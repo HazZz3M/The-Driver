@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,19 +33,40 @@ jobs:
     - name: Build Debug APK
       run: |
         cd android
-        ./gradlew assembleDebug --stacktrace --no-daemon
+        ./gradlew assembleDebug --stacktrace --no-daemon || gradle assembleDebug --stacktrace --no-daemon
 
-    - name: Rename APK
+    - name: Prepare APK Output
       run: |
         cp android/app/build/outputs/apk/debug/app-debug.apk inDrive-Assistant.apk
+        ls -lh inDrive-Assistant.apk
 
-    - name: Upload to Direct Public Download Link
+    - name: Upload to Litterbox (Direct Mobile Download)
+      id: litterbox
       run: |
         DIRECT_URL=$(curl -s -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@inDrive-Assistant.apk" https://litterbox.catbox.moe/resources/internals/api.php)
-        echo "DIRECT_URL=$DIRECT_URL" >> $GITHUB_ENV
-        echo "### 📱 Direct APK Download Link" >> $GITHUB_STEP_SUMMARY
-        echo "[Click Here to Download inDrive Assistant APK]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
-        echo "Direct link: $DIRECT_URL"
+        echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
+        echo "### 📱 Direct APK Mobile Download Link" >> $GITHUB_STEP_SUMMARY
+        echo "[🚀 Click Here to Download inDrive Assistant APK directly to phone]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "Direct Link: $DIRECT_URL"
+
+    - name: Create GitHub Release with direct APK file
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/heads/main')
+      with:
+        tag_name: v1.0.0
+        name: "inDrive Assistant v1.0.0 APK"
+        body: |
+          ### 🚗 مساعد كابتن إن درايف (inDrive Assistant)
+          - تطبيق ذكي لحساب تكلفة وربحية الرحلات
+          - هود عائم فوق تطبيق إن درايف
+          - حاسبة ذكية لاستهلاك البنزين والزيت وتكلفة الكيلومتر
+          
+          **التحميل المباشر:** حمل ملف `inDrive-Assistant.apk` المرفق بالأسفل وثبته على هاتفك مباشرة.
+        files: inDrive-Assistant.apk
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
