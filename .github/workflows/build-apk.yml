@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,27 +31,22 @@ jobs:
         chmod +x ./android/gradlew
 
     - name: Build Debug APK
-      id: gradle_build
-      continue-on-error: true
       run: |
         cd android
-        ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee ../build.log
-
-    - name: Publish Step Summary
-      if: always()
-      run: |
-        echo "### Gradle Build Log" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        tail -n 80 build.log >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
+        ./gradlew assembleDebug --stacktrace --no-daemon
 
     - name: Upload APK Artifact
-      if: steps.gradle_build.outcome == 'success'
       uses: actions/upload-artifact@v4
       with:
         name: inDrive-Assistant-Debug-APK
         path: android/app/build/outputs/apk/debug/app-debug.apk
 
-    - name: Fail If Build Failed
-      if: steps.gradle_build.outcome != 'success'
-      run: exit 1
+    - name: Create Release and Upload APK
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v1.0.0
+        name: "inDrive Assistant v1.0.0"
+        body: "Android Debug APK ready for installation on phone."
+        files: android/app/build/outputs/apk/debug/app-debug.apk
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
