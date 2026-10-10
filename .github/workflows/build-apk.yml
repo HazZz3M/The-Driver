@@ -31,7 +31,14 @@ jobs:
         ./gradlew assembleDebug --stacktrace --no-daemon
 
     - name: Upload APK Artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: inDrive-Assistant-Debug-APK
         path: android/app/build/outputs/apk/debug/app-debug.apk
+
+    - name: Upload Failure Logs
+      if: failure()
+      run: |
+        echo "=== GRADLE LOGS ==="
+        find android -name "*.log" -o -name "hs_err_*.log"
