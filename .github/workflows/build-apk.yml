@@ -53,13 +53,13 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.0.0
-        name: "inDrive Assistant v1.0.0 APK"
+        tag_name: v1.1.0
+        name: "inDrive Assistant v1.1.0 (Auto Screen Reader)"
         body: |
-          ### 🚗 مساعد كابتن إن درايف (inDrive Assistant)
-          - تطبيق ذكي لحساب تكلفة وربحية الرحلات
-          - هود عائم فوق تطبيق إن درايف
-          - حاسبة ذكية لاستهلاك البنزين والزيت وتكلفة الكيلومتر
+          ### 🚗 مساعد كابتن إن درايف (inDrive Assistant) v1.1.0
+          - ⚡ **خاصية قراءة شاشة إن درايف التلقائية (Accessibility Service)**: يقرأ الرحلات والكيلومترات والأجرة فور ظهورها على الشاشة!
+          - 🟢 شريط عائم ذكي (HUD) يعرض صافي الربح واقتراح أفضل سعر للمزايدة تلقائياً دون كتابة يدوي.
+          - ⛽ حاسبة تكاليف البنزين واستهلاك الزيت لسيارات مصر.
           
           **التحميل المباشر:** حمل ملف `inDrive-Assistant.apk` المرفق بالأسفل وثبته على هاتفك مباشرة.
         files: inDrive-Assistant.apk

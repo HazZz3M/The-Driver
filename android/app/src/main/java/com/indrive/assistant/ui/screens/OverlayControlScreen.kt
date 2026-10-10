@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,10 +55,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.indrive.assistant.service.FloatingHudService
+import com.indrive.assistant.service.InDriveAccessibilityService
 import com.indrive.assistant.ui.theme.DarkBackground
 import com.indrive.assistant.ui.theme.DarkCardBorder
 import com.indrive.assistant.ui.theme.DarkSurface
-import com.indrive.assistant.ui.theme.DarkSurfaceVariant
 import com.indrive.assistant.ui.theme.InDriveNeonGreen
 import com.indrive.assistant.ui.theme.LossRed
 import com.indrive.assistant.ui.theme.TextPrimary
@@ -70,12 +71,14 @@ fun OverlayControlScreen(
 ) {
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(false) }
+    var hasAccessibilityPermission by remember { mutableStateOf(false) }
     var isServiceRunning by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Settings.canDrawOverlays(context)
         } else true
+        hasAccessibilityPermission = InDriveAccessibilityService.isAccessibilityEnabled(context)
     }
 
     val scrollState = rememberScrollState()
@@ -89,20 +92,83 @@ fun OverlayControlScreen(
     ) {
         // Screen Header
         Text(
-            text = "الزر العائم فوق تطبيق إن درايف 🫧",
+            text = "الزر العائم وقارئ شاشة إن درايف 🫧",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold,
             color = TextPrimary
         )
         Text(
-            text = "أداة حاسبة عائمة سريعة تظهر مباشرة فوق تطبيق inDrive",
+            text = "يقرأ عروض الرحلات تلقائياً من شاشة إن درايف ويحسب الأرباح فوراً",
             style = MaterialTheme.typography.bodyMedium,
             color = TextSecondary
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(18.dp))
 
-        // Permission Card
+        // 1. Accessibility Service Card (Screen Reading)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = CardDefaults.outlinedCardBorder().copy(
+                brush = androidx.compose.ui.graphics.SolidColor(
+                    if (hasAccessibilityPermission) InDriveNeonGreen.copy(alpha = 0.6f) else WarningYellow
+                )
+            )
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (hasAccessibilityPermission) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (hasAccessibilityPermission) InDriveNeonGreen else WarningYellow,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (hasAccessibilityPermission) "قراءة الشاشة التلقائية مفعلة ✅" else "مطلوب تفعيل قراءة الشاشة (Accessibility) ⚡",
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "هذه الصلاحية ضرورية جداً ليتمكن الزر العائم من قراءة الكيلومترات والأجرة المقترحة من شاشة إن درايف تلقائياً وحساب الربح خلال 3 ثوانٍ.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+
+                if (!hasAccessibilityPermission) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            context.startActivity(intent)
+                            Toast.makeText(context, "ادخل على الخدمات التي تم تنزيلها -> فعّل inDrive Assistant", Toast.LENGTH_LONG).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = WarningYellow,
+                            contentColor = Color(0xFF0F172A)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Accessibility, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("تفعيل قراءة شاشة إن درايف الآن", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 2. Overlay Permission Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -159,15 +225,15 @@ fun OverlayControlScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Settings, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("منح الصلاحية الآن", fontWeight = FontWeight.Bold)
+                        Text("منح صلاحية الظهور", fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Service Control Card
+        // 3. Service Control Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(20.dp),
@@ -187,7 +253,7 @@ fun OverlayControlScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "عند التشغيل، ستظهر فقاعة صغيرة على جانب الشاشة. عند ضغطها تفتح حاسبة سريعة لتقييم الرحلة في 3 ثوانٍ قبل انتهاء مؤقت إن درايف.",
+                    text = "عند التشغيل، ستظهر فقاعة صغيرة على جانب الشاشة. عند وصول أي طلب رحلة، ستقرأ الشاشة فوراً وتعرض صافي الربح والزر المقترح للمزايدة.",
                     color = TextSecondary,
                     fontSize = 13.sp,
                     lineHeight = 18.sp
@@ -245,7 +311,7 @@ fun OverlayControlScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // Visual Preview Demonstration Card
         Card(
@@ -258,7 +324,7 @@ fun OverlayControlScreen(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "معاينة شكل الزر فوق الشاشة 📱",
+                    text = "معاينة القراءة المباشرة لشاشة إن درايف 📱",
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary,
                     fontSize = 15.sp
@@ -269,14 +335,13 @@ fun OverlayControlScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
+                        .height(130.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF0F172A))
                         .border(1.dp, DarkCardBorder, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Floating mock pill
                     Surface(
                         color = Color(0xFF0B1120),
                         shape = RoundedCornerShape(30.dp),
@@ -289,7 +354,7 @@ fun OverlayControlScreen(
                             Text(text = "🚖", fontSize = 18.sp)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "inDrive HUD • صافي: +42 ج.م",
+                                text = "🟢 صافي: +22.6 ج | 4.7 كم | اقترح: 47 ج",
                                 color = InDriveNeonGreen,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp
