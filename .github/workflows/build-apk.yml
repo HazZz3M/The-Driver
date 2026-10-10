@@ -5,9 +5,6 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -35,18 +32,20 @@ jobs:
         cd android
         ./gradlew assembleDebug --stacktrace --no-daemon
 
+    - name: Rename APK
+      run: |
+        cp android/app/build/outputs/apk/debug/app-debug.apk inDrive-Assistant.apk
+
+    - name: Upload to Direct Public Download Link
+      run: |
+        DIRECT_URL=$(curl -s -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@inDrive-Assistant.apk" https://litterbox.catbox.moe/resources/internals/api.php)
+        echo "DIRECT_URL=$DIRECT_URL" >> $GITHUB_ENV
+        echo "### 📱 Direct APK Download Link" >> $GITHUB_STEP_SUMMARY
+        echo "[Click Here to Download inDrive Assistant APK]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "Direct link: $DIRECT_URL"
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: inDrive-Assistant-Debug-APK
-        path: android/app/build/outputs/apk/debug/app-debug.apk
-
-    - name: Create Release and Upload APK
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: v1.0.0
-        name: "inDrive Assistant v1.0.0"
-        body: "Android Debug APK ready for installation on phone."
-        files: android/app/build/outputs/apk/debug/app-debug.apk
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        path: inDrive-Assistant.apk
