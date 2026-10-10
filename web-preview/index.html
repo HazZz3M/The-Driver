@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>inDrive Assistant | مساعد كابتن إن درايف الذكي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#00EA80">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="top-nav">
+    <div class="brand">
+      <div class="brand-icon">🚖</div>
+      <div>
+        <h1>inDrive <span>Assistant</span></h1>
+        <p>مساعد كابتن إن درايف الذكي • حاسبة الأرباح والزر العائم للأندرويد</p>
+      </div>
+    </div>
+
+    <!-- Mode Switcher -->
+    <div class="mode-pills">
+      <button id="btn-mode-app" class="mode-btn active" onclick="switchMode('app')">
+        📱 واجهة التطبيق (Full App)
+      </button>
+      <button id="btn-mode-sim" class="mode-btn" onclick="switchMode('indrive-sim')">
+        🚗 محاكي القيادة والزر العائم (Floating HUD)
+      </button>
+    </div>
+  </header>
+
+  <!-- Simulator Main Container -->
+  <main class="simulator-container">
+
+    <!-- Phone Mockup Frame -->
+    <div class="phone-mockup">
+      <!-- Camera Notch -->
+      <div class="phone-notch">
+        <div class="camera-dot"></div>
+      </div>
+
+      <!-- Phone Status Bar -->
+      <div class="phone-status-bar">
+        <span>04:20 PM</span>
+        <span>📶 5G  🔋 94%</span>
+      </div>
+
+      <!-- Phone Screen Area -->
+      <div class="phone-screen">
+
+        <!-- MODE A: FULL APP VIEW -->
+        <div id="app-main-view" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+          
+          <!-- App Header -->
+          <div class="app-header">
+            <div class="app-title-group">
+              <h2>inDrive Assistant</h2>
+              <span>مساعد السائق الذكي</span>
+            </div>
+            <div class="shift-badge">
+              <span class="shift-dot"></span>
+              <span>وردية نشطة</span>
+            </div>
+          </div>
+
+          <!-- Views Container -->
+          <div class="screen-content">
+            <div id="calc-view" class="view-tab" style="display: flex; flex-direction: column; gap: 14px;"></div>
+            <div id="shift-view" class="view-tab" style="display: none; flex-direction: column; gap: 14px;"></div>
+            <div id="expenses-view" class="view-tab" style="display: none; flex-direction: column; gap: 14px;"></div>
+            <div id="settings-view" class="view-tab" style="display: none; flex-direction: column; gap: 14px;"></div>
+          </div>
+
+          <!-- Bottom Navigation Bar -->
+          <nav class="phone-bottom-nav">
+            <div id="nav-calc" class="nav-item active" onclick="switchTab('calc')">
+              <span class="icon">⚡</span>
+              <span>الحاسبة</span>
+            </div>
+            <div id="nav-shift" class="nav-item" onclick="switchTab('shift')">
+              <span class="icon">📊</span>
+              <span>الوردية</span>
+            </div>
+            <div id="nav-expenses" class="nav-item" onclick="switchTab('expenses')">
+              <span class="icon">⛽</span>
+              <span>المصاريف</span>
+            </div>
+            <div id="nav-settings" class="nav-item" onclick="switchTab('settings')">
+              <span class="icon">⚙️</span>
+              <span>الإعدادات</span>
+            </div>
+          </nav>
+        </div>
+
+        <!-- MODE B: INDRIVE DRIVER SCREEN SIMULATOR -->
+        <div id="indrive-sim-view" style="display: none; flex: 1; position: relative;"></div>
+
+      </div>
+    </div>
+
+    <!-- Desktop Companion Control Sidebar -->
+    <aside class="control-sidebar">
+      
+      <!-- Scenario Testing Box -->
+      <div class="panel-box">
+        <h3>🧪 اختبار سيناريوهات الطلبات الحية</h3>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          جرّب كيف يقوم النظام بتحليل الرحلات في ثوانٍ وكشف العروض الخاسرة وتقديم عروض مضادة:
+        </p>
+        <div class="quick-order-trigger">
+          <button class="trigger-order-btn" style="border-color: var(--loss-red);" onclick="triggerRandomOrder('loss')">
+            🚨 طلب خاسر (فخ البنزين)
+            <span>مشوار طويل + سعر قليل</span>
+          </button>
+          <button class="trigger-order-btn" style="border-color: var(--neon-green);" onclick="triggerRandomOrder('optimal')">
+            💎 طلب ذهبي (عالي الربح)
+            <span>مسافة ممتازة + سعر مرتفع</span>
+          </button>
+          <button class="trigger-order-btn" onclick="triggerRandomOrder('fair')">
+            🎯 طلب عادي متوازن
+            <span>مسافة وسعر متوسط</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Real-time Cost Breakdown Analysis -->
+      <div class="panel-box">
+        <h3>📊 ملخص التحليل المالي السريع</h3>
+        <div id="sidebar-metrics"></div>
+      </div>
+
+      <!-- Android Architecture & Features Box -->
+      <div class="panel-box">
+        <h3>🚀 مزايا كود أندرويد الأصلي (Native Android)</h3>
+        <ul style="font-size: 12.5px; color: var(--text-muted); line-height: 1.6; padding-right: 18px;">
+          <li><strong style="color: #fff;">Jetpack Compose & Material 3:</strong> واجهات مستخدم سريعة وعصرية بالوضع الليلي.</li>
+          <li><strong style="color: #fff;">Floating Overlay HUD:</strong> خدمة خلفية تعمل فوق إن درايف بواسطة <code>SYSTEM_ALERT_WINDOW</code>.</li>
+          <li><strong style="color: #fff;">Room Database:</strong> حفظ محلي لبيانات الرحلات ومصاريف الوقود دون الحاجة لإنترنت.</li>
+          <li><strong style="color: #fff;">Zero Latency Engine:</strong> الحسابات تتم بالكامل محلياً على الجهاز في أقل من جزء من الثانية.</li>
+        </ul>
+      </div>
+
+    </aside>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

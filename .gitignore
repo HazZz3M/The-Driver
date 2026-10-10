@@ -1,0 +1,20 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Gradle files
+.gradle/
+build/
+*/build/
+
+# Local configuration
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# Node / Web dependencies
+node_modules/
+dist/

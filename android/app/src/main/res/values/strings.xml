@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">inDrive Assistant</string>
+    <string name="hud_service_title">inDrive Assistant Active</string>
+    <string name="hud_service_desc">Floating quick calculator is running over other apps</string>
+    <string name="currency_symbol">EGP</string>
+    <string name="overlay_permission_required">Please grant Overlay permission to enable the floating quick HUD over inDrive</string>
+</resources>
