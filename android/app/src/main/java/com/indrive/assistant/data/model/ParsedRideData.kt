@@ -12,6 +12,7 @@ data class ParsedRideData(
     val pickupAddress: String = "",
     val dropoffAddress: String = "",
     val counterBids: List<Int> = emptyList(),
+    val screenBounds: android.graphics.Rect? = null,
     val timestamp: Long = System.currentTimeMillis()
 ) {
     val totalDistanceKm: Double

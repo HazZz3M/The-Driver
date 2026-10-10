@@ -49,17 +49,34 @@ data class FareAnalysisResult(
     val breakEvenFare: Double,
     val recommendedFare: Double,
     val aggressiveFare: Double,
-    val smartBids: List<SmartBidOption>
+    val smartBids: List<SmartBidOption>,
+
+    // Geographic Zone Analysis
+    val isFavoriteZone: Boolean = false,
+    val matchedFavoriteZone: String? = null,
+    val isBlacklistedZone: Boolean = false,
+    val matchedBlacklistZone: String? = null
 )
 
 object FareCalculatorEngine {
+
+    fun normalizeArabicText(str: String): String {
+        return str.lowercase()
+            .replace(Regex("[أإآ]"), "ا")
+            .replace("ى", "ي")
+            .replace("ة", "ه")
+            .replace(Regex("[\\p{Punct}\\s]+"), " ")
+            .trim()
+    }
 
     fun analyze(
         pickupDistanceKm: Double,
         tripDistanceKm: Double,
         estimatedMinutes: Int,
         offeredFare: Double,
-        settings: DriverSettings
+        settings: DriverSettings,
+        pickupAddress: String = "",
+        dropoffAddress: String = ""
     ): FareAnalysisResult {
         val totalDistanceKm = max(0.1, pickupDistanceKm + tripDistanceKm)
         val validMinutes = max(1, estimatedMinutes)
@@ -82,16 +99,7 @@ object FareCalculatorEngine {
         val profitPerKm = netProfit / totalDistanceKm
         val profitPerHour = (netProfit / validMinutes) * 60.0
 
-        // 5. Evaluate Profitability
-        val (level, statusMessage, warningNote) = evaluateProfitability(
-            netProfit = netProfit,
-            profitPerKm = profitPerKm,
-            minTargetProfitPerKm = settings.minProfitPerKm,
-            fuelCost = fuelCost,
-            offeredFare = offeredFare
-        )
-
-        // 6. Calculate Smart Counter-Bids
+        // 5. Calculate Smart Counter-Bids
         // Formula: NeededGross = (FuelCost + WearCost + DesiredProfit) / (1 - CommissionRate)
         val nonCommissionCosts = fuelCost + wearAndTearCost
         val netDivisor = max(0.01, 1.0 - commissionRate)
@@ -108,6 +116,55 @@ object FareCalculatorEngine {
         // Aggressive Bid (Target profit * 1.5 or rush surge)
         val rawAggressive = (nonCommissionCosts + (targetProfit * 1.6)) / netDivisor
         val aggressiveFare = max(recommendedFare + 15.0, roundToSmartStep(rawAggressive))
+
+        // 6. Geographic Zone Analysis
+        val combinedAddress = normalizeArabicText("$pickupAddress $dropoffAddress")
+        var matchedFavorite: String? = null
+        for (z in settings.favoriteZones) {
+            val normZ = normalizeArabicText(z)
+            if (normZ.isNotEmpty() && combinedAddress.contains(normZ)) {
+                matchedFavorite = z
+                break
+            }
+        }
+
+        var matchedBlacklist: String? = null
+        for (z in settings.blacklistedZones) {
+            val normZ = normalizeArabicText(z)
+            if (normZ.isNotEmpty() && combinedAddress.contains(normZ)) {
+                matchedBlacklist = z
+                break
+            }
+        }
+
+        // 7. Evaluate Profitability
+        var (level, statusMessage, warningNote) = evaluateProfitability(
+            netProfit = netProfit,
+            profitPerKm = profitPerKm,
+            minTargetProfitPerKm = settings.minProfitPerKm,
+            fuelCost = fuelCost,
+            offeredFare = offeredFare
+        )
+
+        // Apply Zone Business Rules:
+        if (matchedBlacklist != null) {
+            // Rule: Accept only if fare is exceptionally high
+            if (offeredFare >= aggressiveFare || profitPerKm >= settings.minProfitPerKm * 1.4) {
+                level = ProfitabilityLevel.GOOD_PROFIT
+                statusMessage = "مقبول فقط لارتفاع السعر الاستثنائي"
+                warningNote = "تنبيه: الوجهة تقع ضمن المنطقة غير المرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع."
+            } else {
+                level = ProfitabilityLevel.LOSS_DANGER
+                statusMessage = "مرفوض - منطقة غير مرغوبة ($matchedBlacklist)"
+                warningNote = "الوجهة تقع في منطقة غير مرغوبة ($matchedBlacklist)، والعرض المالي لا يبرر التوجه إليها."
+            }
+        } else if (matchedFavorite != null) {
+            if (level == ProfitabilityLevel.GOOD_PROFIT || level == ProfitabilityLevel.EXCELLENT_PROFIT) {
+                statusMessage = "قبول فوري - منطقة مفضلة ($matchedFavorite)"
+            } else if (level == ProfitabilityLevel.POOR_MARGIN) {
+                statusMessage = "منطقة مفضلة ($matchedFavorite) - ارفع السعر قليلاً"
+            }
+        }
 
         // Create Smart Bid Cards
         val smartBids = listOf(
@@ -158,7 +215,11 @@ object FareCalculatorEngine {
             breakEvenFare = breakEvenFare,
             recommendedFare = recommendedFare,
             aggressiveFare = aggressiveFare,
-            smartBids = smartBids
+            smartBids = smartBids,
+            isFavoriteZone = (matchedFavorite != null),
+            matchedFavoriteZone = matchedFavorite,
+            isBlacklistedZone = (matchedBlacklist != null),
+            matchedBlacklistZone = matchedBlacklist
         )
     }
 

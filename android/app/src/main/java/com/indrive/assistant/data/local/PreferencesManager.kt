@@ -23,7 +23,11 @@ class PreferencesManager(context: Context) {
             wearAndTearPerKm = prefs.getFloat(KEY_WEAR_PER_KM, 1.2f).toDouble(),
             targetDailyEarnings = prefs.getFloat(KEY_DAILY_TARGET, 1500.0f).toDouble(),
             minProfitPerKm = prefs.getFloat(KEY_MIN_PROFIT_KM, 8.0f).toDouble(),
-            currency = prefs.getString(KEY_CURRENCY, "EGP") ?: "EGP"
+            currency = prefs.getString(KEY_CURRENCY, "EGP") ?: "EGP",
+            favoriteZones = prefs.getString(KEY_FAVORITE_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                ?: listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
+            blacklistedZones = prefs.getString(KEY_BLACKLISTED_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                ?: listOf("شبرا الخيمة", "حلوان", "المرج")
         )
     }
 
@@ -36,6 +40,8 @@ class PreferencesManager(context: Context) {
             putFloat(KEY_DAILY_TARGET, settings.targetDailyEarnings.toFloat())
             putFloat(KEY_MIN_PROFIT_KM, settings.minProfitPerKm.toFloat())
             putString(KEY_CURRENCY, settings.currency)
+            putString(KEY_FAVORITE_ZONES, settings.favoriteZones.joinToString(","))
+            putString(KEY_BLACKLISTED_ZONES, settings.blacklistedZones.joinToString(","))
             apply()
         }
         _settingsFlow.value = settings
@@ -49,5 +55,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_DAILY_TARGET = "daily_target"
         private const val KEY_MIN_PROFIT_KM = "min_profit_km"
         private const val KEY_CURRENCY = "currency"
+        private const val KEY_FAVORITE_ZONES = "favorite_zones"
+        private const val KEY_BLACKLISTED_ZONES = "blacklisted_zones"
     }
 }

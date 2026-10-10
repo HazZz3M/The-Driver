@@ -26,32 +26,39 @@ class InDriveAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         val now = System.currentTimeMillis()
-        // Debounce: Avoid processing more than once every 400ms to eliminate UI stutter and endless loops
-        if (now - lastScanTimestamp < 400L) {
+        // Debounce to eliminate lag
+        if (now - lastScanTimestamp < 250L) {
             return
         }
         lastScanTimestamp = now
 
-        val root = rootInActiveWindow ?: return
+        val root = rootInActiveWindow
+        if (root == null) {
+            FloatingHudService.onCardsSync(emptyList())
+            return
+        }
+
         try {
-            val texts = mutableListOf<String>()
-            collectAllTexts(root, texts)
+            val pkg = root.packageName?.toString() ?: ""
+            // Ensure popups disappear immediately if user leaves inDrive
+            val isTargetApp = pkg.contains("indrive", ignoreCase = true) ||
+                    pkg.contains("sinet", ignoreCase = true) ||
+                    pkg.contains("citymobil", ignoreCase = true) ||
+                    pkg.contains("driver", ignoreCase = true) ||
+                    pkg.contains("assistant", ignoreCase = true)
 
-            val parsedRides = parseAllRidesFromScreen(texts)
-            for (ride in parsedRides) {
-                // Deduplicate to avoid repeating the exact same ride hundreds of times per minute
-                if (ride.fingerprint == lastEmittedFingerprint && (now - lastEmittedTimestamp) < 12000L) {
-                    continue
-                }
-
-                lastEmittedFingerprint = ride.fingerprint
-                lastEmittedTimestamp = now
-                Log.d(TAG, "Detected new inDrive ride for ${ride.passengerName}: ${ride.fare} EGP")
-                _latestRide.value = ride
-                FloatingHudService.onNewRideParsed(ride)
+            if (!isTargetApp) {
+                FloatingHudService.onCardsSync(emptyList())
+                return
             }
+
+            val parsedRides = findRideCards(root)
+            _latestRide.value = parsedRides.firstOrNull()
+
+            // Synchronize popup hints on each visible card
+            FloatingHudService.onCardsSync(parsedRides)
         } catch (e: Exception) {
-            Log.e(TAG, "Error parsing screen nodes: ${e.message}")
+            Log.e(TAG, "Error in accessibility event processing: ${e.message}")
         } finally {
             root.recycle()
         }
@@ -120,13 +127,9 @@ class InDriveAccessibilityService : AccessibilityService() {
             val service = instance ?: return emptyList()
             val root = service.rootInActiveWindow ?: return emptyList()
             try {
-                val texts = mutableListOf<String>()
-                service.collectAllTexts(root, texts)
-                val parsedList = parseAllRidesFromScreen(texts)
-                for (parsed in parsedList) {
-                    _latestRide.value = parsed
-                    FloatingHudService.onNewRideParsed(parsed)
-                }
+                val parsedList = service.findRideCards(root)
+                _latestRide.value = parsedList.firstOrNull()
+                FloatingHudService.onCardsSync(parsedList)
                 return parsedList
             } catch (e: Exception) {
                 Log.e(TAG, "Manual scan error: ${e.message}")
@@ -150,12 +153,123 @@ class InDriveAccessibilityService : AccessibilityService() {
             return sb.toString()
         }
 
+        fun findRideCards(root: AccessibilityNodeInfo): List<ParsedRideData> {
+            val results = mutableListOf<ParsedRideData>()
+            val seenBounds = mutableSetOf<String>()
+
+            // 1. Search for offer anchor nodes (Accept buttons, fare tags, offer prompts)
+            val anchorNodes = mutableListOf<AccessibilityNodeInfo>()
+            findOfferAnchors(root, anchorNodes)
+
+            for (anchor in anchorNodes) {
+                val cardNode = findEnclosingCardContainer(anchor) ?: anchor
+                val bounds = android.graphics.Rect()
+                cardNode.getBoundsInScreen(bounds)
+
+                // Deduplicate by vertical screen position
+                val boundsKey = "${bounds.top}_${bounds.bottom}"
+                if (seenBounds.contains(boundsKey)) {
+                    continue
+                }
+                seenBounds.add(boundsKey)
+
+                val texts = mutableListOf<String>()
+                collectNodeTexts(cardNode, texts)
+
+                val parsed = parseRideScreen(texts, bounds)
+                if (parsed != null) {
+                    results.add(parsed)
+                }
+            }
+
+            // Fallback: If no distinct containers isolated, parse whole screen
+            if (results.isEmpty()) {
+                val allTexts = mutableListOf<String>()
+                collectNodeTexts(root, allTexts)
+                val single = parseRideScreen(allTexts, null)
+                if (single != null) {
+                    results.add(single)
+                }
+            }
+
+            return results
+        }
+
+        private fun findOfferAnchors(node: AccessibilityNodeInfo?, anchors: MutableList<AccessibilityNodeInfo>) {
+            if (node == null) return
+            val text = node.text?.toString() ?: ""
+            val desc = node.contentDescription?.toString() ?: ""
+            val combined = "$text $desc"
+
+            val isAnchor = combined.contains("Accept for", ignoreCase = true) ||
+                    combined.contains("قبول مقابل", ignoreCase = true) ||
+                    combined.contains("Offer your fare", ignoreCase = true) ||
+                    combined.contains("اقترح سعرك", ignoreCase = true) ||
+                    Regex("""^(?:EGP|ج\.?م|جنيه)\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(combined) ||
+                    Regex("""^\d+\s*(?:EGP|ج\.?م|جنيه)""", RegexOption.IGNORE_CASE).containsMatchIn(combined)
+
+            if (isAnchor) {
+                anchors.add(node)
+            }
+
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i)
+                if (child != null) {
+                    findOfferAnchors(child, anchors)
+                }
+            }
+        }
+
+        private fun findEnclosingCardContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            var curr: AccessibilityNodeInfo? = node
+            var bestCandidate: AccessibilityNodeInfo? = null
+
+            while (curr != null) {
+                val bounds = android.graphics.Rect()
+                curr.getBoundsInScreen(bounds)
+
+                if (bounds.height() in 140..1500 && bounds.width() >= 300) {
+                    bestCandidate = curr
+                }
+
+                val parent = curr.parent
+                if (parent != null) {
+                    val pClass = parent.className?.toString() ?: ""
+                    if (pClass.contains("RecyclerView", ignoreCase = true) ||
+                        pClass.contains("ListView", ignoreCase = true) ||
+                        pClass.contains("ViewPager", ignoreCase = true)) {
+                        return curr
+                    }
+                }
+                curr = parent
+            }
+            return bestCandidate
+        }
+
+        private fun collectNodeTexts(node: AccessibilityNodeInfo?, texts: MutableList<String>) {
+            if (node == null) return
+            val text = node.text?.toString()?.trim()
+            if (!text.isNullOrEmpty()) {
+                texts.add(text)
+            }
+            val desc = node.contentDescription?.toString()?.trim()
+            if (!desc.isNullOrEmpty() && desc != text) {
+                texts.add(desc)
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i)
+                if (child != null) {
+                    collectNodeTexts(child, texts)
+                }
+            }
+        }
+
         fun parseAllRidesFromScreen(texts: List<String>): List<ParsedRideData> {
-            val single = parseRideScreen(texts)
+            val single = parseRideScreen(texts, null)
             return if (single != null) listOf(single) else emptyList()
         }
 
-        fun parseRideScreen(texts: List<String>): ParsedRideData? {
+        fun parseRideScreen(texts: List<String>, bounds: android.graphics.Rect? = null): ParsedRideData? {
             if (texts.isEmpty()) return null
 
             val normalizedTexts = texts.map { normalizeArabicDigits(it.trim()) }
@@ -180,7 +294,6 @@ class InDriveAccessibilityService : AccessibilityService() {
             val ratingIdx = normalizedTexts.indexOfFirst { ratingRegex.matches(it) }
             if (ratingIdx > 0) {
                 val candidateName = texts[ratingIdx - 1].trim()
-                // Filter out non-names like "11 min", "B", "A", etc.
                 if (!candidateName.contains("min", ignoreCase = true) &&
                     !candidateName.contains("km", ignoreCase = true) &&
                     !candidateName.equals("A", ignoreCase = true) &&
@@ -265,7 +378,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                     tripDistanceKm = tripKm,
                     pickupAddress = pickupAddress,
                     dropoffAddress = dropoffAddress,
-                    counterBids = counterBids.sorted()
+                    counterBids = counterBids.sorted(),
+                    screenBounds = bounds
                 )
             }
 

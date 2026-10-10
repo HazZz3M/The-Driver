@@ -7,5 +7,7 @@ data class DriverSettings(
     val wearAndTearPerKm: Double = 1.2, // Tires, depreciation, oil in EGP
     val targetDailyEarnings: Double = 1500.0,
     val minProfitPerKm: Double = 8.0,
-    val currency: String = "EGP"
+    val currency: String = "EGP",
+    val favoriteZones: List<String> = listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
+    val blacklistedZones: List<String> = listOf("شبرا الخيمة", "حلوان", "المرج")
 )

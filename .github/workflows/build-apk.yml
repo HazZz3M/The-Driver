@@ -53,15 +53,18 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.3.0
-        name: "inDrive Assistant v1.3.0 - Professional OEM HUD & Fair Price Engine"
+        tag_name: v1.4.0
+        name: "inDrive Assistant v1.4.0 - In-App Updates, Card-Attached Popups & Zone Filters"
         body: |
-          ### inDrive Assistant v1.3.0 - Professional Telematics Release
-          - **Contextual Popup Hint HUD**: Real-time floating overlay styled as an intelligent popup hint with dynamic acceptance color codes (Green = High Profit / Fair, Amber = Counter-bid, Red = Reject).
-          - **Fair Price Recommendation**: Directly presents the fair, calculated operational price for each order based on vehicle consumption and maintenance overhead.
-          - **Multi-Order Segmented Queue**: Smooth customer-by-customer order switching without UI flicker.
-          - **Zero Emoji Interface**: Engineered to OEM automotive telematics standard with clean, high-contrast Material icons and fluid interactions.
-          - **Optimized Haptics & Controls**: Multi-ride debounce, quick minimize/expand, and mute control.
+          ### inDrive Assistant v1.4.0 - Major Telematics Upgrade
+          - **In-App Auto Update**: Check and install application updates directly from within the Settings screen with one click.
+          - **Card-Attached Small Popups**: Each ride order card on screen receives its own dedicated small popup hint positioned directly over that card.
+          - **Real-Time Screen Synchronization**: Popups automatically sync with on-screen orders and instantly disappear as soon as orders expire, are accepted, or leave view.
+          - **Compact Clutter-Free Design**: Customer names removed from popup hints to focus strictly on fair price, profitability, and operational advice.
+          - **Geographic Zone Intelligence**:
+            - Favorite Zones (e.g., Maadi, Tagamoa) highlighted in Gold with instant acceptance advice.
+            - Blacklisted Zones (e.g., Helwan, Shubra El Kheima) marked with warning and accepted only if pricing is exceptionally high.
+          - **Zero Emoji Standard**: Automotive telematics UI standard throughout the application.
 
           Download the attached `inDrive-Assistant.apk` to install on your Android device.
         files: inDrive-Assistant.apk
