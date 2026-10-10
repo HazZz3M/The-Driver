@@ -127,7 +127,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             val service = instance ?: return emptyList()
             val root = service.rootInActiveWindow ?: return emptyList()
             try {
-                val parsedList = service.findRideCards(root)
+                val parsedList = findRideCards(root)
                 _latestRide.value = parsedList.firstOrNull()
                 FloatingHudService.onCardsSync(parsedList)
                 return parsedList

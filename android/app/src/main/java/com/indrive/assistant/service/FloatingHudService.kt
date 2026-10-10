@@ -291,7 +291,7 @@ class FloatingHudService : Service() {
             text = "صافي الربح: $netProfitVal ج.م ($profitPerKmVal ج/كم) • $distText"
             setTextColor(Color.parseColor(if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444"))
             textSize = 11.5f
-            typeface = Typeface.NORMAL
+            typeface = Typeface.DEFAULT
             setPadding(0, 2, 0, 0)
         }
 
