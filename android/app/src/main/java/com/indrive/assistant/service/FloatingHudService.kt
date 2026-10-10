@@ -28,9 +28,9 @@ import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.MainActivity
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.data.model.Trip
+import com.indrive.assistant.engine.FareAnalysisResult
 import com.indrive.assistant.engine.FareCalculatorEngine
 import com.indrive.assistant.engine.ProfitabilityLevel
-import com.indrive.assistant.engine.TripAnalysis
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -188,9 +188,9 @@ class FloatingHudService : Service() {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
                     startActivity(intent)
-                    Toast.makeText(context, "اختر inDrive Assistant ثم اضغط تفعيل", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@FloatingHudService, "اختر inDrive Assistant ثم اضغط تفعيل", Toast.LENGTH_LONG).show()
                 }
-                visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(context)) View.GONE else View.VISIBLE
+                visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) View.GONE else View.VISIBLE
             }
             a11yWarningBtn = a11yBtn
 
@@ -249,12 +249,12 @@ class FloatingHudService : Service() {
                     setOnClickListener {
                         val parsed = InDriveAccessibilityService.scanCurrentScreen()
                         if (parsed != null) {
-                            Toast.makeText(context, "تمت قراءة الرحلة بنجاح!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@FloatingHudService, "تمت قراءة الرحلة بنجاح!", Toast.LENGTH_SHORT).show()
                         } else {
-                            if (!InDriveAccessibilityService.isAccessibilityEnabled(context)) {
-                                Toast.makeText(context, "يرجى تفعيل خدمة قراءة الشاشة في إعدادات الهاتف أولاً", Toast.LENGTH_LONG).show()
+                            if (!InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) {
+                                Toast.makeText(this@FloatingHudService, "يرجى تفعيل خدمة قراءة الشاشة في إعدادات الهاتف أولاً", Toast.LENGTH_LONG).show()
                             } else {
-                                Toast.makeText(context, "لم يتم العثور على عرض رحلة مفتوح الآن", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(this@FloatingHudService, "لم يتم العثور على عرض رحلة مفتوح الآن", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -344,7 +344,7 @@ class FloatingHudService : Service() {
                     MotionEvent.ACTION_UP -> {
                         if (isClick) {
                             // Refresh accessibility status button
-                            a11yWarningBtn?.visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(context)) View.GONE else View.VISIBLE
+                            a11yWarningBtn?.visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) View.GONE else View.VISIBLE
                             
                             // If user clicks, also attempt an immediate scan in case an offer is active
                             InDriveAccessibilityService.scanCurrentScreen()
@@ -420,17 +420,22 @@ class FloatingHudService : Service() {
         displayAnalysisInUi(analysis, null)
     }
 
-    private fun displayAnalysisInUi(analysis: TripAnalysis, parsedRide: ParsedRideData?) {
+    private fun displayAnalysisInUi(analysis: FareAnalysisResult, parsedRide: ParsedRideData?) {
         val (profitColorHex, statusArabic) = when (analysis.profitabilityLevel) {
-            ProfitabilityLevel.HIGH_PROFIT -> Pair("#00EA80", "ممتاز جداً 🟢")
-            ProfitabilityLevel.PROFITABLE -> Pair("#00EA80", "رابح 🟢")
-            ProfitabilityLevel.ACCEPTABLE -> Pair("#38BDF8", "مقبول 🔵")
+            ProfitabilityLevel.EXCELLENT_PROFIT -> Pair("#00EA80", "ممتاز جداً 🔥")
+            ProfitabilityLevel.GOOD_PROFIT -> Pair("#00EA80", "رابح 🟢")
             ProfitabilityLevel.POOR_MARGIN -> Pair("#F59E0B", "هامش ضعيف 🟡")
             ProfitabilityLevel.LOSS_DANGER -> Pair("#EF4444", "خسارة 🔴")
         }
 
         // 1. Update Collapsed Bubble text & glow
-        bubbleLabel?.text = "${analysis.profitabilityLevel.name.take(1)} صافي: ${String.format("%.1f", analysis.netProfit)} ج | ${String.format("%.1f", analysis.tripDistanceKm)} كم | اقترح: ${analysis.recommendedFare.toInt()} ج"
+        val shortLevel = when (analysis.profitabilityLevel) {
+            ProfitabilityLevel.EXCELLENT_PROFIT -> "🔥"
+            ProfitabilityLevel.GOOD_PROFIT -> "🟢"
+            ProfitabilityLevel.POOR_MARGIN -> "🟡"
+            ProfitabilityLevel.LOSS_DANGER -> "🔴"
+        }
+        bubbleLabel?.text = "$shortLevel صافي: ${String.format("%.1f", analysis.netProfit)} ج | ${String.format("%.1f", analysis.tripDistanceKm)} كم | اقترح: ${analysis.recommendedFare.toInt()} ج"
         bubbleLabel?.setTextColor(Color.parseColor(profitColorHex))
         bubbleContainer?.background = createPillBackground("#0F172A", profitColorHex)
 
