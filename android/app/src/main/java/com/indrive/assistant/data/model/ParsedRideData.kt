@@ -1,6 +1,11 @@
 package com.indrive.assistant.data.model
 
+import java.util.UUID
+
 data class ParsedRideData(
+    val id: String = UUID.randomUUID().toString(),
+    val passengerName: String = "عميل إن درايف",
+    val passengerRating: String = "",
     val fare: Double,
     val pickupDistanceKm: Double,
     val tripDistanceKm: Double,
@@ -11,4 +16,7 @@ data class ParsedRideData(
 ) {
     val totalDistanceKm: Double
         get() = pickupDistanceKm + tripDistanceKm
+
+    val fingerprint: String
+        get() = "${passengerName.trim()}_${fare.toInt()}_${String.format("%.1f", pickupDistanceKm)}_${String.format("%.1f", tripDistanceKm)}"
 }

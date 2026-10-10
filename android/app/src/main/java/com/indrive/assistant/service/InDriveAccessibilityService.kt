@@ -1,7 +1,6 @@
 package com.indrive.assistant.service
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.provider.Settings
 import android.text.TextUtils
@@ -15,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class InDriveAccessibilityService : AccessibilityService() {
 
+    private var lastScanTimestamp = 0L
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -24,17 +25,30 @@ class InDriveAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
-        // We inspect window content changes or state changes
+        val now = System.currentTimeMillis()
+        // Debounce: Avoid processing more than once every 400ms to eliminate UI stutter and endless loops
+        if (now - lastScanTimestamp < 400L) {
+            return
+        }
+        lastScanTimestamp = now
+
         val root = rootInActiveWindow ?: return
         try {
             val texts = mutableListOf<String>()
             collectAllTexts(root, texts)
-            
-            val parsedRide = parseRideScreen(texts)
-            if (parsedRide != null) {
-                Log.d(TAG, "Detected inDrive ride: $parsedRide")
-                _latestRide.value = parsedRide
-                FloatingHudService.onNewRideParsed(parsedRide)
+
+            val parsedRides = parseAllRidesFromScreen(texts)
+            for (ride in parsedRides) {
+                // Deduplicate to avoid repeating the exact same ride hundreds of times per minute
+                if (ride.fingerprint == lastEmittedFingerprint && (now - lastEmittedTimestamp) < 12000L) {
+                    continue
+                }
+
+                lastEmittedFingerprint = ride.fingerprint
+                lastEmittedTimestamp = now
+                Log.d(TAG, "Detected new inDrive ride for ${ride.passengerName}: ${ride.fare} EGP")
+                _latestRide.value = ride
+                FloatingHudService.onNewRideParsed(ride)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing screen nodes: ${e.message}")
@@ -56,7 +70,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun collectAllTexts(node: AccessibilityNodeInfo?, texts: MutableList<String>) {
         if (node == null) return
-        
+
         val text = node.text?.toString()?.trim()
         if (!text.isNullOrEmpty()) {
             texts.add(text)
@@ -78,6 +92,8 @@ class InDriveAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "InDriveA11y"
         private var instance: InDriveAccessibilityService? = null
+        private var lastEmittedFingerprint = ""
+        private var lastEmittedTimestamp = 0L
 
         private val _latestRide = MutableStateFlow<ParsedRideData?>(null)
         val latestRide: StateFlow<ParsedRideData?> = _latestRide.asStateFlow()
@@ -100,21 +116,21 @@ class InDriveAccessibilityService : AccessibilityService() {
             return false
         }
 
-        fun scanCurrentScreen(): ParsedRideData? {
-            val service = instance ?: return null
-            val root = service.rootInActiveWindow ?: return null
+        fun scanCurrentScreen(): List<ParsedRideData> {
+            val service = instance ?: return emptyList()
+            val root = service.rootInActiveWindow ?: return emptyList()
             try {
                 val texts = mutableListOf<String>()
                 service.collectAllTexts(root, texts)
-                val parsed = parseRideScreen(texts)
-                if (parsed != null) {
+                val parsedList = parseAllRidesFromScreen(texts)
+                for (parsed in parsedList) {
                     _latestRide.value = parsed
                     FloatingHudService.onNewRideParsed(parsed)
                 }
-                return parsed
+                return parsedList
             } catch (e: Exception) {
                 Log.e(TAG, "Manual scan error: ${e.message}")
-                return null
+                return emptyList()
             } finally {
                 root.recycle()
             }
@@ -132,6 +148,11 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
             return sb.toString()
+        }
+
+        fun parseAllRidesFromScreen(texts: List<String>): List<ParsedRideData> {
+            val single = parseRideScreen(texts)
+            return if (single != null) listOf(single) else emptyList()
         }
 
         fun parseRideScreen(texts: List<String>): ParsedRideData? {
@@ -152,7 +173,25 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             if (!hasRideKeywords) return null
 
-            // 1. Extract Fare
+            // 1. Extract Passenger Name & Rating
+            var passengerName = "عميل إن درايف"
+            var passengerRating = ""
+            val ratingRegex = Regex("""^(\d\.\d)(?:\s*\(\d+\))?$""")
+            val ratingIdx = normalizedTexts.indexOfFirst { ratingRegex.matches(it) }
+            if (ratingIdx > 0) {
+                val candidateName = texts[ratingIdx - 1].trim()
+                // Filter out non-names like "11 min", "B", "A", etc.
+                if (!candidateName.contains("min", ignoreCase = true) &&
+                    !candidateName.contains("km", ignoreCase = true) &&
+                    !candidateName.equals("A", ignoreCase = true) &&
+                    !candidateName.equals("B", ignoreCase = true) &&
+                    candidateName.length in 2..30) {
+                    passengerName = candidateName
+                }
+                passengerRating = texts[ratingIdx]
+            }
+
+            // 2. Extract Fare
             var fare: Double? = null
             for (t in normalizedTexts) {
                 val acceptMatch = Regex("""(?:Accept for EGP|قبول مقابل)\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(t)
@@ -173,7 +212,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // 2. Extract Distances
+            // 3. Extract Distances
             val distances = mutableListOf<Double>()
             for (t in normalizedTexts) {
                 val kmMatches = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)""", RegexOption.IGNORE_CASE).findAll(t)
@@ -189,7 +228,6 @@ class InDriveAccessibilityService : AccessibilityService() {
             var tripKm = 5.0
 
             if (distances.size >= 2) {
-                // Pickup is typically the smaller distance to rider A, trip is destination distance B
                 pickupKm = distances.minOrNull() ?: 1.5
                 tripKm = distances.maxOrNull() ?: 5.0
             } else if (distances.size == 1) {
@@ -197,7 +235,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 pickupKm = 1.5
             }
 
-            // 3. Extract Counter Bids
+            // 4. Extract Counter Bids
             val counterBids = mutableListOf<Int>()
             for (t in normalizedTexts) {
                 val bidMatch = Regex("""^EGP\s*(\d+)$""", RegexOption.IGNORE_CASE).find(t)
@@ -209,7 +247,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // 4. Extract Addresses
+            // 5. Extract Addresses
             var pickupAddress = ""
             var dropoffAddress = ""
             val fairPriceIdx = normalizedTexts.indexOfFirst { it.equals("Fair price", ignoreCase = true) || it.contains("سعر مناسب") }
@@ -220,6 +258,8 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             if (fare != null && fare > 0.0) {
                 return ParsedRideData(
+                    passengerName = passengerName,
+                    passengerRating = passengerRating,
                     fare = fare,
                     pickupDistanceKm = pickupKm,
                     tripDistanceKm = tripKm,
