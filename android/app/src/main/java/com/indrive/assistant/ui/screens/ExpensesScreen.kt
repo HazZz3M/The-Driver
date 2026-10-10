@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Opacity
@@ -89,7 +90,7 @@ fun ExpensesScreen(
         // Screen Header
         item {
             Text(
-                text = "مصاريف الوقود والزيت ⛽🛢️",
+                text = "سجل استهلاك الوقود والزيوت",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = TextPrimary
@@ -122,7 +123,7 @@ fun ExpensesScreen(
                 ) {
                     Icon(imageVector = Icons.Default.LocalGasStation, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تفويلة بنزين ⛽", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(text = "تفويلة بنزين", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
 
                 Button(
@@ -138,7 +139,7 @@ fun ExpensesScreen(
                 ) {
                     Icon(imageVector = Icons.Default.Opacity, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "غيار زيت 🛢️", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(text = "غيار زيت", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
 
@@ -232,7 +233,12 @@ fun ExpensesScreen(
                             .padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(text = "⛽", fontSize = 40.sp)
+                        Icon(
+                            imageVector = Icons.Default.LocalGasStation,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(44.dp)
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "لا توجد تفويلات أو غيارات زيت مسجلة حتى الآن",
@@ -275,7 +281,7 @@ fun ExpensesScreen(
                 showFuelDialog = false
                 Toast.makeText(
                     context,
-                    "تم تسجيل التفويلة وتحديث معدل استهلاك السيارة تلقائياً! ⛽",
+                    "تم تسجيل التفويلة وتحديث معدل استهلاك السيارة بنجاح.",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -292,7 +298,7 @@ fun ExpensesScreen(
                 showOilDialog = false
                 Toast.makeText(
                     context,
-                    "تم تسجيل غيار الزيت وحساب تكلفته لكل كم بنجاح! 🛢️",
+                    "تم تسجيل غيار الزيت وحساب تكلفته لكل كم بنجاح.",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -331,7 +337,12 @@ fun DetailedExpenseItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = if (isFuel) "⛽" else if (isOil) "🛢️" else "🔧", fontSize = 20.sp)
+                    Icon(
+                        imageVector = if (isFuel) Icons.Default.LocalGasStation else if (isOil) Icons.Default.Opacity else Icons.Default.Build,
+                        contentDescription = null,
+                        tint = if (isFuel) InDriveNeonGreen else if (isOil) Color(0xFF38BDF8) else WarningYellow,
+                        modifier = Modifier.size(20.dp)
+                    )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isFuel) "تفويلة بنزين" else if (isOil) "غيار زيت موتور" else "مصروف صيانة",
@@ -453,7 +464,12 @@ fun FuelRefillDialog(
         containerColor = DarkSurface,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "⛽", fontSize = 22.sp)
+                Icon(
+                    imageVector = Icons.Default.LocalGasStation,
+                    contentDescription = null,
+                    tint = InDriveNeonGreen,
+                    modifier = Modifier.size(24.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(text = "تسجيل تفويلة بنزين", fontWeight = FontWeight.Bold, color = TextPrimary)
             }
@@ -612,7 +628,12 @@ fun OilChangeDialog(
         containerColor = DarkSurface,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(text = "🛢️", fontSize = 22.sp)
+                Icon(
+                    imageVector = Icons.Default.Opacity,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(24.dp)
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(text = "تسجيل غيار زيت الموتور", fontWeight = FontWeight.Bold, color = TextPrimary)
             }

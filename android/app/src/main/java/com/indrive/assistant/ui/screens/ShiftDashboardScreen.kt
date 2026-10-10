@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -86,7 +87,7 @@ fun ShiftDashboardScreen(
             ) {
                 Column {
                     Text(
-                        text = "لوحة الوردية والأرباح 📊",
+                        text = "لوحة متابعة الوردية والأرباح",
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = TextPrimary
@@ -184,7 +185,7 @@ fun ShiftDashboardScreen(
 
                     val remaining = (settings.targetDailyEarnings - todayTotalGross).coerceAtLeast(0.0)
                     Text(
-                        text = if (remaining > 0) "متبقي ${remaining.toInt()} ${settings.currency} للوصول للهدف اليومي 🎯" else "أحسنت! حققت الهدف اليومي وتجاوزته! 🏆",
+                        text = if (remaining > 0) "المتبقي لتحقيق الهدف: ${remaining.toInt()} ${settings.currency}" else "تم تحقيق الهدف اليومي وتجاوزه بنجاح",
                         color = if (remaining > 0) TextSecondary else InDriveNeonGreen,
                         fontSize = 12.sp
                     )
@@ -249,7 +250,12 @@ fun ShiftDashboardScreen(
                             .padding(32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(text = "🚖", fontSize = 40.sp)
+                        Icon(
+                            imageVector = Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(44.dp)
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "لا توجد رحلات مسجلة اليوم بعد",

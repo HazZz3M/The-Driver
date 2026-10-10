@@ -81,7 +81,7 @@ fun SettingsScreen(
     ) {
         // Screen Header
         Text(
-            text = "إعدادات السيارة والتسعير ⚙️",
+            text = "إعدادات المركبة والتسعير التشغيلي",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.ExtraBold,
             color = TextPrimary
@@ -202,7 +202,7 @@ fun SettingsScreen(
                     currency = currency.trim().ifEmpty { "EGP" }
                 )
                 viewModel.updateSettings(newSettings)
-                Toast.makeText(context, "تم حفظ الإعدادات وتحديث محرك الحساب بنجاح! 💾", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "تم حفظ وتطبيق معايير التسعير بنجاح.", Toast.LENGTH_SHORT).show()
             },
             modifier = Modifier
                 .fillMaxWidth()

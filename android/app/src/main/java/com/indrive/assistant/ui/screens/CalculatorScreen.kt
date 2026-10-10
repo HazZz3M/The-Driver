@@ -89,9 +89,9 @@ fun CalculatorScreen(
         ) {
             Column {
                 Text(
-                    text = "محلل رحلات إن درايف ⚡",
+                    text = "محلل عروض إن درايف والتسعير",
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
+                    fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
                 Text(
@@ -253,7 +253,7 @@ fun CalculatorScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "خيارات المضاربة الذكية (Counter-Offers) 🎯",
+                text = "خيارات التسعير والمزايدة الذكية (Counter-Bids)",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
@@ -290,7 +290,7 @@ fun CalculatorScreen(
                 viewModel.saveCurrentRide(targetFareToSave)
                 Toast.makeText(
                     context,
-                    "تم حفظ الرحلة (${targetFareToSave.toInt()} ${settings.currency}) في سجل الوردية اليومي! 🚀",
+                    "تم تسجيل الرحلة (${targetFareToSave.toInt()} ${settings.currency}) في سجل الوردية بنجاح.",
                     Toast.LENGTH_SHORT
                 ).show()
             },

@@ -173,28 +173,28 @@ object FareCalculatorEngine {
             netProfit < 0 -> {
                 Triple(
                     ProfitabilityLevel.LOSS_DANGER,
-                    "⚠️ رحلة خاسرة! ستدفع من جيبك",
-                    "تكلفة البنزين والعمولة (${String.format("%.1f", fuelCost)} ج.م) تتجاوز عرض الراكب (${String.format("%.1f", offeredFare)} ج.م). ارفض أو ارفع السعر فوراً!"
+                    "رحلة خاسرة - التكلفة التشغيلية تتجاوز العرض",
+                    "تكلفة الوقود والاستهلاك والعمولة (${String.format("%.1f", fuelCost)} ج.م) تتجاوز عرض الراكب (${String.format("%.1f", offeredFare)} ج.م). يوصى بالمزايدة لرفع السعر أو رفض الطلب."
                 )
             }
             profitPerKm < minTargetProfitPerKm -> {
                 Triple(
                     ProfitabilityLevel.POOR_MARGIN,
-                    "هامش ربح ضعيف",
-                    "صافي الربح أقل من الحد الأدنى المستهدف (${String.format("%.1f", minTargetProfitPerKm)} ج.م/كم). قد لا تستحق وقتك واستهلاك سيارتك."
+                    "هامش ربح منخفض دون المستهدف",
+                    "صافي العائد أقل من الحد الأدنى المطلوب (${String.format("%.1f", minTargetProfitPerKm)} ج.م/كم). يفضل المزايدة لرفع السعر."
                 )
             }
             profitPerKm >= minTargetProfitPerKm * 1.5 -> {
                 Triple(
                     ProfitabilityLevel.EXCELLENT_PROFIT,
-                    "🔥 رحلة ممتازة وعالية الربحية!",
+                    "عائد ممتاز وعالي الربحية",
                     null
                 )
             }
             else -> {
                 Triple(
                     ProfitabilityLevel.GOOD_PROFIT,
-                    "✅ رحلة رابحة ومقبولة",
+                    "عرض رابح ومجدٍ تشغيلياً",
                     null
                 )
             }

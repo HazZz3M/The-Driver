@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
@@ -44,7 +45,7 @@ class FloatingHudService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main)
 
-    // Multiple Rides Storage & Selection
+    // Multi-Ride Queue
     private val activeRidesList = mutableListOf<ParsedRideData>()
     private var selectedRideIndex = 0
 
@@ -53,23 +54,30 @@ class FloatingHudService : Service() {
     private var lastVibratedFingerprint = ""
     private var lastVibrateTimestamp = 0L
 
-    // UI Element References
-    private var bubbleView: View? = null
-    private var expandedCard: View? = null
+    // View References
+    private var popupHintView: View? = null
+    private var expandedSheetView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
-    private var bubbleLabel: TextView? = null
-    private var bubbleContainer: LinearLayout? = null
-    private var ridesTabsContainer: LinearLayout? = null
-    private var ridesTabsScroll: HorizontalScrollView? = null
-    private var currentClientTv: TextView? = null
-    private var addressInfoTv: TextView? = null
+    // Popup Hint UI Components
+    private var hintStatusTagTv: TextView? = null
+    private var hintFairPriceTv: TextView? = null
+    private var hintSubtextTv: TextView? = null
+    private var hintActionTv: TextView? = null
+    private var hintMultiOrdersRow: LinearLayout? = null
+    private var hintContainerLayout: LinearLayout? = null
+
+    // Expanded Sheet UI Components
+    private var sheetClientHeaderTv: TextView? = null
+    private var sheetAddressesTv: TextView? = null
+    private var sheetTabsContainer: LinearLayout? = null
+    private var sheetTabsScroll: HorizontalScrollView? = null
     private var pickupInputEt: EditText? = null
     private var tripInputEt: EditText? = null
     private var fareInputEt: EditText? = null
-    private var resultProfitTv: TextView? = null
-    private var costBreakdownTv: TextView? = null
-    private var suggestedBidsTv: TextView? = null
+    private var sheetProfitTv: TextView? = null
+    private var sheetCostTv: TextView? = null
+    private var sheetBidsTv: TextView? = null
     private var a11yWarningBtn: Button? = null
     private var muteVibrateBtn: Button? = null
 
@@ -91,8 +99,8 @@ class FloatingHudService : Service() {
         )
 
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
-            .setContentTitle("inDrive Assistant HUD Active")
-            .setContentText("محلل ومساعد عروض رحلات إن درايف يعمل الآن فوق التطبيقات")
+            .setContentTitle("مساعد إن درايف الذكي")
+            .setContentText("المحلل التلقائي لتقييم العروض والتسعير العادل يعمل في الخلفية")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -117,287 +125,319 @@ class FloatingHudService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 40
-            y = 180
+            x = 32
+            y = 380
         }
         layoutParams = params
 
-        val container = LinearLayout(this).apply {
+        val rootContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
 
-        // Collapse / Close logic helper
-        fun collapsePanel() {
-            expandedCard?.visibility = View.GONE
-            bubbleView?.visibility = View.VISIBLE
+        fun collapseToHint() {
+            expandedSheetView?.visibility = View.GONE
+            popupHintView?.visibility = View.VISIBLE
             isExpanded = false
             params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            windowManager?.updateViewLayout(container, params)
+            windowManager?.updateViewLayout(rootContainer, params)
         }
 
-        // 1. Collapsed Bubble (Pill that dynamically displays latest customer & profit)
-        val bubble = LinearLayout(this).apply {
+        // =========================================================================
+        // 1. POPUP HINT WIDGET (Sleek Automotive Overlay directly indicating Fair Price)
+        // =========================================================================
+        val hintLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(22, 16, 22, 16)
+            background = createCardBackground("#0B1120", "#10B981", 3.0f, 22f)
+            hintContainerLayout = this
+        }
+
+        // Multiple orders row inside hint (if 2+ orders exist)
+        val multiOrdersLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(26, 18, 26, 18)
-            gravity = Gravity.CENTER_VERTICAL
-            background = createPillBackground("#0F172A", "#00EA80")
-
-            val iconText = TextView(context).apply {
-                text = "🚖"
-                textSize = 17f
-                setPadding(0, 0, 10, 0)
-            }
-
-            val label = TextView(context).apply {
-                text = "inDrive HUD (جاهز)"
-                setTextColor(Color.parseColor("#00EA80"))
-                textSize = 13f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-            }
-
-            bubbleLabel = label
-            bubbleContainer = this
-
-            addView(iconText)
-            addView(label)
+            visibility = View.GONE
+            setPadding(0, 0, 0, 10)
         }
-        bubbleView = bubble
+        hintMultiOrdersRow = multiOrdersLayout
+        hintLayout.addView(multiOrdersLayout)
 
-        // 2. Expanded Panel
-        val card = LinearLayout(this).apply {
+        // Main Hint Body
+        val hintMainRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        // Left Tag Badge (acceptance level)
+        val statusTag = TextView(this).apply {
+            text = "جاهز للمسح"
+            setTextColor(Color.WHITE)
+            textSize = 10.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(14, 6, 14, 6)
+            background = createBadgeBackground("#10B981", 12f)
+        }
+        hintStatusTagTv = statusTag
+        hintMainRow.addView(statusTag)
+
+        // Center Content: Fair Price & Subtext
+        val centerColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 0, 16, 0)
+        }
+
+        val fairPriceTv = TextView(this).apply {
+            text = "بانتظار طلب رحلة..."
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        hintFairPriceTv = fairPriceTv
+
+        val subtextTv = TextView(this).apply {
+            text = "افتح إن درايف لتلقي العروض تلقائياً"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10.5f
+            setPadding(0, 2, 0, 0)
+        }
+        hintSubtextTv = subtextTv
+
+        centerColumn.addView(fairPriceTv)
+        centerColumn.addView(subtextTv)
+        hintMainRow.addView(centerColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+        // Right Expand / Action Indicator
+        val actionTv = TextView(this).apply {
+            text = "تفاصيل"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(10, 6, 8, 6)
+        }
+        hintActionTv = actionTv
+        hintMainRow.addView(actionTv)
+
+        hintLayout.addView(hintMainRow)
+        popupHintView = hintLayout
+
+        // =========================================================================
+        // 2. EXPANDED FINANCIAL AUDIT SHEET (Professional Telematics Breakdown)
+        // =========================================================================
+        val sheetCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
-            setPadding(28, 24, 28, 24)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0B1120"))
-                setStroke(3, Color.parseColor("#334155"))
-                cornerRadius = 28f
-            }
-
-            // Top Header with clear clickable Close button
-            val headerRow = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, 8)
-
-                val title = TextView(context).apply {
-                    text = "⚡ محلل رحلات إن درايف"
-                    setTextColor(Color.WHITE)
-                    textSize = 14f
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    setOnClickListener { collapsePanel() }
-                }
-
-                // Close Button (Fixed: closes the card explicitly!)
-                val closeBtn = TextView(context).apply {
-                    text = "✕ إغلاق"
-                    setTextColor(Color.parseColor("#F87171"))
-                    textSize = 13f
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    setBackgroundColor(Color.parseColor("#1E293B"))
-                    setPadding(24, 12, 24, 12)
-                    setOnClickListener {
-                        collapsePanel()
-                    }
-                }
-
-                addView(title)
-                addView(closeBtn)
-            }
-
-            // Accessibility Warning button if disabled
-            val a11yBtn = Button(context).apply {
-                text = "⚠️ اضغط هنا لتفعيل قراءة الشاشة (Accessibility)"
-                textSize = 11f
-                setBackgroundColor(Color.parseColor("#854D0E"))
-                setTextColor(Color.WHITE)
-                setOnClickListener {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    startActivity(intent)
-                    Toast.makeText(this@FloatingHudService, "اختر inDrive Assistant ثم اضغط تفعيل", Toast.LENGTH_LONG).show()
-                }
-                visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) View.GONE else View.VISIBLE
-            }
-            a11yWarningBtn = a11yBtn
-
-            // Horizontal Scroll for Multiple Client Rides Tabs
-            val tabsScroll = HorizontalScrollView(context).apply {
-                visibility = View.GONE
-                setPadding(0, 6, 0, 8)
-            }
-            val tabsLayout = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-            }
-            tabsScroll.addView(tabsLayout)
-            ridesTabsScroll = tabsScroll
-            ridesTabsContainer = tabsLayout
-
-            // Customer Name & Rating Badge
-            val clientTv = TextView(context).apply {
-                text = "بانتظار قراءة عرض الرحلة..."
-                setTextColor(Color.parseColor("#38BDF8"))
-                textSize = 13f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setPadding(0, 4, 0, 4)
-            }
-            currentClientTv = clientTv
-
-            // Pickup & Destination Address Info
-            val addrTv = TextView(context).apply {
-                text = ""
-                setTextColor(Color.parseColor("#94A3B8"))
-                textSize = 11f
-                setPadding(0, 2, 0, 8)
-                visibility = View.GONE
-            }
-            addressInfoTv = addrTv
-
-            // Input Fields
-            val pickupInput = createInputField("مسافة الراكب (كم):", "2.0")
-            val tripInput = createInputField("مسافة المشوار (كم):", "5.0")
-            val fareInput = createInputField("عرض الراكب (ج.م):", "40.0")
-
-            pickupInputEt = pickupInput.second
-            tripInputEt = tripInput.second
-            fareInputEt = fareInput.second
-
-            val resultTv = TextView(context).apply {
-                text = "صافي الربح: --"
-                setTextColor(Color.parseColor("#00EA80"))
-                textSize = 15f
-                setPadding(0, 10, 0, 2)
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-            }
-            resultProfitTv = resultTv
-
-            val costTv = TextView(context).apply {
-                text = "التكاليف: --"
-                setTextColor(Color.parseColor("#94A3B8"))
-                textSize = 12f
-                setPadding(0, 0, 0, 4)
-            }
-            costBreakdownTv = costTv
-
-            val suggestedTv = TextView(context).apply {
-                text = "المزايدة المقترحة: --"
-                setTextColor(Color.parseColor("#38BDF8"))
-                textSize = 12f
-                setPadding(0, 0, 0, 10)
-            }
-            suggestedBidsTv = suggestedTv
-
-            // Actions Row 1 (Scan, Calc, Save, Mute Vibrate)
-            val btnRow1 = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 0, 0, 8)
-
-                val scanBtn = Button(context).apply {
-                    text = "🔄 اقرأ"
-                    setBackgroundColor(Color.parseColor("#1E293B"))
-                    setTextColor(Color.parseColor("#38BDF8"))
-                    textSize = 11f
-                    setOnClickListener {
-                        val parsedList = InDriveAccessibilityService.scanCurrentScreen()
-                        if (parsedList.isNotEmpty()) {
-                            Toast.makeText(this@FloatingHudService, "تمت قراءة ${parsedList.size} عروض بنجاح!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            if (!InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) {
-                                Toast.makeText(this@FloatingHudService, "يرجى تفعيل خدمة قراءة الشاشة في إعدادات الهاتف أولاً", Toast.LENGTH_LONG).show()
-                            } else {
-                                Toast.makeText(this@FloatingHudService, "لم يتم العثور على عرض رحلة على الشاشة حالياً", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply {
-                        setMargins(0, 0, 6, 0)
-                    }
-                }
-
-                val calcBtn = Button(context).apply {
-                    text = "حساب"
-                    setBackgroundColor(Color.parseColor("#00EA80"))
-                    setTextColor(Color.parseColor("#0F172A"))
-                    textSize = 11f
-                    typeface = android.graphics.Typeface.DEFAULT_BOLD
-                    setOnClickListener { executeManualRecalculate() }
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply {
-                        setMargins(0, 0, 6, 0)
-                    }
-                }
-
-                val saveBtn = Button(context).apply {
-                    text = "💾 حفظ"
-                    setBackgroundColor(Color.parseColor("#334155"))
-                    setTextColor(Color.WHITE)
-                    textSize = 11f
-                    setOnClickListener {
-                        saveCurrentRideToDatabase {
-                            collapsePanel()
-                        }
-                    }
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply {
-                        setMargins(0, 0, 6, 0)
-                    }
-                }
-
-                val vibrateBtn = Button(context).apply {
-                    text = "📳 هزاز"
-                    setBackgroundColor(Color.parseColor("#1E293B"))
-                    setTextColor(Color.parseColor("#94A3B8"))
-                    textSize = 11f
-                    setOnClickListener {
-                        isVibrationMuted = !isVibrationMuted
-                        text = if (isVibrationMuted) "🔕 صامت" else "📳 هزاز"
-                        setTextColor(if (isVibrationMuted) Color.parseColor("#EF4444") else Color.parseColor("#00EA80"))
-                        Toast.makeText(this@FloatingHudService, if (isVibrationMuted) "تم كتم اهتزاز العروض" else "تم تفعيل الاهتزاز", Toast.LENGTH_SHORT).show()
-                    }
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                }
-                muteVibrateBtn = vibrateBtn
-
-                addView(scanBtn)
-                addView(calcBtn)
-                addView(saveBtn)
-                addView(vibrateBtn)
-            }
-
-            // Big, Dedicated Close / Minimize Button at bottom (Guaranteed to close easily!)
-            val bottomCloseBtn = Button(context).apply {
-                text = "✕ تصغير وإغلاق النافذة"
-                setBackgroundColor(Color.parseColor("#1E293B"))
-                setTextColor(Color.parseColor("#E2E8F0"))
-                textSize = 13f
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-                setPadding(0, 16, 0, 16)
-                setOnClickListener {
-                    collapsePanel()
-                }
-            }
-
-            addView(headerRow)
-            addView(a11yBtn)
-            addView(tabsScroll)
-            addView(clientTv)
-            addView(addrTv)
-            addView(pickupInput.first)
-            addView(tripInput.first)
-            addView(fareInput.first)
-            addView(resultTv)
-            addView(costTv)
-            addView(suggestedTv)
-            addView(btnRow1)
-            addView(bottomCloseBtn)
+            setPadding(26, 22, 26, 22)
+            background = createCardBackground("#090D16", "#334155", 2.0f, 26f)
         }
-        expandedCard = card
 
-        container.addView(bubble)
-        container.addView(card)
+        // Top Navigation & Close Header
+        val sheetHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 12)
 
-        // Dragging & Tapping the Bubble
-        bubble.setOnTouchListener(object : View.OnTouchListener {
+            val sheetTitle = TextView(context).apply {
+                text = "تحليل تسعير الرحلة والجدوى المالية"
+                setTextColor(Color.WHITE)
+                textSize = 13.5f
+                typeface = Typeface.DEFAULT_BOLD
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val closeBtn = TextView(context).apply {
+                text = "إغلاق"
+                setTextColor(Color.parseColor("#EF4444"))
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                setBackgroundColor(Color.parseColor("#1E293B"))
+                setPadding(20, 10, 20, 10)
+                setOnClickListener { collapseToHint() }
+            }
+
+            addView(sheetTitle)
+            addView(closeBtn)
+        }
+
+        // Accessibility Warning Banner
+        val a11yBanner = Button(this).apply {
+            text = "تفعيل خدمة قراءة الشاشة (إمكانية الوصول مطلوبة)"
+            textSize = 11f
+            setBackgroundColor(Color.parseColor("#92400E"))
+            setTextColor(Color.WHITE)
+            setOnClickListener {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(intent)
+                Toast.makeText(this@FloatingHudService, "ادخل على الخدمات المثبتة وفعل inDrive Assistant", Toast.LENGTH_LONG).show()
+            }
+            visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) View.GONE else View.VISIBLE
+        }
+        a11yWarningBtn = a11yBanner
+
+        // Customer selection scroll tabs for multiple rides
+        val tabsScroll = HorizontalScrollView(this).apply {
+            visibility = View.GONE
+            setPadding(0, 4, 0, 8)
+        }
+        val tabsLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+        tabsScroll.addView(tabsLayout)
+        sheetTabsScroll = tabsScroll
+        sheetTabsContainer = tabsLayout
+
+        // Customer Profile Tag
+        val clientHeaderTv = TextView(this).apply {
+            text = "العميل: غير محدد"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 12.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 4, 0, 2)
+        }
+        sheetClientHeaderTv = clientHeaderTv
+
+        // Address Details
+        val addrTv = TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 11f
+            setPadding(0, 2, 0, 8)
+            visibility = View.GONE
+        }
+        sheetAddressesTv = addrTv
+
+        // Telematics Distance and Fare Inputs
+        val pickupInput = createTelemetryInput("مسافة الوصول للراكب (كم):", "2.0")
+        val tripInput = createTelemetryInput("مسافة المشوار الصافية (كم):", "5.0")
+        val fareInput = createTelemetryInput("عرض الراكب الحالي (ج.م):", "40.0")
+
+        pickupInputEt = pickupInput.second
+        tripInputEt = tripInput.second
+        fareInputEt = fareInput.second
+
+        // Outcome Metrics
+        val netProfitTv = TextView(this).apply {
+            text = "صافي الربح المتوقع: --"
+            setTextColor(Color.parseColor("#10B981"))
+            textSize = 14.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 10, 0, 2)
+        }
+        sheetProfitTv = netProfitTv
+
+        val costTv = TextView(this).apply {
+            text = "التكاليف التشغيلية: --"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 11.5f
+            setPadding(0, 2, 0, 4)
+        }
+        sheetCostTv = costTv
+
+        val recommendedBidTv = TextView(this).apply {
+            text = "السعر العادل المقترح: --"
+            setTextColor(Color.parseColor("#38BDF8"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 2, 0, 10)
+        }
+        sheetBidsTv = recommendedBidTv
+
+        // Actions Row
+        val actionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 4, 0, 10)
+
+            val scanBtn = Button(context).apply {
+                text = "قراءة الشاشة"
+                setBackgroundColor(Color.parseColor("#1E293B"))
+                setTextColor(Color.parseColor("#38BDF8"))
+                textSize = 11f
+                setOnClickListener {
+                    val parsedList = InDriveAccessibilityService.scanCurrentScreen()
+                    if (parsedList.isNotEmpty()) {
+                        Toast.makeText(this@FloatingHudService, "تم مسح ${parsedList.size} طلبات", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@FloatingHudService, "لا توجد طلبات معروضة حالياً", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f).apply {
+                    setMargins(0, 0, 6, 0)
+                }
+            }
+
+            val calcBtn = Button(context).apply {
+                text = "إعادة الحساب"
+                setBackgroundColor(Color.parseColor("#059669"))
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                typeface = Typeface.DEFAULT_BOLD
+                setOnClickListener { executeManualRecalculate() }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(0, 0, 6, 0)
+                }
+            }
+
+            val recordBtn = Button(context).apply {
+                text = "تسجيل الرحلة"
+                setBackgroundColor(Color.parseColor("#334155"))
+                setTextColor(Color.WHITE)
+                textSize = 11f
+                setOnClickListener {
+                    saveCurrentRideToDatabase { collapseToHint() }
+                }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins(0, 0, 6, 0)
+                }
+            }
+
+            val muteBtn = Button(context).apply {
+                text = "الاهتزاز: مفعل"
+                setBackgroundColor(Color.parseColor("#1E293B"))
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 10f
+                setOnClickListener {
+                    isVibrationMuted = !isVibrationMuted
+                    text = if (isVibrationMuted) "الاهتزاز: مكتوم" else "الاهتزاز: مفعل"
+                    setTextColor(if (isVibrationMuted) Color.parseColor("#EF4444") else Color.parseColor("#10B981"))
+                }
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f)
+            }
+            muteVibrateBtn = muteBtn
+
+            addView(scanBtn)
+            addView(calcBtn)
+            addView(recordBtn)
+            addView(muteBtn)
+        }
+
+        val minimizeFullBtn = Button(this).apply {
+            text = "تصغير وحفظ في الخلفية"
+            setBackgroundColor(Color.parseColor("#1E293B"))
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 12f
+            setOnClickListener { collapseToHint() }
+        }
+
+        sheetCard.addView(sheetHeader)
+        sheetCard.addView(a11yBanner)
+        sheetCard.addView(tabsScroll)
+        sheetCard.addView(clientHeaderTv)
+        sheetCard.addView(addrTv)
+        sheetCard.addView(pickupInput.first)
+        sheetCard.addView(tripInput.first)
+        sheetCard.addView(fareInput.first)
+        sheetCard.addView(netProfitTv)
+        sheetCard.addView(costTv)
+        sheetCard.addView(recommendedBidTv)
+        sheetCard.addView(actionsRow)
+        sheetCard.addView(minimizeFullBtn)
+        expandedSheetView = sheetCard
+
+        rootContainer.addView(hintLayout)
+        rootContainer.addView(sheetCard)
+
+        // Dragging and Tapping for the Popup Hint
+        hintLayout.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
@@ -422,21 +462,19 @@ class FloatingHudService : Service() {
                         }
                         params.x = initialX + dx.toInt()
                         params.y = initialY + dy.toInt()
-                        windowManager?.updateViewLayout(container, params)
+                        windowManager?.updateViewLayout(rootContainer, params)
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isClick) {
                             a11yWarningBtn?.visibility = if (InDriveAccessibilityService.isAccessibilityEnabled(this@FloatingHudService)) View.GONE else View.VISIBLE
-                            
-                            // On click, scan in case a ride is open
                             InDriveAccessibilityService.scanCurrentScreen()
 
-                            bubble.visibility = View.GONE
-                            card.visibility = View.VISIBLE
+                            hintLayout.visibility = View.GONE
+                            sheetCard.visibility = View.VISIBLE
                             isExpanded = true
                             params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            windowManager?.updateViewLayout(container, params)
+                            windowManager?.updateViewLayout(rootContainer, params)
                         }
                         return true
                     }
@@ -445,39 +483,46 @@ class FloatingHudService : Service() {
             }
         })
 
-        containerView = container
-        windowManager?.addView(container, params)
+        containerView = rootContainer
+        windowManager?.addView(rootContainer, params)
     }
 
-    private fun createPillBackground(bgColor: String, strokeColor: String): GradientDrawable {
+    private fun createCardBackground(bgColor: String, strokeColor: String, strokeWidth: Float, cornerRadiusDp: Float): GradientDrawable {
         return GradientDrawable().apply {
             setColor(Color.parseColor(bgColor))
-            setStroke(4, Color.parseColor(strokeColor))
-            cornerRadius = 60f
+            setStroke((strokeWidth * resources.displayMetrics.density).toInt(), Color.parseColor(strokeColor))
+            cornerRadius = cornerRadiusDp * resources.displayMetrics.density
         }
     }
 
-    private fun createInputField(label: String, defaultVal: String): Pair<LinearLayout, EditText> {
+    private fun createBadgeBackground(color: String, cornerRadiusDp: Float): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(Color.parseColor(color))
+            cornerRadius = cornerRadiusDp * resources.displayMetrics.density
+        }
+    }
+
+    private fun createTelemetryInput(label: String, defaultVal: String): Pair<LinearLayout, EditText> {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 4, 0, 4)
+            setPadding(0, 3, 0, 3)
         }
 
         val tv = TextView(this).apply {
             text = label
             setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 12f
+            textSize = 11.5f
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f)
         }
 
         val et = EditText(this).apply {
             setText(defaultVal)
             setTextColor(Color.WHITE)
-            textSize = 13f
+            textSize = 12.5f
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             setBackgroundColor(Color.parseColor("#1E293B"))
-            setPadding(14, 8, 14, 8)
+            setPadding(12, 6, 12, 6)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
@@ -508,63 +553,100 @@ class FloatingHudService : Service() {
     }
 
     private fun displayAnalysisInUi(analysis: FareAnalysisResult, parsedRide: ParsedRideData?) {
-        val (profitColorHex, statusArabic) = when (analysis.profitabilityLevel) {
-            ProfitabilityLevel.EXCELLENT_PROFIT -> Pair("#00EA80", "ممتاز جداً 🔥")
-            ProfitabilityLevel.GOOD_PROFIT -> Pair("#00EA80", "رابح 🟢")
-            ProfitabilityLevel.POOR_MARGIN -> Pair("#F59E0B", "هامش ضعيف 🟡")
-            ProfitabilityLevel.LOSS_DANGER -> Pair("#EF4444", "خسارة 🔴")
+        // Color-coding and status strictly based on acceptability & profitability
+        val (themeColorHex, tagLabel, statusDesc) = when (analysis.profitabilityLevel) {
+            ProfitabilityLevel.EXCELLENT_PROFIT -> Triple("#10B981", "قبول فوري", "عالي الربحية")
+            ProfitabilityLevel.GOOD_PROFIT -> Triple("#059669", "عرض رابح", "مجدٍ تشغيلياً")
+            ProfitabilityLevel.POOR_MARGIN -> Triple("#D97706", "هامش ضعيف", "ارفع السعر")
+            ProfitabilityLevel.LOSS_DANGER -> Triple("#DC2626", "غير مقبول", "مخاطرة خسارة")
         }
 
-        val shortIcon = when (analysis.profitabilityLevel) {
-            ProfitabilityLevel.EXCELLENT_PROFIT -> "🔥"
-            ProfitabilityLevel.GOOD_PROFIT -> "🟢"
-            ProfitabilityLevel.POOR_MARGIN -> "🟡"
-            ProfitabilityLevel.LOSS_DANGER -> "🔴"
-        }
+        // 1. Update Popup Hint Widget (Live on-screen hint)
+        hintContainerLayout?.background = createCardBackground("#0B1120", themeColorHex, 2.5f, 22f)
+        hintStatusTagTv?.text = tagLabel
+        hintStatusTagTv?.background = createBadgeBackground(themeColorHex, 12f)
 
-        // 1. Update Collapsed Bubble text
-        if (activeRidesList.size > 1) {
-            val r1 = activeRidesList[0]
-            val r2 = activeRidesList[1]
-            bubbleLabel?.text = "$shortIcon (${activeRidesList.size}) [${r1.passengerName}]: ${r1.fare.toInt()}ج ⮂ [${r2.passengerName}]: ${r2.fare.toInt()}ج"
-        } else if (parsedRide != null) {
-            bubbleLabel?.text = "$shortIcon [${parsedRide.passengerName}]: ${analysis.offeredFare.toInt()} ج | صافي: ${String.format("%.1f", analysis.netProfit)} ج | اقترح: ${analysis.recommendedFare.toInt()} ج"
-        } else {
-            bubbleLabel?.text = "$shortIcon صافي: ${String.format("%.1f", analysis.netProfit)} ج | اقترح: ${analysis.recommendedFare.toInt()} ج"
-        }
-        bubbleLabel?.setTextColor(Color.parseColor(profitColorHex))
-        bubbleContainer?.background = createPillBackground("#0F172A", profitColorHex)
+        val fairPriceValue = analysis.recommendedFare.toInt()
+        val clientName = parsedRide?.passengerName ?: "طلب الرحلة"
+        hintFairPriceTv?.text = "السعر العادل: $fairPriceValue ج.م ($clientName)"
+        hintFairPriceTv?.setTextColor(Color.WHITE)
 
-        // 2. Update Customer Name & Rating
+        val netProfitVal = String.format("%.1f", analysis.netProfit)
+        val profitPerKmVal = String.format("%.1f", analysis.profitPerKm)
+        hintSubtextTv?.text = "صافي الربح: $netProfitVal ج.م ($profitPerKmVal ج/كم) • العرض: ${analysis.offeredFare.toInt()} ج.م"
+
+        // Update multi-orders row inside hint
+        updateHintMultiOrdersRow()
+
+        // 2. Update Expanded Sheet
         if (parsedRide != null) {
-            val ratingTxt = if (parsedRide.passengerRating.isNotEmpty()) " (${parsedRide.passengerRating})" else ""
-            currentClientTv?.text = "👤 عميل: ${parsedRide.passengerName}$ratingTxt"
+            val ratingStr = if (parsedRide.passengerRating.isNotEmpty()) " (${parsedRide.passengerRating})" else ""
+            sheetClientHeaderTv?.text = "العميل: ${parsedRide.passengerName}$ratingStr"
             if (parsedRide.pickupAddress.isNotEmpty() || parsedRide.dropoffAddress.isNotEmpty()) {
-                addressInfoTv?.visibility = View.VISIBLE
-                addressInfoTv?.text = "📍 من: ${parsedRide.pickupAddress}\n🏁 إلى: ${parsedRide.dropoffAddress}"
+                sheetAddressesTv?.visibility = View.VISIBLE
+                sheetAddressesTv?.text = "الانطلاق: ${parsedRide.pickupAddress}\nالوجهة: ${parsedRide.dropoffAddress}"
             } else {
-                addressInfoTv?.visibility = View.GONE
+                sheetAddressesTv?.visibility = View.GONE
             }
         }
 
-        // 3. Update Result texts
-        resultProfitTv?.setTextColor(Color.parseColor(profitColorHex))
-        resultProfitTv?.text = "صافي الربح: ${String.format("%.1f", analysis.netProfit)} ج.م ($statusArabic) | ${String.format("%.1f", analysis.profitPerKm)} ج/كم"
+        sheetProfitTv?.setTextColor(Color.parseColor(themeColorHex))
+        sheetProfitTv?.text = "صافي الربح الفعلي: $netProfitVal ج.م ($statusDesc) | العائد: $profitPerKmVal ج/كم"
 
-        val totalCost = analysis.fuelCost + analysis.wearAndTearCost + analysis.commissionCost
-        costBreakdownTv?.text = "بنزين وزيت: ${String.format("%.1f", analysis.fuelCost + analysis.wearAndTearCost)} ج | عمولة: ${String.format("%.1f", analysis.commissionCost)} ج | التكلفة: ${String.format("%.1f", totalCost)} ج"
+        val totalCost = String.format("%.1f", analysis.fuelCost + analysis.wearAndTearCost + analysis.commissionCost)
+        val fuelAndWear = String.format("%.1f", analysis.fuelCost + analysis.wearAndTearCost)
+        val comm = String.format("%.1f", analysis.commissionCost)
+        sheetCostTv?.text = "إجمالي التكلفة: $totalCost ج.م (وقود وصيانة: $fuelAndWear ج.م | عمولة: $comm ج.م)"
 
         val bidsInfo = if (parsedRide?.counterBids?.isNotEmpty() == true) {
-            "خيارات الشاشة: ${parsedRide.counterBids.joinToString("، ")} ج.م  ⚡ اختر: ${analysis.recommendedFare.toInt()} ج"
+            "خيارات المزايدة بالتطبيق: ${parsedRide.counterBids.joinToString("، ")} ج.م • السعر الموصى به: $fairPriceValue ج.م"
         } else {
-            "الحد الأدنى: ${analysis.breakEvenFare.toInt()} ج | المقترح: ${analysis.recommendedFare.toInt()} ج | الأعلى: ${analysis.aggressiveFare.toInt()} ج"
+            "الحد الأدنى: ${analysis.breakEvenFare.toInt()} ج.م | السعر العادل: $fairPriceValue ج.م | الذروة: ${analysis.aggressiveFare.toInt()} ج.م"
         }
-        suggestedBidsTv?.text = bidsInfo
+        sheetBidsTv?.text = bidsInfo
     }
 
-    private fun refreshRidesTabs() {
-        val container = ridesTabsContainer ?: return
-        val scroll = ridesTabsScroll ?: return
+    private fun updateHintMultiOrdersRow() {
+        val row = hintMultiOrdersRow ?: return
+        row.removeAllViews()
+
+        if (activeRidesList.size <= 1) {
+            row.visibility = View.GONE
+            return
+        }
+
+        row.visibility = View.VISIBLE
+        for (i in activeRidesList.indices) {
+            val r = activeRidesList[i]
+            val isSelected = (i == selectedRideIndex)
+
+            val tabTv = TextView(this).apply {
+                text = "${r.passengerName}: ${r.fare.toInt()}ج"
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(12, 4, 12, 4)
+                if (isSelected) {
+                    setTextColor(Color.parseColor("#0F172A"))
+                    background = createBadgeBackground("#10B981", 10f)
+                } else {
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    background = createBadgeBackground("#1E293B", 10f)
+                }
+                setOnClickListener { selectRide(i) }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 0, 6, 0)
+                }
+            }
+            row.addView(tabTv)
+        }
+    }
+
+    private fun refreshSheetRidesTabs() {
+        val container = sheetTabsContainer ?: return
+        val scroll = sheetTabsScroll ?: return
 
         container.removeAllViews()
         if (activeRidesList.size <= 1) {
@@ -578,25 +660,18 @@ class FloatingHudService : Service() {
             val isSelected = (i == selectedRideIndex)
 
             val chip = TextView(this).apply {
-                text = "${if (isSelected) "👉 " else ""}${ride.passengerName} (${ride.fare.toInt()} ج)"
+                text = "${ride.passengerName} (${ride.fare.toInt()} ج.م)"
                 textSize = 11f
-                setPadding(18, 10, 18, 10)
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(16, 8, 16, 8)
                 if (isSelected) {
                     setTextColor(Color.parseColor("#0F172A"))
-                    background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#00EA80"))
-                        cornerRadius = 20f
-                    }
+                    background = createBadgeBackground("#10B981", 16f)
                 } else {
                     setTextColor(Color.parseColor("#94A3B8"))
-                    background = GradientDrawable().apply {
-                        setColor(Color.parseColor("#1E293B"))
-                        cornerRadius = 20f
-                    }
+                    background = createBadgeBackground("#1E293B", 16f)
                 }
-                setOnClickListener {
-                    selectRide(i)
-                }
+                setOnClickListener { selectRide(i) }
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
@@ -626,25 +701,21 @@ class FloatingHudService : Service() {
             settings = settings
         )
 
-        refreshRidesTabs()
+        refreshSheetRidesTabs()
         displayAnalysisInUi(analysis, ride)
     }
 
     private fun handleNewRideParsed(ride: ParsedRideData) {
         serviceScope.launch(Dispatchers.Main) {
-            // Check if this exact ride fingerprint is already in the list
             val existingIdx = activeRidesList.indexOfFirst { it.fingerprint == ride.fingerprint }
             val isGenuinelyNew = (existingIdx == -1)
 
             if (existingIdx != -1) {
-                // Update existing item
                 activeRidesList[existingIdx] = ride
                 selectedRideIndex = existingIdx
             } else {
-                // Prepend new ride so it's first
                 activeRidesList.add(0, ride)
-                // Limit queue to 6 recent rides
-                if (activeRidesList.size > 6) {
+                if (activeRidesList.size > 5) {
                     activeRidesList.removeAt(activeRidesList.size - 1)
                 }
                 selectedRideIndex = 0
@@ -652,7 +723,6 @@ class FloatingHudService : Service() {
 
             selectRide(selectedRideIndex)
 
-            // Vibrate ONLY ONCE when a genuinely new ride arrives (never in a loop!)
             if (isGenuinelyNew) {
                 vibrateSingleShotOnce(ride)
             }
@@ -663,7 +733,6 @@ class FloatingHudService : Service() {
         if (isVibrationMuted) return
 
         val now = System.currentTimeMillis()
-        // Deduplicate & enforce 4-second minimum interval between vibrations
         if (ride.fingerprint == lastVibratedFingerprint && (now - lastVibrateTimestamp) < 15000L) {
             return
         }
@@ -708,7 +777,7 @@ class FloatingHudService : Service() {
                     profitPerKm = analysis.profitPerKm
                 )
             )
-            Toast.makeText(this@FloatingHudService, "تم تسجيل الرحلة في الوردية بنجاح!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@FloatingHudService, "تم حفظ بيانات الرحلة بنجاح", Toast.LENGTH_SHORT).show()
             onSaved()
         }
     }
