@@ -515,7 +515,7 @@ fun ExpensesScreen(
     if (showAddVehicleDialog) {
         AddVehicleDialog(
             onDismiss = { showAddVehicleDialog = false },
-            onConfirm = { newProfile ->
+            onConfirm = { newProfile: VehicleProfile ->
                 val updated = vehicleProfiles.toMutableList().apply { add(newProfile) }
                 viewModel.saveVehicleProfiles(updated)
                 viewModel.switchActiveVehicle(newProfile)
@@ -1091,3 +1091,123 @@ fun SparePartDialog(
         }
     )
 }
+
+@Composable
+fun AddVehicleDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (VehicleProfile) -> Unit
+) {
+    var nameText by remember { mutableStateOf("") }
+    var modelYearText by remember { mutableStateOf("2021") }
+    var fuelType by remember { mutableStateOf("بنزين 92") }
+    var consumptionText by remember { mutableStateOf("8.5") }
+    var fuelPriceText by remember { mutableStateOf("15.25") }
+    var wearTearText by remember { mutableStateOf("1.2") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.DirectionsCar,
+                    contentDescription = null,
+                    tint = com.indrive.assistant.ui.theme.InDriveNeonGreen,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "إضافة وتخصيص مركبة جديدة", fontWeight = FontWeight.Bold, color = com.indrive.assistant.ui.theme.TextPrimary)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = nameText,
+                    onValueChange = { nameText = it },
+                    label = { Text("اسم المركبة أو الطراز") },
+                    placeholder = { Text("مثال: تويوتا كورولا 2021") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("بنزين 92", "بنزين 95", "بنزين 80", "غاز طبيعي").forEach { type ->
+                        FilterChip(
+                            selected = fuelType == type,
+                            onClick = {
+                                fuelType = type
+                                fuelPriceText = when (type) {
+                                    "بنزين 95" -> "17.00"
+                                    "بنزين 92" -> "15.25"
+                                    "بنزين 80" -> "13.75"
+                                    "غاز طبيعي" -> "7.00"
+                                    else -> "15.25"
+                                }
+                            },
+                            label = { Text(type, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = com.indrive.assistant.ui.theme.InDriveNeonGreen,
+                                selectedLabelColor = Color(0xFF070B14)
+                            )
+                        )
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = consumptionText,
+                        onValueChange = { consumptionText = it },
+                        label = { Text("الاستهلاك (لتر/100كم)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = fuelPriceText,
+                        onValueChange = { fuelPriceText = it },
+                        label = { Text("سعر اللتر (ج.م)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = wearTearText,
+                    onValueChange = { wearTearText = it },
+                    label = { Text("معدل الإهلاك لكل كم (ج.م)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (nameText.isNotBlank()) {
+                        val profile = VehicleProfile(
+                            name = nameText.trim(),
+                            modelYear = modelYearText.trim(),
+                            fuelType = fuelType,
+                            fuelConsumptionLPer100Km = consumptionText.toDoubleOrNull() ?: 8.5,
+                            fuelPricePerLiter = fuelPriceText.toDoubleOrNull() ?: 15.25,
+                            wearAndTearPerKm = wearTearText.toDoubleOrNull() ?: 1.2
+                        )
+                        onConfirm(profile)
+                    }
+                },
+                enabled = nameText.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = com.indrive.assistant.ui.theme.InDriveNeonGreen,
+                    contentColor = Color(0xFF070B14)
+                )
+            ) {
+                Text("إضافة وحفظ المركبة", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء", color = com.indrive.assistant.ui.theme.TextSecondary)
+            }
+        }
+    )
+}
+

@@ -20,4 +20,16 @@ data class DriverSettings(
     val autoAcceptIgnoreBlacklist: Boolean = true,
     val autoBidMode: String = "RECOMMENDED", // "RECOMMENDED" or "PASSENGER_FARE"
     val autoAcceptDelaySeconds: Double = 1.5
-)
+) {
+    fun isFavorite(zone: String?): Boolean {
+        if (zone.isNullOrBlank()) return false
+        val clean = zone.trim().lowercase()
+        return favoriteZones.any { it.isNotBlank() && clean.contains(it.trim().lowercase()) }
+    }
+
+    fun isBlacklisted(zone: String?): Boolean {
+        if (zone.isNullOrBlank()) return false
+        val clean = zone.trim().lowercase()
+        return blacklistedZones.any { it.isNotBlank() && clean.contains(it.trim().lowercase()) }
+    }
+}

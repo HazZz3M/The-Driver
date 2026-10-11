@@ -338,8 +338,8 @@ fun CalculatorScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 var zoneInputText by remember { mutableStateOf("") }
-                val isFav = remember(zoneInputText, settings) { settings.isFavorite(zoneInputText) }
-                val isBlack = remember(zoneInputText, settings) { settings.isBlacklisted(zoneInputText) }
+                val isFav: Boolean = remember(zoneInputText, settings) { settings.isFavorite(zoneInputText) }
+                val isBlack: Boolean = remember(zoneInputText, settings) { settings.isBlacklisted(zoneInputText) }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -391,7 +391,7 @@ fun CalculatorScreen(
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isBlack) Color(0xFF475569) else Color(0xFFFF3355),
-                                contentColor = Color.WHITE
+                                contentColor = Color.White
                             )
                         ) {
                             Text(if (isBlack) "محظورة" else "+ محظورة", fontSize = 11.sp, fontWeight = FontWeight.Bold)
