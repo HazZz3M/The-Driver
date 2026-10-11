@@ -33,7 +33,7 @@ class AppTheme {
           systemNavigationBarIconBrightness: Brightness.light,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.darkSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -74,7 +74,7 @@ class AppTheme {
         trackHeight: 6,
         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: AppColors.darkSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
@@ -141,7 +141,7 @@ class AppTheme {
           systemNavigationBarIconBrightness: Brightness.dark,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.lightSurface,
         elevation: 0,
         shape: RoundedRectangleBorder(
