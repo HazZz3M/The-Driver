@@ -9,20 +9,31 @@ class DatabaseService {
 
   final SharedPreferences prefs;
 
+  List<Trip>? _cachedTrips;
+  List<Expense>? _cachedExpenses;
+
   DatabaseService(this.prefs);
 
   // ==========================================
   // TRIPS OPERATIONS
   // ==========================================
   List<Trip> getAllTrips() {
+    if (_cachedTrips != null) {
+      return List<Trip>.from(_cachedTrips!);
+    }
     final raw = prefs.getString(keyTrips);
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) {
+      _cachedTrips = [];
+      return [];
+    }
     try {
       final list = jsonDecode(raw) as List<dynamic>;
       final trips = list.map((e) => Trip.fromJson(e as Map<String, dynamic>)).toList();
       trips.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      return trips;
+      _cachedTrips = trips;
+      return List<Trip>.from(trips);
     } catch (_) {
+      _cachedTrips = [];
       return [];
     }
   }
@@ -48,17 +59,20 @@ class DatabaseService {
   Future<void> recordTrip(Trip trip) async {
     final current = getAllTrips();
     current.insert(0, trip);
+    _cachedTrips = current;
     final raw = jsonEncode(current.map((t) => t.toJson()).toList());
     await prefs.setString(keyTrips, raw);
   }
 
   Future<void> deleteTrip(int tripId) async {
     final current = getAllTrips().where((t) => t.id != tripId).toList();
+    _cachedTrips = current;
     final raw = jsonEncode(current.map((t) => t.toJson()).toList());
     await prefs.setString(keyTrips, raw);
   }
 
   Future<void> clearAllTrips() async {
+    _cachedTrips = [];
     await prefs.remove(keyTrips);
   }
 
@@ -66,14 +80,22 @@ class DatabaseService {
   // EXPENSES OPERATIONS
   // ==========================================
   List<Expense> getAllExpenses() {
+    if (_cachedExpenses != null) {
+      return List<Expense>.from(_cachedExpenses!);
+    }
     final raw = prefs.getString(keyExpenses);
-    if (raw == null || raw.isEmpty) return [];
+    if (raw == null || raw.isEmpty) {
+      _cachedExpenses = [];
+      return [];
+    }
     try {
       final list = jsonDecode(raw) as List<dynamic>;
       final expenses = list.map((e) => Expense.fromJson(e as Map<String, dynamic>)).toList();
       expenses.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      return expenses;
+      _cachedExpenses = expenses;
+      return List<Expense>.from(expenses);
     } catch (_) {
+      _cachedExpenses = [];
       return [];
     }
   }
@@ -112,12 +134,14 @@ class DatabaseService {
   Future<void> recordExpense(Expense expense) async {
     final current = getAllExpenses();
     current.insert(0, expense);
+    _cachedExpenses = current;
     final raw = jsonEncode(current.map((e) => e.toJson()).toList());
     await prefs.setString(keyExpenses, raw);
   }
 
   Future<void> deleteExpense(int expenseId) async {
     final current = getAllExpenses().where((e) => e.id != expenseId).toList();
+    _cachedExpenses = current;
     final raw = jsonEncode(current.map((e) => e.toJson()).toList());
     await prefs.setString(keyExpenses, raw);
   }

@@ -71,15 +71,17 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.6.0
-        name: "The Driver v1.6.0 - Converted to Flutter (Dart Engine & Cockpit UI)"
+        tag_name: v1.7.0
+        name: "The Driver v1.7.0 - Precision Distance Extraction & 60fps Performance Overhaul"
         body: |
-          ### The Driver v1.6.0 - Full Flutter Transformation
-          - **100% Flutter Codebase**: Completely migrated from Jetpack Compose to high-performance Flutter & Dart.
-          - **Obsidian Dark & Neon Cockpit UI**: Fatigue-free driver display optimized for high-contrast day & night driving.
-          - **Smart 10s Counter-Bidding Engine**: Mathematical floor, recommended sweet-spot, and surge margin analytics.
-          - **Fleet Vehicles & Fuel/Oil Expenses Hub**: Automatic recalculation of fuel economy (L/100km) and operating wear & tear.
-          - **Native Android Floating HUD & Accessibility Integration**: Foreground service with screen bounds OCR parsing.
+          ### The Driver v1.7.0 - Precision Distance & Performance Release
+          - **Dynamic Ride Distance Parser**: Solved the fixed 3.2 km / (1 وصول + 1 مشوار) bug! Now dynamically extracts true individual pickup and trip distances across all Arabic & English formats.
+          - **Meters & RTL Reversal Support**: Accurately parses meter distances (e.g., `600 م` -> `0.6 كم`), Arabic decimal separators (`٫`), and RTL unit inversion (`كم 3.5`).
+          - **Spatial Card Container Isolation**: Prevents Compose LazyColumn root container leaking text between stacked order cards.
+          - **Fractional HUD Precision**: Displays exact fractional kilometer breakdowns (`1.8 وصول + 7.4 مشوار`) instead of truncated integers.
+          - **60fps Lag-Free Navigation**: Added in-memory cached database layer, eliminating synchronous JSON deserialization on UI thread during page changes and slider drags.
+          - **Lazy Tab Instantiation**: Tabs are loaded on-demand, drastically reducing initial memory footprint and stutter.
+          - **Executive Obsidian & Emerald Cockpit Theme**: Shifted away from harsh neon to an ergonomic, anti-glare automotive palette (`#0B0F19` Obsidian with `#10B981` Precision Emerald).
         files: |
           The-Driver.apk
           inDrive-Assistant.apk

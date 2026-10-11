@@ -255,14 +255,13 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
 
         fun normalizeArabicDigits(str: String): String {
-            val arabicNumerals = charArrayOf('٠','١','٢','٣','٤','٥','٦','٧','٨','٩')
             val sb = java.lang.StringBuilder()
             for (c in str) {
-                val idx = arabicNumerals.indexOf(c)
-                if (idx != -1) {
-                    sb.append(idx)
-                } else {
-                    sb.append(c)
+                when (c) {
+                    in '٠'..'٩' -> sb.append(c - '٠')
+                    in '۰'..'۹' -> sb.append(c - '۰')
+                    '٫', '،' -> sb.append('.')
+                    else -> sb.append(c)
                 }
             }
             return sb.toString()
@@ -276,20 +275,32 @@ class InDriveAccessibilityService : AccessibilityService() {
             val anchorNodes = mutableListOf<AccessibilityNodeInfo>()
             findOfferAnchors(root, anchorNodes)
 
-            for (anchor in anchorNodes) {
-                val cardNode = findEnclosingCardContainer(anchor) ?: anchor
+            val anchorCenters = anchorNodes.map { node ->
+                val r = android.graphics.Rect()
+                node.getBoundsInScreen(r)
+                android.graphics.Point(r.centerX(), r.centerY())
+            }
+
+            for ((index, anchor) in anchorNodes.withIndex()) {
+                val anchorBounds = android.graphics.Rect()
+                anchor.getBoundsInScreen(anchorBounds)
+
+                val otherCenters = anchorCenters.filterIndexed { i, _ -> i != index }
+                val cardNode = findEnclosingCardContainer(anchor, otherCenters) ?: anchor
                 val bounds = android.graphics.Rect()
                 cardNode.getBoundsInScreen(bounds)
 
-                // Deduplicate by vertical screen position
-                val boundsKey = "${bounds.top}_${bounds.bottom}"
+                // Deduplicate by card vertical bounds or anchor position
+                val boundsKey = if (bounds.height() in 120..1300) {
+                    "${bounds.left}_${bounds.top}_${bounds.bottom}"
+                } else {
+                    "${anchorBounds.left}_${anchorBounds.top}_${anchorBounds.bottom}"
+                }
+
                 if (seenBounds.contains(boundsKey)) {
                     continue
                 }
                 seenBounds.add(boundsKey)
-
-                val anchorBounds = android.graphics.Rect()
-                anchor.getBoundsInScreen(anchorBounds)
 
                 val texts = mutableListOf<String>()
                 collectNodeTexts(cardNode, texts)
@@ -338,27 +349,46 @@ class InDriveAccessibilityService : AccessibilityService() {
             }
         }
 
-        private fun findEnclosingCardContainer(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        private fun findEnclosingCardContainer(
+            node: AccessibilityNodeInfo,
+            otherAnchorCenters: List<android.graphics.Point>
+        ): AccessibilityNodeInfo? {
             var curr: AccessibilityNodeInfo? = node
-            var bestCandidate: AccessibilityNodeInfo? = null
+            var bestCandidate: AccessibilityNodeInfo? = node
 
             while (curr != null) {
-                val bounds = android.graphics.Rect()
-                curr.getBoundsInScreen(bounds)
+                val parent = curr.parent ?: break
+                val parentBounds = android.graphics.Rect()
+                parent.getBoundsInScreen(parentBounds)
 
-                if (bounds.height() in 140..1500 && bounds.width() >= 300) {
-                    bestCandidate = curr
+                // If parent contains ANY other anchor on the screen, stop climbing to avoid merging cards
+                val containsOtherAnchor = otherAnchorCenters.any { pt ->
+                    parentBounds.contains(pt.x, pt.y)
+                }
+                if (containsOtherAnchor) {
+                    return bestCandidate
                 }
 
-                val parent = curr.parent
-                if (parent != null) {
-                    val pClass = parent.className?.toString() ?: ""
-                    if (pClass.contains("RecyclerView", ignoreCase = true) ||
-                        pClass.contains("ListView", ignoreCase = true) ||
-                        pClass.contains("ViewPager", ignoreCase = true)) {
-                        return curr
-                    }
+                // If parent is a scroll container (RecyclerView, ListView, Compose LazyColumn, etc.)
+                val pClass = parent.className?.toString() ?: ""
+                val isListContainer = parent.isScrollable ||
+                    pClass.contains("RecyclerView", ignoreCase = true) ||
+                    pClass.contains("ListView", ignoreCase = true) ||
+                    pClass.contains("ViewPager", ignoreCase = true) ||
+                    pClass.contains("ScrollView", ignoreCase = true)
+
+                if (isListContainer) {
+                    return curr
                 }
+
+                if (parentBounds.height() > 1300) {
+                    return bestCandidate
+                }
+
+                if (parentBounds.height() in 120..1150 && parentBounds.width() >= 250) {
+                    bestCandidate = parent
+                }
+
                 curr = parent
             }
             return bestCandidate
@@ -447,27 +477,84 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // 3. Extract Distances
+            // 3. Extract Distances (Supports km, meters, Arabic numerals, RTL reversals)
             val distances = mutableListOf<Double>()
             for (t in normalizedTexts) {
-                val kmMatches = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)""", RegexOption.IGNORE_CASE).findAll(t)
-                for (m in kmMatches) {
+                val isCurrency = t.contains("EGP", ignoreCase = true) ||
+                        t.contains("ج.م") || t.contains("جنيه") || t.contains("جم")
+
+                // Pattern 1: standard km ("1.8 km", "~1.8 كم", "1.8كم")
+                val kmRegex1 = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)\b""", RegexOption.IGNORE_CASE)
+                for (m in kmRegex1.findAll(t)) {
                     val d = m.groupValues[1].replace(',', '.').toDoubleOrNull()
-                    if (d != null && d > 0.1 && !distances.contains(d)) {
+                    if (d != null && d > 0.05 && !distances.contains(d)) {
                         distances.add(d)
+                    }
+                }
+
+                // Pattern 2: RTL reversed km ("كم 1.8", "km 1.8")
+                val kmRegex2 = Regex("""\b(?:km|كم)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+                for (m in kmRegex2.findAll(t)) {
+                    val d = m.groupValues[1].replace(',', '.').toDoubleOrNull()
+                    if (d != null && d > 0.05 && !distances.contains(d)) {
+                        distances.add(d)
+                    }
+                }
+
+                // Pattern 3: Meters (e.g., "600 م", "~600 م", "600 متر", "500m", "م 600")
+                if (!isCurrency) {
+                    val mRegex1 = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)\b""", RegexOption.IGNORE_CASE)
+                    for (m in mRegex1.findAll(t)) {
+                        val meters = m.groupValues[1].toDoubleOrNull()
+                        if (meters != null && meters in 30.0..999.0) {
+                            val km = (Math.round((meters / 1000.0) * 10.0) / 10.0)
+                            if (!distances.contains(km)) {
+                                distances.add(km)
+                            }
+                        }
+                    }
+
+                    val mRegex2 = Regex("""\b(?:متر|م)\s*(?:~)?\s*(\d+)\b""", RegexOption.IGNORE_CASE)
+                    for (m in mRegex2.findAll(t)) {
+                        val meters = m.groupValues[1].toDoubleOrNull()
+                        if (meters != null && meters in 30.0..999.0) {
+                            val km = (Math.round((meters / 1000.0) * 10.0) / 10.0)
+                            if (!distances.contains(km)) {
+                                distances.add(km)
+                            }
+                        }
                     }
                 }
             }
 
-            var pickupKm = 1.5
+            var pickupKm = 1.2
             var tripKm = 5.0
 
             if (distances.size >= 2) {
-                pickupKm = distances.minOrNull() ?: 1.5
-                tripKm = distances.maxOrNull() ?: 5.0
+                if (distances.size >= 3) {
+                    val maxD = distances.maxOrNull() ?: distances[0]
+                    val parts = distances.filter { it != maxD }
+                    if (parts.size >= 2 && Math.abs(maxD - parts.sum()) < 0.4) {
+                        pickupKm = parts[0]
+                        tripKm = parts[1]
+                    } else {
+                        pickupKm = distances[0]
+                        tripKm = distances[1]
+                    }
+                } else {
+                    val d1 = distances[0]
+                    val d2 = distances[1]
+                    if (d1 > 7.0 && d2 <= 5.0) {
+                        pickupKm = d2
+                        tripKm = d1
+                    } else {
+                        pickupKm = d1
+                        tripKm = d2
+                    }
+                }
             } else if (distances.size == 1) {
                 tripKm = distances[0]
-                pickupKm = 1.5
+                pickupKm = 1.0
             }
 
             // 4. Extract Counter Bids

@@ -588,9 +588,12 @@ class FloatingHudService : Service() {
         }
 
         // ROW 3: Net Profit & Distance Breakdown
-        val netProfitVal = String.format("%.1f", analysis.netProfit)
-        val profitPerKmVal = String.format("%.1f", analysis.profitPerKm)
-        val distText = "${String.format("%.1f", card.totalDistanceKm)} كم (${card.pickupDistanceKm.toInt()} وصول + ${card.tripDistanceKm.toInt()} مشوار)"
+        val netProfitVal = String.format(java.util.Locale.US, "%.1f", analysis.netProfit)
+        val profitPerKmVal = String.format(java.util.Locale.US, "%.1f", analysis.profitPerKm)
+        val pickupFmt = String.format(java.util.Locale.US, "%.1f", card.pickupDistanceKm)
+        val tripFmt = String.format(java.util.Locale.US, "%.1f", card.tripDistanceKm)
+        val totalFmt = String.format(java.util.Locale.US, "%.1f", card.totalDistanceKm)
+        val distText = "$totalFmt كم ($pickupFmt وصول + $tripFmt مشوار)"
 
         val profitTv = TextView(this).apply {
             text = "صافي الربح: $netProfitVal ج.م ($profitPerKmVal ج/كم) • $distText"
