@@ -45,6 +45,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import com.indrive.assistant.ui.components.ProfitStatusBanner
 import com.indrive.assistant.ui.components.QuickInputSlider
 import com.indrive.assistant.ui.components.SmartBidOptionCard
@@ -69,8 +76,13 @@ fun CalculatorScreen(
     val fare by viewModel.offeredFare.collectAsState()
     val analysis by viewModel.fareAnalysis.collectAsState()
     val isShiftActive by viewModel.isShiftActive.collectAsState()
+    val vehicleProfiles by viewModel.vehicleProfiles.collectAsState()
+    val activeVehicleId by viewModel.activeVehicleId.collectAsState()
 
     var selectedBidFare by remember { mutableStateOf<Double?>(null) }
+    var showVehicleMenu by remember { mutableStateOf(false) }
+
+    val activeProfile = vehicleProfiles.firstOrNull { it.id == activeVehicleId } ?: vehicleProfiles.firstOrNull()
 
     val scrollState = rememberScrollState()
 
@@ -131,7 +143,67 @@ fun CalculatorScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Active Vehicle Quick Switcher Strip
+        if (activeProfile != null) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showVehicleMenu = true },
+                color = DarkSurface,
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = InDriveNeonGreen, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "المركبة النشطة: ${activeProfile.name}",
+                            color = TextPrimary,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "(${activeProfile.fuelConsumptionLPer100Km}L / ${activeProfile.fuelPricePerLiter} ج.م)",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                    Icon(imageVector = Icons.Default.ArrowDropDown, contentDescription = null, tint = TextSecondary)
+                }
+
+                DropdownMenu(
+                    expanded = showVehicleMenu,
+                    onDismissRequest = { showVehicleMenu = false }
+                ) {
+                    vehicleProfiles.forEach { profile ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "${profile.name} (${profile.fuelType})",
+                                    fontWeight = if (profile.id == activeVehicleId) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (profile.id == activeVehicleId) InDriveNeonGreen else TextPrimary
+                                )
+                            },
+                            onClick = {
+                                viewModel.switchActiveVehicle(profile)
+                                showVehicleMenu = false
+                                Toast.makeText(context, "تم التبديل إلى '${profile.name}'", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // 1. Live Profitability Evaluation Banner
         ProfitStatusBanner(
@@ -184,6 +256,42 @@ fun CalculatorScreen(
                 selectedBidFare = null
             }
         )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Fast Fare Delta Increments
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(-10.0, -5.0, 5.0, 10.0, 15.0, 20.0).forEach { delta ->
+                val label = if (delta > 0) "+${delta.toInt()}" else "${delta.toInt()}"
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable {
+                            val next = (fare + delta).coerceIn(10.0, 600.0)
+                            viewModel.setOfferedFare(next)
+                            selectedBidFare = null
+                        },
+                    color = DarkSurfaceVariant,
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 6.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$label ${settings.currency}",
+                            color = if (delta > 0) InDriveNeonGreen else Color(0xFFEF4444),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

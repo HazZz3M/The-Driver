@@ -1,8 +1,10 @@
 package com.indrive.assistant.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
@@ -26,19 +28,44 @@ private val DarkColorScheme = darkColorScheme(
     error = LossRed
 )
 
+private val LightColorScheme = lightColorScheme(
+    primary = InDriveNeonGreenDark,
+    onPrimary = LightSurface,
+    primaryContainer = InDriveNeonGreenLight,
+    onPrimaryContainer = LightTextPrimary,
+    secondary = AccentCyan,
+    onSecondary = LightSurface,
+    background = LightBackground,
+    onBackground = LightTextPrimary,
+    surface = LightSurface,
+    onSurface = LightTextPrimary,
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = LightTextSecondary,
+    outline = LightCardBorder,
+    error = LossRed
+)
+
 @Composable
 fun InDriveAssistantTheme(
+    themeMode: String = "dark",
     content: @Composable () -> Unit
 ) {
-    val colorScheme = DarkColorScheme
+    val isDark = when (themeMode) {
+        "light" -> false
+        "system" -> isSystemInDarkTheme()
+        else -> true // default dark
+    }
+
+    val colorScheme = if (isDark) DarkColorScheme else LightColorScheme
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window
             window?.let {
-                it.statusBarColor = DarkBackground.toArgb()
-                it.navigationBarColor = DarkBackground.toArgb()
-                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = false
+                val bg = if (isDark) DarkBackground else LightBackground
+                it.statusBarColor = bg.toArgb()
+                it.navigationBarColor = (if (isDark) DarkSurface else LightSurface).toArgb()
+                WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = !isDark
             }
         }
     }

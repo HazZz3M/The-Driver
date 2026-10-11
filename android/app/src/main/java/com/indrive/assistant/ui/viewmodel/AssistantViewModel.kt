@@ -24,6 +24,31 @@ class AssistantViewModel(
 ) : ViewModel() {
 
     val driverSettings: StateFlow<DriverSettings> = repository.driverSettingsFlow
+    val vehicleProfiles: StateFlow<List<com.indrive.assistant.data.model.VehicleProfile>> = repository.vehicleProfilesFlow
+    val activeVehicleId: StateFlow<String> = repository.activeVehicleIdFlow
+    val themeMode: StateFlow<String> = repository.themeModeFlow
+    val overlayStyle: StateFlow<String> = repository.overlayStyleFlow
+    val overlaySize: StateFlow<String> = repository.overlaySizeFlow
+
+    fun switchActiveVehicle(profile: com.indrive.assistant.data.model.VehicleProfile) {
+        repository.switchActiveVehicle(profile)
+    }
+
+    fun saveVehicleProfiles(profiles: List<com.indrive.assistant.data.model.VehicleProfile>) {
+        repository.saveVehicleProfiles(profiles)
+    }
+
+    fun setThemeMode(mode: String) {
+        repository.setThemeMode(mode)
+    }
+
+    fun setOverlayStyle(style: String) {
+        repository.setOverlayStyle(style)
+    }
+
+    fun setOverlaySize(size: String) {
+        repository.setOverlaySize(size)
+    }
 
     // Calculator inputs
     val pickupDistanceKm = MutableStateFlow(2.0)
@@ -219,6 +244,40 @@ class AssistantViewModel(
                     description = description.ifBlank { "غيار زيت موتور (${oilVolumeMl} ملل، نزل بعد ${oilLifespanKm.toInt()} كم)" }
                 )
             )
+        }
+    }
+
+    fun addSparePart(
+        partName: String,
+        amount: Double,
+        lifespanKm: Double?,
+        updateWearTear: Boolean,
+        description: String = ""
+    ) {
+        val costPerKm = if (lifespanKm != null && lifespanKm > 0) amount / lifespanKm else null
+        viewModelScope.launch {
+            repository.recordExpense(
+                Expense(
+                    category = "SPARE_PART",
+                    amount = amount,
+                    partName = partName,
+                    partLifespanKm = lifespanKm,
+                    partCostPerKm = costPerKm,
+                    description = description.ifBlank {
+                        if (lifespanKm != null && lifespanKm > 0) {
+                            "قطعة غيار: $partName (عمر افتراضي: ${lifespanKm.toInt()} كم • ${String.format("%.2f", costPerKm)} ج/كم)"
+                        } else {
+                            "قطعة غيار / صيانة: $partName"
+                        }
+                    }
+                )
+            )
+
+            if (updateWearTear && costPerKm != null && costPerKm > 0) {
+                val current = driverSettings.value
+                val newRate = Math.round((current.wearAndTearPerKm + costPerKm) * 100.0) / 100.0
+                repository.updateWearAndTearRate(newRate)
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 <resources>
-    <string name="app_name">inDrive Assistant</string>
-    <string name="hud_service_title">inDrive Assistant Active</string>
-    <string name="hud_service_desc">Floating quick calculator is running over other apps</string>
+    <string name="app_name">The Driver</string>
+    <string name="hud_service_title">The Driver Active</string>
+    <string name="hud_service_desc">محلل التسعير التلقائي والهود العائم يعمل في الخلفية</string>
     <string name="accessibility_service_desc">يقرأ عروض الرحلات تلقائياً من شاشة تطبيق إن درايف لحساب الأرباح واقتراح أفضل سعر للمزايدة وتكلفة البنزين فوراً.</string>
     <string name="currency_symbol">EGP</string>
     <string name="overlay_permission_required">يرجى منح إذن الظهور فوق التطبيقات لتفعيل الهود العائم فوق إن درايف</string>

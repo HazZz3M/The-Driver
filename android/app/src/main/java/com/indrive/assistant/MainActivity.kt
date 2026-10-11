@@ -28,17 +28,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.collectAsState
 import com.indrive.assistant.ui.screens.CalculatorScreen
 import com.indrive.assistant.ui.screens.ExpensesScreen
 import com.indrive.assistant.ui.screens.OverlayControlScreen
 import com.indrive.assistant.ui.screens.ShiftDashboardScreen
 import com.indrive.assistant.ui.screens.SettingsScreen
-import com.indrive.assistant.ui.theme.DarkBackground
-import com.indrive.assistant.ui.theme.DarkSurface
 import com.indrive.assistant.ui.theme.InDriveAssistantTheme
 import com.indrive.assistant.ui.theme.InDriveNeonGreen
-import com.indrive.assistant.ui.theme.TextPrimary
-import com.indrive.assistant.ui.theme.TextSecondary
 import com.indrive.assistant.ui.viewmodel.AssistantViewModel
 import com.indrive.assistant.ui.viewmodel.AssistantViewModelFactory
 
@@ -57,7 +54,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            InDriveAssistantTheme {
+            val themeMode by viewModel.themeMode.collectAsState()
+            InDriveAssistantTheme(themeMode = themeMode) {
                 MainAppContent(viewModel = viewModel)
             }
         }
@@ -77,11 +75,11 @@ fun MainAppContent(viewModel: AssistantViewModel) {
     )
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
         bottomBar = {
             NavigationBar(
-                containerColor = DarkSurface,
-                contentColor = TextPrimary
+                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+                contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
             ) {
                 navItems.forEachIndexed { index, item ->
                     val isSelected = selectedIndex == index
@@ -92,13 +90,13 @@ fun MainAppContent(viewModel: AssistantViewModel) {
                             Icon(
                                 imageVector = item.icon,
                                 contentDescription = item.title,
-                                tint = if (isSelected) InDriveNeonGreen else TextSecondary
+                                tint = if (isSelected) InDriveNeonGreen else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
                         label = {
                             Text(
                                 text = item.title,
-                                color = if (isSelected) InDriveNeonGreen else TextSecondary,
+                                color = if (isSelected) InDriveNeonGreen else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )

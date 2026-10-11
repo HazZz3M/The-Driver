@@ -37,37 +37,40 @@ jobs:
 
     - name: Prepare APK Output
       run: |
+        cp android/app/build/outputs/apk/debug/app-debug.apk The-Driver.apk
         cp android/app/build/outputs/apk/debug/app-debug.apk inDrive-Assistant.apk
-        ls -lh inDrive-Assistant.apk
+        ls -lh The-Driver.apk
 
     - name: Upload to Litterbox (Direct Mobile Download)
       id: litterbox
       run: |
-        DIRECT_URL=$(curl -s -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@inDrive-Assistant.apk" https://litterbox.catbox.moe/resources/internals/api.php)
+        DIRECT_URL=$(curl -s -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@The-Driver.apk" https://litterbox.catbox.moe/resources/internals/api.php)
         echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-        echo "### 📱 Direct APK Mobile Download Link" >> $GITHUB_STEP_SUMMARY
-        echo "[🚀 Click Here to Download inDrive Assistant APK directly to phone]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
+        echo "### Direct APK Mobile Download Link" >> $GITHUB_STEP_SUMMARY
+        echo "[Click Here to Download The Driver APK directly to phone]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
         echo "Direct Link: $DIRECT_URL"
 
     - name: Create GitHub Release with direct APK file
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.4.0
-        name: "inDrive Assistant v1.4.0 - In-App Updates, Card-Attached Popups & Zone Filters"
+        tag_name: v1.5.0
+        name: "The Driver v1.5.0 - Multi-Vehicle Profiles, Ultra-Compact Badges & Spare Parts"
         body: |
-          ### inDrive Assistant v1.4.0 - Major Telematics Upgrade
-          - **In-App Auto Update**: Check and install application updates directly from within the Settings screen with one click.
-          - **Card-Attached Small Popups**: Each ride order card on screen receives its own dedicated small popup hint positioned directly over that card.
-          - **Real-Time Screen Synchronization**: Popups automatically sync with on-screen orders and instantly disappear as soon as orders expire, are accepted, or leave view.
-          - **Compact Clutter-Free Design**: Customer names removed from popup hints to focus strictly on fair price, profitability, and operational advice.
-          - **Geographic Zone Intelligence**:
-            - Favorite Zones (e.g., Maadi, Tagamoa) highlighted in Gold with instant acceptance advice.
-            - Blacklisted Zones (e.g., Helwan, Shubra El Kheima) marked with warning and accepted only if pricing is exceptionally high.
-          - **Zero Emoji Standard**: Automotive telematics UI standard throughout the application.
-
-          Download the attached `inDrive-Assistant.apk` to install on your Android device.
-        files: inDrive-Assistant.apk
+          ### The Driver v1.5.0 - Major Telematics Upgrade
+          - **App Rebranded**: Now titled **The Driver**.
+          - **Multi-Vehicle Profiles System**: Create and manage multiple vehicle profiles (fuel consumption, fuel type, price, wear & tear) with 1-tap switching.
+          - **Ultra-Compact Floating HUD Overlay**: Redesigned from large cards to miniature badges (6 distinct visual styles: Coin Badge, Slim Pill, Speedo Gauge, Price Tag, Corner Notch, Glow Dot) so they never cover inDrive's original ride card details.
+          - **Pulsating Light Glow Animation**: Favorite zones pulse with radiant breathing light to distinguish them from standard yellow warnings.
+          - **1-Tap Quick Zone Categorization**: Categorize pickup and dropoff addresses into Favorite or Blacklisted zones with one tap directly from popup hints.
+          - **Spare Parts & True Wear-and-Tear**: Record spare parts with optional kilometer lifespan, calculating the true wear-and-tear rate per km to enhance pricing accuracy.
+          - **Segmented Settings Architecture**: Clean 5-tab settings navigation separating Vehicle Profiles, Pricing, HUD Styles, Zones, and App Settings.
+          - **Dark & Light Themes**: High-contrast dark mode and crisp light mode support.
+          - **Fast Pricing Analyzer**: Quick bid increment chips (+5, +10, +15, +20 EGP) and active vehicle switcher directly inside the calculator.
+          - **In-App Auto Update**: Seamless 1-tap update downloads directly within the app.
+        files: |
+          The-Driver.apk
+          inDrive-Assistant.apk
         draft: false
         prerelease: false
       env:
@@ -76,5 +79,5 @@ jobs:
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: inDrive-Assistant-Debug-APK
-        path: inDrive-Assistant.apk
+        name: The-Driver-Debug-APK
+        path: The-Driver.apk

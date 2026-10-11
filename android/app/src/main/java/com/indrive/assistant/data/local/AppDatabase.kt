@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import com.indrive.assistant.data.model.Expense
 import com.indrive.assistant.data.model.Trip
 
-@Database(entities = [Trip::class, Expense::class], version = 1, exportSchema = false)
+@Database(entities = [Trip::class, Expense::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tripDao(): TripDao
     abstract fun expenseDao(): ExpenseDao

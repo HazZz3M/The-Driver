@@ -28,6 +28,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,6 +82,7 @@ fun ExpensesScreen(
 
     var showFuelDialog by remember { mutableStateOf(false) }
     var showOilDialog by remember { mutableStateOf(false) }
+    var showSparePartDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -90,13 +93,13 @@ fun ExpensesScreen(
         // Screen Header
         item {
             Text(
-                text = "سجل استهلاك الوقود والزيوت",
+                text = "سجل المصاريف والوقود وقطع الغيار",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = TextPrimary
             )
             Text(
-                text = "حساب دقيق لمعدل استهلاك البنزين وتكلفة الزيت لكل كيلومتر",
+                text = "حساب دقيق لمعدل استهلاك البنزين وتكلفة الزيوت وإهلاك قطع الغيار لكل كم",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary
             )
@@ -104,11 +107,11 @@ fun ExpensesScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Two Dedicated Action Buttons (تفويلة بنزين + غيار زيت)
+        // Three Action Buttons (تفويلة بنزين + غيار زيت + قطعة غيار)
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
                     onClick = { showFuelDialog = true },
@@ -121,9 +124,9 @@ fun ExpensesScreen(
                     ),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.LocalGasStation, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "تفويلة بنزين", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Icon(imageVector = Icons.Default.LocalGasStation, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "تفويلة", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
                 Button(
@@ -137,9 +140,25 @@ fun ExpensesScreen(
                     ),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Opacity, contentDescription = null)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = "غيار زيت", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Icon(imageVector = Icons.Default.Opacity, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "زيت", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Button(
+                    onClick = { showSparePartDialog = true },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFA855F7),
+                        contentColor = Color(0xFF0F172A)
+                    ),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "قطع غيار", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
 
@@ -304,6 +323,23 @@ fun ExpensesScreen(
             }
         )
     }
+
+    // 3. SPARE PART DIALOG
+    if (showSparePartDialog) {
+        SparePartDialog(
+            currency = settings.currency,
+            onDismiss = { showSparePartDialog = false },
+            onConfirm = { partName, amount, lifespanKm, updateWearTear, desc ->
+                viewModel.addSparePart(partName, amount, lifespanKm, updateWearTear, desc)
+                showSparePartDialog = false
+                Toast.makeText(
+                    context,
+                    if (updateWearTear) "تم تسجيل قطعة الغيار وتحديث معدل إهلاك السيارة بنجاح." else "تم تسجيل قطعة الغيار بنجاح.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
 }
 
 @Composable
@@ -317,6 +353,7 @@ fun DetailedExpenseItemCard(
 
     val isFuel = expense.category == "FUEL"
     val isOil = expense.category == "OIL_CHANGE"
+    val isSparePart = expense.category == "SPARE_PART"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -326,6 +363,7 @@ fun DetailedExpenseItemCard(
             brush = androidx.compose.ui.graphics.SolidColor(
                 if (isFuel) InDriveNeonGreen.copy(alpha = 0.4f)
                 else if (isOil) Color(0xFF38BDF8).copy(alpha = 0.4f)
+                else if (isSparePart) Color(0xFFA855F7).copy(alpha = 0.4f)
                 else DarkCardBorder
             )
         )
@@ -340,12 +378,12 @@ fun DetailedExpenseItemCard(
                     Icon(
                         imageVector = if (isFuel) Icons.Default.LocalGasStation else if (isOil) Icons.Default.Opacity else Icons.Default.Build,
                         contentDescription = null,
-                        tint = if (isFuel) InDriveNeonGreen else if (isOil) Color(0xFF38BDF8) else WarningYellow,
+                        tint = if (isFuel) InDriveNeonGreen else if (isOil) Color(0xFF38BDF8) else if (isSparePart) Color(0xFFA855F7) else WarningYellow,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isFuel) "تفويلة بنزين" else if (isOil) "غيار زيت موتور" else "مصروف صيانة",
+                        text = if (isFuel) "تفويلة بنزين" else if (isOil) "غيار زيت موتور" else if (isSparePart) (expense.partName ?: "قطعة غيار") else "مصروف صيانة",
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         fontSize = 15.sp
@@ -355,7 +393,7 @@ fun DetailedExpenseItemCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "${expense.amount.toInt()} $currency",
-                        color = if (isFuel) InDriveNeonGreen else if (isOil) Color(0xFF38BDF8) else WarningYellow,
+                        color = if (isFuel) InDriveNeonGreen else if (isOil) Color(0xFF38BDF8) else if (isSparePart) Color(0xFFA855F7) else WarningYellow,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 18.sp
                     )
@@ -408,6 +446,28 @@ fun DetailedExpenseItemCard(
                         label = "تكلفة الزيت/كم",
                         value = "${String.format("%.2f", expense.oilCostPerKm)} $currency/كم"
                     )
+                }
+            } else if (isSparePart) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MetricBadge(
+                        label = "نوع الصيانة",
+                        value = expense.partName ?: "قطعة غيار"
+                    )
+                    if (expense.partLifespanKm != null && expense.partLifespanKm > 0) {
+                        MetricBadge(
+                            label = "عمر القطعة",
+                            value = "${expense.partLifespanKm.toInt()} كم"
+                        )
+                        if (expense.partCostPerKm != null) {
+                            MetricBadge(
+                                label = "إهلاك/كم",
+                                value = "${String.format("%.2f", expense.partCostPerKm)} $currency/كم"
+                            )
+                        }
+                    }
                 }
             }
 
@@ -750,6 +810,195 @@ fun OilChangeDialog(
                 )
             ) {
                 Text("حفظ غيار الزيت", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("إلغاء", color = TextSecondary)
+            }
+        }
+    )
+}
+
+// 3. SPARE PART / MAINTENANCE DIALOG
+@Composable
+fun SparePartDialog(
+    currency: String,
+    onDismiss: () -> Unit,
+    onConfirm: (partName: String, amount: Double, lifespanKm: Double?, updateWearTear: Boolean, desc: String) -> Unit
+) {
+    var partNameText by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var hasKmWearTear by remember { mutableStateOf(true) }
+    var lifespanKmText by remember { mutableStateOf("30000") }
+    var updateWearTear by remember { mutableStateOf(true) }
+    var descText by remember { mutableStateOf("") }
+
+    val amount = amountText.toDoubleOrNull() ?: 0.0
+    val lifespanKm = if (hasKmWearTear) lifespanKmText.toDoubleOrNull() else null
+    val costPerKm = if (lifespanKm != null && lifespanKm > 0) amount / lifespanKm else 0.0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = Color(0xFFA855F7),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "تسجيل قطع غيار وصيانة", fontWeight = FontWeight.Bold, color = TextPrimary)
+            }
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = partNameText,
+                    onValueChange = { partNameText = it },
+                    label = { Text("اسم قطعة الغيار أو الصيانة") },
+                    placeholder = { Text("مثال: تيل فرامل أمامي، طقم كاوتش، سيور") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = Color(0xFFA855F7),
+                        unfocusedBorderColor = DarkCardBorder
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("التكلفة الإجمالية للشراء والتركيب ($currency)") },
+                    placeholder = { Text("مثال: 1200") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = Color(0xFFA855F7),
+                        unfocusedBorderColor = DarkCardBorder
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Toggle for kilometer lifespan
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = hasKmWearTear,
+                        onCheckedChange = { hasKmWearTear = it },
+                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFFA855F7))
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "القطعة مرتبطة بعدد كيلومترات معينة (عمر افتراضي)",
+                        color = TextPrimary,
+                        fontSize = 12.sp
+                    )
+                }
+
+                if (hasKmWearTear) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = lifespanKmText,
+                        onValueChange = { lifespanKmText = it },
+                        label = { Text("عمر القطعة التقريبي بالكيلومتر (كم)") },
+                        placeholder = { Text("مثال: 30000 أو 50000 كم") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = Color(0xFFA855F7),
+                            unfocusedBorderColor = DarkCardBorder
+                        )
+                    )
+
+                    if (amount > 0 && (lifespanKm ?: 0.0) > 0) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = DarkBackground),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFA855F7))
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(text = "معدل إهلاك القطعة/كم:", color = TextSecondary, fontSize = 12.sp)
+                                    Text(
+                                        text = "${String.format("%.2f", costPerKm)} $currency/كم",
+                                        color = Color(0xFFA855F7),
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = updateWearTear,
+                                onCheckedChange = { updateWearTear = it },
+                                colors = CheckboxDefaults.colors(checkedColor = InDriveNeonGreen)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "تحديث معدل إهلاك السيارة في إعدادات التسعير تلقائياً",
+                                color = InDriveNeonGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = descText,
+                    onValueChange = { descText = it },
+                    label = { Text("ملاحظات إضافية (التاجر أو مركز الصيانة)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = Color(0xFFA855F7),
+                        unfocusedBorderColor = DarkCardBorder
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (partNameText.isNotBlank() && amount > 0) {
+                        onConfirm(partNameText.trim(), amount, lifespanKm, updateWearTear && hasKmWearTear, descText.trim())
+                    }
+                },
+                enabled = partNameText.isNotBlank() && amount > 0,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFA855F7),
+                    contentColor = Color(0xFF0F172A)
+                )
+            ) {
+                Text("حفظ قطعة الغيار", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

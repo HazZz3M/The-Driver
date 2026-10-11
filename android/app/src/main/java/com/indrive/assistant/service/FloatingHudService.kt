@@ -1,5 +1,6 @@
 package com.indrive.assistant.service
 
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -18,8 +19,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -28,7 +27,6 @@ import androidx.core.app.NotificationCompat
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.MainActivity
 import com.indrive.assistant.data.model.ParsedRideData
-import com.indrive.assistant.data.model.Trip
 import com.indrive.assistant.engine.FareAnalysisResult
 import com.indrive.assistant.engine.FareCalculatorEngine
 import com.indrive.assistant.engine.ProfitabilityLevel
@@ -44,11 +42,6 @@ class FloatingHudService : Service() {
     // Active Card Popups mapped by ride fingerprint
     private val activePopups = mutableMapOf<String, CardPopupViewHolder>()
 
-    // Optional Quick Tool Bubble (Idle Pill)
-    private var idleToolBubble: View? = null
-    private var isExpandedManualSheet = false
-    private var manualSheetView: View? = null
-
     // Anti-Vibration Spam tracking
     private var isVibrationMuted = false
     private var lastVibratedFingerprint = ""
@@ -56,8 +49,11 @@ class FloatingHudService : Service() {
 
     private data class CardPopupViewHolder(
         val ride: ParsedRideData,
-        val view: View,
-        val params: WindowManager.LayoutParams
+        var analysis: FareAnalysisResult,
+        val container: FrameLayout,
+        val params: WindowManager.LayoutParams,
+        var isExpanded: Boolean = false,
+        var pulseAnimator: ValueAnimator? = null
     )
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -78,7 +74,7 @@ class FloatingHudService : Service() {
         )
 
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
-            .setContentTitle("مساعد إن درايف الذكي")
+            .setContentTitle("The Driver")
             .setContentText("المحلل التلقائي للتسعير العادل والمناطق المفضلة يعمل بنشاط")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
@@ -105,8 +101,9 @@ class FloatingHudService : Service() {
             val toRemove = activePopups.keys.filter { it !in currentFingerprints }
             for (fp in toRemove) {
                 activePopups[fp]?.let { holder ->
+                    holder.pulseAnimator?.cancel()
                     try {
-                        wm.removeView(holder.view)
+                        wm.removeView(holder.container)
                     } catch (_: Exception) {}
                 }
                 activePopups.remove(fp)
@@ -128,17 +125,16 @@ class FloatingHudService : Service() {
 
                 val existing = activePopups[card.fingerprint]
                 if (existing != null) {
-                    // Update position if screen scrolled
+                    existing.analysis = analysis
                     val targetY = calculatePopupY(card)
-                    if (existing.params.y != targetY) {
+                    if (existing.params.y != targetY && !existing.isExpanded) {
                         existing.params.y = targetY
                         try {
-                            wm.updateViewLayout(existing.view, existing.params)
+                            wm.updateViewLayout(existing.container, existing.params)
                         } catch (_: Exception) {}
                     }
-                    updatePopupContent(existing.view, card, analysis)
+                    renderPopup(existing)
                 } else {
-                    // Create and add new small popup attached to this card
                     createAndAttachPopup(card, analysis)
                     vibrateSingleShotOnce(card)
                 }
@@ -149,10 +145,8 @@ class FloatingHudService : Service() {
     private fun calculatePopupY(card: ParsedRideData): Int {
         val screenBounds = card.screenBounds
         return if (screenBounds != null) {
-            // Position neatly near the top of the card
-            (screenBounds.top + 8).coerceAtLeast(30)
+            (screenBounds.top + 6).coerceAtLeast(30)
         } else {
-            // Default top offset
             320
         }
     }
@@ -176,38 +170,43 @@ class FloatingHudService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 24
+            x = 20
             y = targetY
         }
 
-        val popupView = buildSmallPopupView(card, analysis)
+        val container = FrameLayout(this)
+        val holder = CardPopupViewHolder(
+            ride = card,
+            analysis = analysis,
+            container = container,
+            params = params,
+            isExpanded = false
+        )
+
+        renderPopup(holder)
+
         try {
-            wm.addView(popupView, params)
-            activePopups[card.fingerprint] = CardPopupViewHolder(card, popupView, params)
+            wm.addView(container, params)
+            activePopups[card.fingerprint] = holder
         } catch (_: Exception) {}
     }
 
     // =========================================================================
-    // SMALL POPUP VIEW BUILDER (OEM Telematics standard - Zero Emojis)
+    // DYNAMIC POPUP RENDERING (COMPACT VS EXPANDED)
     // =========================================================================
-    private fun buildSmallPopupView(card: ParsedRideData, analysis: FareAnalysisResult): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(18, 12, 18, 12)
-        }
-
-        updatePopupContent(root, card, analysis)
-        return root
-    }
-
-    private fun updatePopupContent(view: View, card: ParsedRideData, analysis: FareAnalysisResult) {
-        val container = view as? LinearLayout ?: return
+    private fun renderPopup(holder: CardPopupViewHolder) {
+        val container = holder.container
         container.removeAllViews()
+        holder.pulseAnimator?.cancel()
+        holder.pulseAnimator = null
 
-        // Dynamic Color Logic based on Acceptance, Zones & Profitability
+        val analysis = holder.analysis
+        val card = holder.ride
+
+        // Determine Theme Color and Label based on Profitability & Zones
         val (themeColorHex, tagLabel) = when {
             analysis.isBlacklistedZone && analysis.profitabilityLevel != ProfitabilityLevel.GOOD_PROFIT -> {
-                Pair("#DC2626", "منطقة غير مرغوبة (${analysis.matchedBlacklistZone ?: ""})")
+                Pair("#DC2626", "منطقة سوداء (${analysis.matchedBlacklistZone ?: ""})")
             }
             analysis.isBlacklistedZone && analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT -> {
                 Pair("#D97706", "مقبول فقط لارتفاع السعر (${analysis.matchedBlacklistZone ?: ""})")
@@ -219,18 +218,301 @@ class FloatingHudService : Service() {
                 Pair("#10B981", "قبول فوري ومجزٍ")
             }
             analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT -> {
-                Pair("#059669", "عرض رابح ومجدٍ")
+                Pair("#00EA80", "عرض رابح ومجدٍ")
             }
             analysis.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> {
-                Pair("#D97706", "هامش ضعيف - اقترح سعراً أعلى")
+                Pair("#EAB308", "هامش ضعيف - اقترح زيادة")
             }
             else -> {
-                Pair("#DC2626", "غير مقبول - مخاطرة خسارة")
+                Pair("#EF4444", "غير مقبول - مخاطرة خسارة")
             }
         }
 
-        // Sleek Glassmorphism Container with Dynamic Colored Border
-        container.background = createCardBackground("#0B1120", themeColorHex, 2.5f, 16f)
+        if (holder.isExpanded) {
+            renderExpandedDetailsCard(holder, themeColorHex, tagLabel)
+        } else {
+            renderCompactBadge(holder, themeColorHex)
+        }
+    }
+
+    // =========================================================================
+    // 1. ULTRA-COMPACT BADGE BUILDER (6 Distinct OEM Styles)
+    // =========================================================================
+    private fun renderCompactBadge(holder: CardPopupViewHolder, themeColorHex: String) {
+        val density = resources.displayMetrics.density
+        val prefs = InDriveAssistantApp.instance.repository.getPreferencesManager()
+        val style = prefs.overlayStyleFlow.value.uppercase()
+        val sizePref = prefs.overlaySizeFlow.value.uppercase()
+
+        val sizeScale = when (sizePref) {
+            "SMALL" -> 0.85f
+            "LARGE" -> 1.22f
+            else -> 1.0f
+        }
+
+        val fairPrice = holder.analysis.recommendedFare.toInt()
+        val isFav = holder.analysis.isFavoriteZone
+
+        val badgeView = when (style) {
+            "SLIM_PILL" -> buildSlimPill(fairPrice, themeColorHex, sizeScale, density)
+            "SPEEDO_GAUGE" -> buildSpeedoGauge(fairPrice, themeColorHex, sizeScale, density)
+            "MINI_TAG" -> buildMiniTag(fairPrice, themeColorHex, sizeScale, density)
+            "CORNER_RIBBON" -> buildCornerRibbon(fairPrice, themeColorHex, sizeScale, density)
+            "GLOW_DOT" -> buildGlowDot(fairPrice, themeColorHex, sizeScale, density)
+            else -> buildCompactCircle(fairPrice, themeColorHex, sizeScale, density)
+        }
+
+        // Tap to expand into quick details popover
+        badgeView.setOnClickListener {
+            holder.isExpanded = true
+            renderPopup(holder)
+            windowManager?.updateViewLayout(holder.container, holder.params)
+        }
+
+        // Dragging gesture support for fine-tuning position
+        setupDragTouchListener(badgeView, holder)
+
+        // Pulsating Glow Animation for Favorite Zones (Solves gold vs yellow confusion)
+        if (isFav) {
+            startPulsatingGlowAnimation(badgeView, holder, themeColorHex)
+        }
+
+        holder.container.addView(badgeView)
+    }
+
+    // Style 1: COMPACT_CIRCLE (قرص دائري مصغر)
+    private fun buildCompactCircle(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val diameter = (48 * scale * density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(diameter, diameter)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#0A0F1D"))
+                setStroke((3 * density).toInt(), Color.parseColor(colorHex))
+            }
+            elevation = 6 * density
+        }
+
+        val priceTv = TextView(this).apply {
+            text = "$price"
+            setTextColor(Color.WHITE)
+            textSize = 14f * scale
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+
+        val currencyTv = TextView(this).apply {
+            text = "ج"
+            setTextColor(Color.parseColor(colorHex))
+            textSize = 9f * scale
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+
+        layout.addView(priceTv)
+        layout.addView(currencyTv)
+        return layout
+    }
+
+    // Style 2: SLIM_PILL (كبسولة أفقية رفيعة)
+    private fun buildSlimPill(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val h = (28 * scale * density).toInt()
+        val padH = (10 * density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(padH, 0, padH, 0)
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, h)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 16 * density
+                setColor(Color.parseColor("#0A0F1D"))
+                setStroke((2.2f * density).toInt(), Color.parseColor(colorHex))
+            }
+            elevation = 6 * density
+        }
+
+        val dot = View(this).apply {
+            val dotSize = (8 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply {
+                setMargins(0, 0, (6 * density).toInt(), 0)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor(colorHex))
+            }
+        }
+
+        val textTv = TextView(this).apply {
+            text = "$price ج.م"
+            setTextColor(Color.WHITE)
+            textSize = 11.5f * scale
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
+        layout.addView(dot)
+        layout.addView(textTv)
+        return layout
+    }
+
+    // Style 3: SPEEDO_GAUGE (عداد سرعة رقمي)
+    private fun buildSpeedoGauge(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val w = (48 * scale * density).toInt()
+        val h = (44 * scale * density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(w, h)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#0F172A"))
+                setStroke((2.5f * density).toInt(), Color.parseColor(colorHex))
+            }
+            elevation = 6 * density
+        }
+
+        val topBar = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt())
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor(colorHex))
+            }
+        }
+
+        val priceTv = TextView(this).apply {
+            text = "$price"
+            setTextColor(Color.WHITE)
+            textSize = 13.5f * scale
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(0, (2 * density).toInt(), 0, 0)
+        }
+
+        val subTv = TextView(this).apply {
+            text = "عادل"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 8.5f * scale
+            gravity = Gravity.CENTER
+        }
+
+        layout.addView(topBar)
+        layout.addView(priceTv)
+        layout.addView(subTv)
+        return layout
+    }
+
+    // Style 4: MINI_TAG (شارة تسعير مدمجة)
+    private fun buildMiniTag(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val h = (28 * scale * density).toInt()
+        val padH = (8 * density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(padH, 0, padH, 0)
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, h)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6 * density
+                setColor(Color.parseColor(colorHex))
+            }
+            elevation = 6 * density
+        }
+
+        val textTv = TextView(this).apply {
+            text = "$price ج"
+            setTextColor(Color.parseColor("#0F172A"))
+            textSize = 12f * scale
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
+        layout.addView(textTv)
+        return layout
+    }
+
+    // Style 5: CORNER_RIBBON (شريط زاوية أنيق)
+    private fun buildCornerRibbon(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val h = (26 * scale * density).toInt()
+        val padH = (9 * density).toInt()
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(padH, 0, padH, 0)
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, h)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 12 * density
+                setColor(Color.parseColor("#0B132B"))
+                setStroke((1.8f * density).toInt(), Color.parseColor(colorHex))
+            }
+            elevation = 6 * density
+        }
+
+        val textTv = TextView(this).apply {
+            text = "تسعير $price"
+            setTextColor(Color.parseColor(colorHex))
+            textSize = 11f * scale
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
+        layout.addView(textTv)
+        return layout
+    }
+
+    // Style 6: GLOW_DOT (نقطة إشعاع ذكية)
+    private fun buildGlowDot(price: Int, colorHex: String, scale: Float, density: Float): View {
+        val diameter = (46 * scale * density).toInt()
+        val layout = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(diameter, diameter)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#0D1B2A"))
+                setStroke((3.5f * density).toInt(), Color.parseColor(colorHex))
+            }
+            elevation = 8 * density
+        }
+
+        val priceTv = TextView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            text = "$price"
+            setTextColor(Color.WHITE)
+            textSize = 14f * scale
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+
+        layout.addView(priceTv)
+        return layout
+    }
+
+    // =========================================================================
+    // 2. EXPANDED DETAILS POPOVER WITH 1-CLICK ZONE MANAGEMENT
+    // =========================================================================
+    private fun renderExpandedDetailsCard(
+        holder: CardPopupViewHolder,
+        themeColorHex: String,
+        tagLabel: String
+    ) {
+        val density = resources.displayMetrics.density
+        val card = holder.ride
+        val analysis = holder.analysis
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((14 * density).toInt(), (12 * density).toInt(), (14 * density).toInt(), (12 * density).toInt())
+            layoutParams = FrameLayout.LayoutParams(
+                (290 * density).toInt(),
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 16 * density
+                setColor(Color.parseColor("#0A0F1D"))
+                setStroke((2.5f * density).toInt(), Color.parseColor(themeColorHex))
+            }
+            elevation = 12 * density
+        }
 
         // ROW 1: Status Badge & Close Button
         val topRow = LinearLayout(this).apply {
@@ -245,44 +527,45 @@ class FloatingHudService : Service() {
         val tagTv = TextView(this).apply {
             text = tagLabel
             setTextColor(Color.WHITE)
-            textSize = 10.5f
+            textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(12, 4, 12, 4)
-            background = createBadgeBackground(themeColorHex, 8f)
+            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor(themeColorHex))
+            }
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
         val closeBtn = TextView(this).apply {
-            text = "✕"
+            text = "✕ تصغير"
             setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 13f
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(14, 2, 6, 2)
+            setPadding((10 * density).toInt(), (4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
             setOnClickListener {
-                windowManager?.let { wm ->
-                    try {
-                        wm.removeView(container)
-                    } catch (_: Exception) {}
-                }
-                activePopups.remove(card.fingerprint)
+                holder.isExpanded = false
+                renderPopup(holder)
+                windowManager?.updateViewLayout(holder.container, holder.params)
             }
         }
 
         topRow.addView(tagTv)
         topRow.addView(closeBtn)
 
-        // ROW 2: Fair Price (السعر العادل للرحلة) - Bold, prominent telematics font
+        // ROW 2: Fair Price vs Offered Fare
         val fairPriceVal = analysis.recommendedFare.toInt()
         val offeredVal = card.fare.toInt()
         val fairPriceTv = TextView(this).apply {
             text = "السعر العادل: $fairPriceVal ج.م  (عرض الراكب: $offeredVal ج.م)"
             setTextColor(Color.WHITE)
-            textSize = 14f
+            textSize = 13.5f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 6, 0, 2)
+            setPadding(0, (8 * density).toInt(), 0, (2 * density).toInt())
         }
 
-        // ROW 3: Net Profit Margin & Distance Breakdown
+        // ROW 3: Net Profit & Distance Breakdown
         val netProfitVal = String.format("%.1f", analysis.netProfit)
         val profitPerKmVal = String.format("%.1f", analysis.profitPerKm)
         val distText = "${String.format("%.1f", card.totalDistanceKm)} كم (${card.pickupDistanceKm.toInt()} وصول + ${card.tripDistanceKm.toInt()} مشوار)"
@@ -290,21 +573,216 @@ class FloatingHudService : Service() {
         val profitTv = TextView(this).apply {
             text = "صافي الربح: $netProfitVal ج.م ($profitPerKmVal ج/كم) • $distText"
             setTextColor(Color.parseColor(if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444"))
-            textSize = 11.5f
+            textSize = 11f
             typeface = Typeface.DEFAULT
-            setPadding(0, 2, 0, 0)
+            setPadding(0, (2 * density).toInt(), 0, (8 * density).toInt())
         }
 
-        container.addView(topRow)
-        container.addView(fairPriceTv)
-        container.addView(profitTv)
+        root.addView(topRow)
+        root.addView(fairPriceTv)
+        root.addView(profitTv)
+
+        // ROW 4: 1-CLICK ZONE MANAGEMENT (Pick-up & Drop-off addresses)
+        if (card.pickupAddress.isNotBlank()) {
+            root.addView(buildZoneAddressActionRow(card.pickupAddress, "التحرك", holder, density))
+        }
+
+        if (card.dropoffAddress.isNotBlank()) {
+            root.addView(buildZoneAddressActionRow(card.dropoffAddress, "الوصول", holder, density))
+        }
+
+        holder.container.addView(root)
+    }
+
+    private fun buildZoneAddressActionRow(
+        address: String,
+        prefix: String,
+        holder: CardPopupViewHolder,
+        density: Float
+    ): View {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, (4 * density).toInt(), 0, (4 * density).toInt())
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#131D31"))
+            }
+            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+        }
+
+        val addrTv = TextView(this).apply {
+            text = "$prefix: $address"
+            setTextColor(Color.parseColor("#F8FAFC"))
+            textSize = 10.5f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, (4 * density).toInt(), 0, 0)
+            }
+        }
+
+        val favBtn = TextView(this).apply {
+            text = "+ مفضلة"
+            setTextColor(Color.parseColor("#0F172A"))
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6 * density
+                setColor(Color.parseColor("#F59E0B"))
+            }
+            setOnClickListener {
+                val success = InDriveAssistantApp.instance.repository.addFavoriteZone(address)
+                Toast.makeText(
+                    this@FloatingHudService,
+                    if (success) "تمت إضافة '$address' إلى المناطق المفضلة بنجاح" else "المنطقة مسجلة بالفعل",
+                    Toast.LENGTH_SHORT
+                ).show()
+                refreshAnalysis(holder)
+            }
+        }
+
+        val blackBtn = TextView(this).apply {
+            text = "+ سوداء"
+            setTextColor(Color.WHITE)
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins((6 * density).toInt(), 0, 0, 0)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 6 * density
+                setColor(Color.parseColor("#DC2626"))
+            }
+            setOnClickListener {
+                val success = InDriveAssistantApp.instance.repository.addBlacklistZone(address)
+                Toast.makeText(
+                    this@FloatingHudService,
+                    if (success) "تمت إضافة '$address' إلى المناطق السوداء بنجاح" else "المنطقة مسجلة بالفعل",
+                    Toast.LENGTH_SHORT
+                ).show()
+                refreshAnalysis(holder)
+            }
+        }
+
+        btnRow.addView(favBtn)
+        btnRow.addView(blackBtn)
+
+        container.addView(addrTv)
+        container.addView(btnRow)
+        return container
+    }
+
+    private fun refreshAnalysis(holder: CardPopupViewHolder) {
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        holder.analysis = FareCalculatorEngine.analyze(
+            pickupDistanceKm = holder.ride.pickupDistanceKm,
+            tripDistanceKm = holder.ride.tripDistanceKm,
+            estimatedMinutes = ((holder.ride.totalDistanceKm) * 2.3).toInt(),
+            offeredFare = holder.ride.fare,
+            settings = settings,
+            pickupAddress = holder.ride.pickupAddress,
+            dropoffAddress = holder.ride.dropoffAddress
+        )
+        renderPopup(holder)
+        windowManager?.updateViewLayout(holder.container, holder.params)
+    }
+
+    // =========================================================================
+    // PULSATING GLOW ANIMATION (Brings Favorite Zones to life)
+    // =========================================================================
+    private fun startPulsatingGlowAnimation(
+        view: View,
+        holder: CardPopupViewHolder,
+        themeColorHex: String
+    ) {
+        val animator = ValueAnimator.ofFloat(0.35f, 1.0f).apply {
+            duration = 850L
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener { va ->
+                val fraction = va.animatedValue as Float
+                val baseColor = Color.parseColor(themeColorHex)
+                val alpha = (fraction * 255).toInt()
+                val animatedColor = Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
+                (view.background as? GradientDrawable)?.setStroke(
+                    (3.5f * resources.displayMetrics.density).toInt(),
+                    animatedColor
+                )
+            }
+        }
+        animator.start()
+        holder.pulseAnimator = animator
+    }
+
+    // Drag touch listener
+    private fun setupDragTouchListener(view: View, holder: CardPopupViewHolder) {
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
+        var isDragging = false
+
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = holder.params.x
+                    initialY = holder.params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - initialTouchX
+                    val dy = event.rawY - initialTouchY
+                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10) {
+                        isDragging = true
+                        holder.params.x = initialX + dx.toInt()
+                        holder.params.y = initialY + dy.toInt()
+                        windowManager?.updateViewLayout(holder.container, holder.params)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging) {
+                        view.performClick()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
     private fun clearAllCardPopups() {
         val wm = windowManager ?: return
         for ((_, holder) in activePopups) {
+            holder.pulseAnimator?.cancel()
             try {
-                wm.removeView(holder.view)
+                wm.removeView(holder.container)
             } catch (_: Exception) {}
         }
         activePopups.clear()
@@ -340,34 +818,6 @@ class FloatingHudService : Service() {
                 vibrator?.vibrate(70)
             }
         } catch (_: Exception) {}
-    }
-
-    // =========================================================================
-    // GRAPHICAL DRAWABLE BUILDERS
-    // =========================================================================
-    private fun createCardBackground(
-        backgroundColorHex: String,
-        borderColorHex: String,
-        strokeWidthDp: Float,
-        cornerRadiusDp: Float
-    ): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor(backgroundColorHex))
-            setStroke(
-                (strokeWidthDp * resources.displayMetrics.density).toInt(),
-                Color.parseColor(borderColorHex)
-            )
-            cornerRadius = cornerRadiusDp * resources.displayMetrics.density
-        }
-    }
-
-    private fun createBadgeBackground(color: String, cornerRadiusDp: Float): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor(color))
-            cornerRadius = cornerRadiusDp * resources.displayMetrics.density
-        }
     }
 
     override fun onDestroy() {

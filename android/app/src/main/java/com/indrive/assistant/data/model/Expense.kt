@@ -24,6 +24,11 @@ data class Expense(
     val oilLifespanKm: Double? = null,        // الزيت نزل بعد كام كم
     val oilCostPerKm: Double? = null,         // amount / oilLifespanKm
 
+    // Spare Parts Specific Fields (قطع الغيار والصيانة الدورية)
+    val partName: String? = null,
+    val partLifespanKm: Double? = null,       // العمر الافتراضي لقطعة الغيار بالكيلومتر
+    val partCostPerKm: Double? = null,        // amount / partLifespanKm
+
     val odometerKm: Double? = null,
     val description: String = ""
 )
