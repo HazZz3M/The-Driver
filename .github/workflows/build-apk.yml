@@ -47,19 +47,13 @@ jobs:
     - name: Install Flutter Dependencies
       run: |
         flutter --version
-        flutter pub get -v
+        flutter pub get
 
     - name: Build Flutter Debug APK
       run: |
-        flutter build apk --debug -v
-        mkdir -p build/app/outputs/flutter-apk
-        if [ -f build/app/outputs/flutter-apk/app-debug.apk ]; then
-          cp build/app/outputs/flutter-apk/app-debug.apk The-Driver.apk
-          cp build/app/outputs/flutter-apk/app-debug.apk inDrive-Assistant.apk
-        elif [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
-          cp android/app/build/outputs/apk/debug/app-debug.apk The-Driver.apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk inDrive-Assistant.apk
-        fi
+        flutter build apk --debug
+        cp build/app/outputs/flutter-apk/app-debug.apk The-Driver.apk
+        cp build/app/outputs/flutter-apk/app-debug.apk inDrive-Assistant.apk
         ls -lh The-Driver.apk
 
     - name: Upload to Litterbox (Direct Mobile Download)
