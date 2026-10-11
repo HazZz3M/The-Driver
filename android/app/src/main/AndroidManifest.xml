@@ -23,6 +23,10 @@
         android:theme="@style/Theme.InDriveAssistant"
         tools:targetApi="34">
 
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
