@@ -22,8 +22,25 @@ android {
         }
     }
 
+    signingConfigs {
+        create("permanent") {
+            storeFile = file("keystore/fixed-release.keystore")
+            storePassword = "thedriver123"
+            keyAlias = "thedriver"
+            keyPassword = "thedriver123"
+        }
+    }
+
     buildTypes {
+        debug {
+            if (file("keystore/fixed-release.keystore").exists()) {
+                signingConfig = signingConfigs.getByName("permanent")
+            }
+        }
         release {
+            if (file("keystore/fixed-release.keystore").exists()) {
+                signingConfig = signingConfigs.getByName("permanent")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
