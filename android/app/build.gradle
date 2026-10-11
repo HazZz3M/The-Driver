@@ -55,15 +55,18 @@ android {
 
     buildTypes {
         debug {
+            shrinkResources false
+            minifyEnabled false
             if (file("keystore/fixed-release.keystore").exists()) {
                 signingConfig signingConfigs.permanent
             }
         }
         release {
+            shrinkResources false
+            minifyEnabled false
             if (file("keystore/fixed-release.keystore").exists()) {
                 signingConfig signingConfigs.permanent
             }
-            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
