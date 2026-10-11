@@ -53,16 +53,7 @@ jobs:
       run: |
         flutter --version
         echo "Building Flutter debug APK..."
-        flutter build apk --debug --verbose --android-skip-build-dependency-validation > flutter_build.log 2>&1 || BUILD_EXIT=$?
-        if [ ! -f build/app/outputs/flutter-apk/app-debug.apk ]; then
-          echo "### Flutter Build Failed (Exit code: ${BUILD_EXIT:-1})" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          tail -n 120 flutter_build.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "=== LAST 120 LINES OF LOG ==="
-          tail -n 120 flutter_build.log
-          exit 1
-        fi
+        flutter build apk --debug --android-skip-build-dependency-validation
         cp build/app/outputs/flutter-apk/app-debug.apk The-Driver.apk
         cp build/app/outputs/flutter-apk/app-debug.apk inDrive-Assistant.apk
         ls -lh The-Driver.apk

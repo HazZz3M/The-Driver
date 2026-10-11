@@ -1,13 +1,13 @@
 package com.indrive.assistant
 
-import io.flutter.app.FlutterApplication
+import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.indrive.assistant.data.local.PreferencesManager
 import com.indrive.assistant.data.repository.AssistantRepository
 
-class InDriveAssistantApp : FlutterApplication() {
+class InDriveAssistantApp : Application() {
 
     lateinit var repository: AssistantRepository
         private set
