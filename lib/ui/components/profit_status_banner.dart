@@ -104,19 +104,26 @@ class ProfitStatusBanner extends StatelessWidget {
           ],
           const SizedBox(height: 12),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildSubMetric(
-                label: "صافي/كم",
-                value: "${analysis.profitPerKm.toStringAsFixed(1)} $currency",
+              Expanded(
+                child: _buildSubMetric(
+                  label: "صافي/كم",
+                  value: "${analysis.profitPerKm.toStringAsFixed(1)} $currency",
+                ),
               ),
-              _buildSubMetric(
-                label: "تكلفة الوقود",
-                value: "${analysis.fuelCost.toStringAsFixed(1)} $currency",
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildSubMetric(
+                  label: "تكلفة الوقود",
+                  value: "${analysis.fuelCost.toStringAsFixed(1)} $currency",
+                ),
               ),
-              _buildSubMetric(
-                label: "عمولة التطبيق",
-                value: "${analysis.commissionCost.toStringAsFixed(1)} $currency",
+              const SizedBox(width: 6),
+              Expanded(
+                child: _buildSubMetric(
+                  label: "عمولة التطبيق",
+                  value: "${analysis.commissionCost.toStringAsFixed(1)} $currency",
+                ),
               ),
             ],
           ),
@@ -127,27 +134,30 @@ class ProfitStatusBanner extends StatelessWidget {
 
   Widget _buildSubMetric({required String label, required String value}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.darkSurfaceVariant.withOpacity(0.85),
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            "$label: ",
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.bold,
-              fontSize: 11.5,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              "$label: ",
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
             ),
-          ),
-        ],
+            Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.bold,
+                fontSize: 11.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

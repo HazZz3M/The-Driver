@@ -271,7 +271,28 @@ class InDriveAccessibilityService : AccessibilityService() {
             val results = mutableListOf<ParsedRideData>()
             val seenBounds = mutableSetOf<String>()
 
-            // 1. Search for offer anchor nodes (Accept buttons, fare tags, offer prompts)
+            // 0. Check if this is a Single Full-Screen Ride Details screen ("Ride request" / "طلب مشوار")
+            val allScreenTexts = mutableListOf<String>()
+            collectNodeTexts(root, allScreenTexts)
+            val normalizedAll = allScreenTexts.map { normalizeArabicDigits(it.trim()) }
+
+            val isFullScreenRide = normalizedAll.any {
+                it.contains("Ride request", ignoreCase = true) ||
+                it.contains("طلب مشوار", ignoreCase = true) ||
+                it.contains("طلب رحلة", ignoreCase = true)
+            } || (normalizedAll.any { it.equals("Skip", ignoreCase = true) || it.equals("تخطي", ignoreCase = true) }
+                    && normalizedAll.any { it.contains("EGP", ignoreCase = true) || it.contains("ج.م") || it.contains("قبول") })
+
+            if (isFullScreenRide) {
+                val rootBounds = android.graphics.Rect()
+                root.getBoundsInScreen(rootBounds)
+                val single = parseRideScreen(allScreenTexts, rootBounds, null)
+                if (single != null) {
+                    return listOf(single)
+                }
+            }
+
+            // 1. Otherwise: Search for individual offer anchor nodes in the feed/list
             val anchorNodes = mutableListOf<AccessibilityNodeInfo>()
             findOfferAnchors(root, anchorNodes)
 
@@ -313,9 +334,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             // Fallback: If no distinct containers isolated, parse whole screen
             if (results.isEmpty()) {
-                val allTexts = mutableListOf<String>()
-                collectNodeTexts(root, allTexts)
-                val single = parseRideScreen(allTexts, null)
+                val single = parseRideScreen(allScreenTexts, null)
                 if (single != null) {
                     results.add(single)
                 }
@@ -477,85 +496,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // 3. Extract Distances (Supports km, meters, Arabic numerals, RTL reversals)
-            val distances = mutableListOf<Double>()
-            for (t in normalizedTexts) {
-                val isCurrency = t.contains("EGP", ignoreCase = true) ||
-                        t.contains("ج.م") || t.contains("جنيه") || t.contains("جم")
-
-                // Pattern 1: standard km ("1.8 km", "~1.8 كم", "1.8كم")
-                val kmRegex1 = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)\b""", RegexOption.IGNORE_CASE)
-                for (m in kmRegex1.findAll(t)) {
-                    val d = m.groupValues[1].replace(',', '.').toDoubleOrNull()
-                    if (d != null && d > 0.05 && !distances.contains(d)) {
-                        distances.add(d)
-                    }
-                }
-
-                // Pattern 2: RTL reversed km ("كم 1.8", "km 1.8")
-                val kmRegex2 = Regex("""\b(?:km|كم)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
-                for (m in kmRegex2.findAll(t)) {
-                    val d = m.groupValues[1].replace(',', '.').toDoubleOrNull()
-                    if (d != null && d > 0.05 && !distances.contains(d)) {
-                        distances.add(d)
-                    }
-                }
-
-                // Pattern 3: Meters (e.g., "600 م", "~600 م", "600 متر", "500m", "م 600")
-                if (!isCurrency) {
-                    val mRegex1 = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)\b""", RegexOption.IGNORE_CASE)
-                    for (m in mRegex1.findAll(t)) {
-                        val meters = m.groupValues[1].toDoubleOrNull()
-                        if (meters != null && meters in 30.0..999.0) {
-                            val km = (Math.round((meters / 1000.0) * 10.0) / 10.0)
-                            if (!distances.contains(km)) {
-                                distances.add(km)
-                            }
-                        }
-                    }
-
-                    val mRegex2 = Regex("""\b(?:متر|م)\s*(?:~)?\s*(\d+)\b""", RegexOption.IGNORE_CASE)
-                    for (m in mRegex2.findAll(t)) {
-                        val meters = m.groupValues[1].toDoubleOrNull()
-                        if (meters != null && meters in 30.0..999.0) {
-                            val km = (Math.round((meters / 1000.0) * 10.0) / 10.0)
-                            if (!distances.contains(km)) {
-                                distances.add(km)
-                            }
-                        }
-                    }
-                }
-            }
-
-            var pickupKm = 1.2
-            var tripKm = 5.0
-
-            if (distances.size >= 2) {
-                if (distances.size >= 3) {
-                    val maxD = distances.maxOrNull() ?: distances[0]
-                    val parts = distances.filter { it != maxD }
-                    if (parts.size >= 2 && Math.abs(maxD - parts.sum()) < 0.4) {
-                        pickupKm = parts[0]
-                        tripKm = parts[1]
-                    } else {
-                        pickupKm = distances[0]
-                        tripKm = distances[1]
-                    }
-                } else {
-                    val d1 = distances[0]
-                    val d2 = distances[1]
-                    if (d1 > 7.0 && d2 <= 5.0) {
-                        pickupKm = d2
-                        tripKm = d1
-                    } else {
-                        pickupKm = d1
-                        tripKm = d2
-                    }
-                }
-            } else if (distances.size == 1) {
-                tripKm = distances[0]
-                pickupKm = 1.0
-            }
+            // 3. Extract Distances (Supports km, meters, Arabic numerals, RTL reversals, Point A / Point B pins)
+            val (pickupKm, tripKm) = extractDistancesFromTexts(normalizedTexts)
 
             // 4. Extract Counter Bids
             val counterBids = mutableListOf<Int>()
@@ -593,6 +535,115 @@ class InDriveAccessibilityService : AccessibilityService() {
                 )
             }
 
+            return null
+        }
+
+        private fun extractDistancesFromTexts(normalizedTexts: List<String>): Pair<Double, Double> {
+            var pickupKm: Double? = null
+            var tripKm: Double? = null
+
+            val allKmList = mutableListOf<Double>()
+            val tildeKmList = mutableListOf<Double>()
+            val regularKmList = mutableListOf<Double>()
+
+            // Strategy 1: Map Marker Pin association (Point A = pickup, Point B = trip)
+            for (i in normalizedTexts.indices) {
+                val t = normalizedTexts[i]
+                val prev = if (i > 0) normalizedTexts[i - 1] else ""
+                val next = if (i < normalizedTexts.size - 1) normalizedTexts[i + 1] else ""
+
+                if (t.equals("A", ignoreCase = true) || prev.equals("A", ignoreCase = true) || next.equals("A", ignoreCase = true)) {
+                    val d = parseDistanceValue(t) ?: parseDistanceValue(prev) ?: parseDistanceValue(next)
+                    if (d != null && d > 0.05) {
+                        pickupKm = d
+                    }
+                }
+
+                if (t.equals("B", ignoreCase = true) || prev.equals("B", ignoreCase = true) || next.equals("B", ignoreCase = true)) {
+                    val d = parseDistanceValue(t) ?: parseDistanceValue(prev) ?: parseDistanceValue(next)
+                    if (d != null && d > 0.05) {
+                        tripKm = d
+                    }
+                }
+            }
+
+            // Strategy 2: Extract all distances across texts
+            for (t in normalizedTexts) {
+                val isCurrency = t.contains("EGP", ignoreCase = true) ||
+                        t.contains("ج.م") || t.contains("جنيه") || t.contains("جم")
+                if (isCurrency) continue
+
+                val hasTilde = t.contains("~")
+                val dist = parseDistanceValue(t)
+                if (dist != null && dist > 0.05) {
+                    if (!allKmList.contains(dist)) {
+                        allKmList.add(dist)
+                    }
+                    if (hasTilde && !tildeKmList.contains(dist)) {
+                        tildeKmList.add(dist)
+                    } else if (!hasTilde && !regularKmList.contains(dist)) {
+                        regularKmList.add(dist)
+                    }
+                }
+            }
+
+            // If Marker check didn't catch pickup, check tilde
+            if (pickupKm == null && tildeKmList.isNotEmpty()) {
+                pickupKm = tildeKmList.first()
+            }
+
+            // If Marker check didn't catch trip, check non-tilde distances
+            if (tripKm == null) {
+                val candidates = regularKmList.filter { it != pickupKm }
+                if (candidates.isNotEmpty()) {
+                    tripKm = candidates.first()
+                }
+            }
+
+            if (pickupKm == null && allKmList.size >= 2) {
+                pickupKm = allKmList[0]
+                tripKm = allKmList[1]
+            } else if (pickupKm == null && allKmList.size == 1) {
+                if (tildeKmList.isNotEmpty()) {
+                    pickupKm = tildeKmList.first()
+                    tripKm = 4.0
+                } else {
+                    tripKm = allKmList[0]
+                    pickupKm = 1.0
+                }
+            } else if (tripKm == null && allKmList.isNotEmpty()) {
+                tripKm = allKmList.firstOrNull { it != pickupKm } ?: 4.0
+            }
+
+            return Pair(pickupKm ?: 1.0, tripKm ?: 4.0)
+        }
+
+        private fun parseDistanceValue(str: String): Double? {
+            // Km formats (e.g., "3,2 km", "3.2 km", "~3,2 كم", "كم 3.2", "2,3 km")
+            val kmMatch1 = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)\b""", RegexOption.IGNORE_CASE).find(str)
+            if (kmMatch1 != null) {
+                return kmMatch1.groupValues[1].replace(',', '.').toDoubleOrNull()
+            }
+            val kmMatch2 = Regex("""\b(?:km|كم)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(str)
+            if (kmMatch2 != null) {
+                return kmMatch2.groupValues[1].replace(',', '.').toDoubleOrNull()
+            }
+
+            // Meter formats (e.g., "600 م", "600 متر", "500m")
+            val mMatch1 = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)\b""", RegexOption.IGNORE_CASE).find(str)
+            if (mMatch1 != null) {
+                val meters = mMatch1.groupValues[1].toDoubleOrNull()
+                if (meters != null && meters in 30.0..999.0) {
+                    return Math.round((meters / 1000.0) * 10.0) / 10.0
+                }
+            }
+            val mMatch2 = Regex("""\b(?:متر|م)\s*(?:~)?\s*(\d+)""", RegexOption.IGNORE_CASE).find(str)
+            if (mMatch2 != null) {
+                val meters = mMatch2.groupValues[1].toDoubleOrNull()
+                if (meters != null && meters in 30.0..999.0) {
+                    return Math.round((meters / 1000.0) * 10.0) / 10.0
+                }
+            }
             return null
         }
     }

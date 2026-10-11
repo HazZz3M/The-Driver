@@ -71,17 +71,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.7.0
-        name: "The Driver v1.7.0 - Precision Distance Extraction & 60fps Performance Overhaul"
+        tag_name: v1.8.0
+        name: "The Driver v1.8.0 - Full-Screen Map Marker Precision, Outside-Dismiss & Single-Expanded Overlay"
         body: |
-          ### The Driver v1.7.0 - Precision Distance & Performance Release
-          - **Dynamic Ride Distance Parser**: Solved the fixed 3.2 km / (1 وصول + 1 مشوار) bug! Now dynamically extracts true individual pickup and trip distances across all Arabic & English formats.
-          - **Meters & RTL Reversal Support**: Accurately parses meter distances (e.g., `600 م` -> `0.6 كم`), Arabic decimal separators (`٫`), and RTL unit inversion (`كم 3.5`).
-          - **Spatial Card Container Isolation**: Prevents Compose LazyColumn root container leaking text between stacked order cards.
-          - **Fractional HUD Precision**: Displays exact fractional kilometer breakdowns (`1.8 وصول + 7.4 مشوار`) instead of truncated integers.
-          - **60fps Lag-Free Navigation**: Added in-memory cached database layer, eliminating synchronous JSON deserialization on UI thread during page changes and slider drags.
-          - **Lazy Tab Instantiation**: Tabs are loaded on-demand, drastically reducing initial memory footprint and stutter.
-          - **Executive Obsidian & Emerald Cockpit Theme**: Shifted away from harsh neon to an ergonomic, anti-glare automotive palette (`#0B0F19` Obsidian with `#10B981` Precision Emerald).
+          ### The Driver v1.8.0 - Full-Screen Map Marker & Ergonomic UX Release
+          - **Full-Screen Ride Details Scanner**: Specifically identifies full-screen "Ride request" screens and extracts Point A marker distance (pickup) and Point B marker distance (trip) directly from the map pins and bottom sheet.
+          - **Dismiss on Outside Tap**: Tapping anywhere outside the expanded details popup instantly collapses it back into a floating badge.
+          - **Strict Single-Expanded Policy**: Only one popup hint can be opened at a time. Opening another popup automatically closes the previous one.
+          - **Vertical Text & Split Elimination**: Converted compact circular badges and speedo gauges to single-line horizontal text (e.g., `75 ج` instead of vertical stacking).
+          - **Side-by-Side Fare Comparison**: Restructured the expanded card with spacious side-by-side metric boxes and dedicated profit and distance rows to prevent word wrapping.
         files: |
           The-Driver.apk
           inDrive-Assistant.apk

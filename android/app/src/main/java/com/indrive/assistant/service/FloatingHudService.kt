@@ -191,6 +191,46 @@ class FloatingHudService : Service() {
         } catch (_: Exception) {}
     }
 
+    fun collapseAllPopups() {
+        val wm = windowManager ?: return
+        for (holder in activePopups.values) {
+            if (holder.isExpanded) {
+                holder.isExpanded = false
+                holder.params.width = WindowManager.LayoutParams.WRAP_CONTENT
+                holder.params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                holder.params.x = 20
+                holder.params.y = calculatePopupY(holder.ride)
+                holder.params.gravity = Gravity.TOP or Gravity.START
+                renderPopup(holder)
+                try {
+                    wm.updateViewLayout(holder.container, holder.params)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun togglePopupExpanded(holder: CardPopupViewHolder) {
+        val wm = windowManager ?: return
+        if (holder.isExpanded) {
+            collapseAllPopups()
+        } else {
+            // Collapse any other open popups first so only ONE is open!
+            collapseAllPopups()
+
+            // Expand this one and cover screen to intercept outside clicks
+            holder.isExpanded = true
+            holder.params.width = WindowManager.LayoutParams.MATCH_PARENT
+            holder.params.height = WindowManager.LayoutParams.MATCH_PARENT
+            holder.params.x = 0
+            holder.params.y = 0
+            holder.params.gravity = Gravity.TOP or Gravity.START
+            renderPopup(holder)
+            try {
+                wm.updateViewLayout(holder.container, holder.params)
+            } catch (_: Exception) {}
+        }
+    }
+
     // =========================================================================
     // DYNAMIC POPUP RENDERING (COMPACT VS EXPANDED)
     // =========================================================================
@@ -262,11 +302,9 @@ class FloatingHudService : Service() {
             else -> buildCompactCircle(fairPrice, themeColorHex, sizeScale, density)
         }
 
-        // Tap to expand into quick details popover
+        // Tap to toggle expanded details popover
         badgeView.setOnClickListener {
-            holder.isExpanded = true
-            renderPopup(holder)
-            windowManager?.updateViewLayout(holder.container, holder.params)
+            togglePopupExpanded(holder)
         }
 
         // Dragging gesture support for fine-tuning position
@@ -294,7 +332,7 @@ class FloatingHudService : Service() {
                 }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(if (isFav) Color.parseColor("#FFB800") else Color.parseColor("#00F59B"))
+                    setColor(if (isFav) Color.parseColor("#FFB800") else Color.parseColor("#10B981"))
                     setStroke((1 * density).toInt(), Color.parseColor("#070B14"))
                 }
             }
@@ -304,37 +342,30 @@ class FloatingHudService : Service() {
 
     // Style 1: COMPACT_CIRCLE (قرص دائري مصغر)
     private fun buildCompactCircle(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val diameter = (48 * scale * density).toInt()
+        val diameter = (50 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(diameter, diameter)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#0A0F1D"))
-                setStroke((3 * density).toInt(), Color.parseColor(colorHex))
+                setColor(Color.parseColor("#0B0F19"))
+                setStroke((2.5f * density).toInt(), Color.parseColor(colorHex))
             }
             elevation = 6 * density
         }
 
         val priceTv = TextView(this).apply {
-            text = "$price"
+            text = "$price ج"
             setTextColor(Color.WHITE)
-            textSize = 14f * scale
+            textSize = 12f * scale
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }
-
-        val currencyTv = TextView(this).apply {
-            text = "ج"
-            setTextColor(Color.parseColor(colorHex))
-            textSize = 9f * scale
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+            setSingleLine(true)
+            includeFontPadding = false
         }
 
         layout.addView(priceTv)
-        layout.addView(currencyTv)
         return layout
     }
 
@@ -350,7 +381,7 @@ class FloatingHudService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 16 * density
-                setColor(Color.parseColor("#0A0F1D"))
+                setColor(Color.parseColor("#0B0F19"))
                 setStroke((2.2f * density).toInt(), Color.parseColor(colorHex))
             }
             elevation = 6 * density
@@ -372,6 +403,7 @@ class FloatingHudService : Service() {
             setTextColor(Color.WHITE)
             textSize = 11.5f * scale
             typeface = Typeface.DEFAULT_BOLD
+            setSingleLine(true)
         }
 
         layout.addView(dot)
@@ -381,7 +413,7 @@ class FloatingHudService : Service() {
 
     // Style 3: SPEEDO_GAUGE (عداد سرعة رقمي)
     private fun buildSpeedoGauge(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val w = (48 * scale * density).toInt()
+        val w = (54 * scale * density).toInt()
         val h = (44 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -404,11 +436,12 @@ class FloatingHudService : Service() {
         }
 
         val priceTv = TextView(this).apply {
-            text = "$price"
+            text = "$price ج"
             setTextColor(Color.WHITE)
-            textSize = 13.5f * scale
+            textSize = 12f * scale
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
+            setSingleLine(true)
             setPadding(0, (2 * density).toInt(), 0, 0)
         }
 
@@ -417,6 +450,7 @@ class FloatingHudService : Service() {
             setTextColor(Color.parseColor("#94A3B8"))
             textSize = 8.5f * scale
             gravity = Gravity.CENTER
+            setSingleLine(true)
         }
 
         layout.addView(topBar)
@@ -517,23 +551,44 @@ class FloatingHudService : Service() {
         tagLabel: String
     ) {
         val density = resources.displayMetrics.density
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
         val card = holder.ride
         val analysis = holder.analysis
 
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding((14 * density).toInt(), (12 * density).toInt(), (14 * density).toInt(), (12 * density).toInt())
+        // 1. Full-screen transparent backdrop that captures clicks outside the card to dismiss!
+        val backdrop = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(
-                (290 * density).toInt(),
-                FrameLayout.LayoutParams.WRAP_CONTENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
+            setBackgroundColor(Color.parseColor("#33000000")) // Gentle dark scrim
+            setOnClickListener {
+                collapseAllPopups()
+            }
+        }
+
+        // 2. The Card itself
+        val cardWidth = (screenWidth * 0.92f).toInt().coerceAtMost((380 * density).toInt()).coerceAtLeast((310 * density).toInt())
+        val targetY = (calculatePopupY(card)).coerceIn((50 * density).toInt(), screenHeight - (430 * density).toInt())
+
+        val cardRoot = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
+            layoutParams = FrameLayout.LayoutParams(cardWidth, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = targetY
+            }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 16 * density
-                setColor(Color.parseColor("#0A0F1D"))
-                setStroke((2.5f * density).toInt(), Color.parseColor(themeColorHex))
+                cornerRadius = 18 * density
+                setColor(Color.parseColor("#0B0F19")) // Deep Obsidian
+                setStroke((2f * density).toInt(), Color.parseColor(themeColorHex))
             }
-            elevation = 12 * density
+            elevation = 16 * density
+            // Prevent clicks inside card from bubbling up to backdrop
+            setOnClickListener { /* Consume click */ }
         }
 
         // ROW 1: Status Badge & Close Button
@@ -557,6 +612,8 @@ class FloatingHudService : Service() {
                 cornerRadius = 8 * density
                 setColor(Color.parseColor(themeColorHex))
             }
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
@@ -567,56 +624,167 @@ class FloatingHudService : Service() {
             typeface = Typeface.DEFAULT_BOLD
             setPadding((10 * density).toInt(), (4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
             setOnClickListener {
-                holder.isExpanded = false
-                renderPopup(holder)
-                windowManager?.updateViewLayout(holder.container, holder.params)
+                collapseAllPopups()
             }
         }
 
         topRow.addView(tagTv)
         topRow.addView(closeBtn)
 
-        // ROW 2: Fair Price vs Offered Fare
-        val fairPriceVal = analysis.recommendedFare.toInt()
-        val offeredVal = card.fare.toInt()
-        val fairPriceTv = TextView(this).apply {
-            text = "السعر العادل: $fairPriceVal ج.م  (عرض الراكب: $offeredVal ج.م)"
-            setTextColor(Color.WHITE)
-            textSize = 13.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, (8 * density).toInt(), 0, (2 * density).toInt())
+        // ROW 2: Side-by-side Fare Comparison Grid
+        val fareRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, (10 * density).toInt(), 0, 0)
+            }
         }
 
-        // ROW 3: Net Profit & Distance Breakdown
+        val fairPriceVal = analysis.recommendedFare.toInt()
+        val offeredVal = card.fare.toInt()
+
+        // Box 1: السعر العادل
+        val fairBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#131B2E"))
+                setStroke((1 * density).toInt(), Color.parseColor("#23324E"))
+            }
+        }
+        val fairLabel = TextView(this).apply {
+            text = "السعر العادل"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        }
+        val fairValue = TextView(this).apply {
+            text = "$fairPriceVal ج.م"
+            setTextColor(Color.parseColor("#10B981"))
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        }
+        fairBox.addView(fairLabel)
+        fairBox.addView(fairValue)
+
+        // Box 2: عرض الراكب
+        val offerBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = (8 * density).toInt()
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#131B2E"))
+                setStroke((1 * density).toInt(), Color.parseColor("#23324E"))
+            }
+        }
+        val offerLabel = TextView(this).apply {
+            text = "عرض الراكب"
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        }
+        val offerValue = TextView(this).apply {
+            text = "$offeredVal ج.م"
+            setTextColor(Color.WHITE)
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        }
+        offerBox.addView(offerLabel)
+        offerBox.addView(offerValue)
+
+        fareRow.addView(fairBox)
+        fareRow.addView(offerBox)
+
+        // ROW 3: Net Profit Metric Box
         val netProfitVal = String.format(java.util.Locale.US, "%.1f", analysis.netProfit)
         val profitPerKmVal = String.format(java.util.Locale.US, "%.1f", analysis.profitPerKm)
+        val profitContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, (6 * density).toInt(), 0, 0)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#131B2E"))
+            }
+        }
+        val profitTv = TextView(this).apply {
+            text = "صافي الربح: $netProfitVal ج.م  ($profitPerKmVal ج/كم)"
+            setTextColor(Color.parseColor(if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setSingleLine(true)
+        }
+        profitContainer.addView(profitTv)
+
+        // ROW 4: Distance Breakdown Metric Box
         val pickupFmt = String.format(java.util.Locale.US, "%.1f", card.pickupDistanceKm)
         val tripFmt = String.format(java.util.Locale.US, "%.1f", card.tripDistanceKm)
         val totalFmt = String.format(java.util.Locale.US, "%.1f", card.totalDistanceKm)
-        val distText = "$totalFmt كم ($pickupFmt وصول + $tripFmt مشوار)"
-
-        val profitTv = TextView(this).apply {
-            text = "صافي الربح: $netProfitVal ج.م ($profitPerKmVal ج/كم) • $distText"
-            setTextColor(Color.parseColor(if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444"))
-            textSize = 11f
-            typeface = Typeface.DEFAULT
-            setPadding(0, (2 * density).toInt(), 0, (8 * density).toInt())
+        val distContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, (6 * density).toInt(), 0, 0)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#131B2E"))
+            }
         }
+        val distTv = TextView(this).apply {
+            text = "المسافة: $totalFmt كم  ($pickupFmt وصول + $tripFmt مشوار)"
+            setTextColor(Color.parseColor("#F8FAFC"))
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT
+            setSingleLine(true)
+        }
+        distContainer.addView(distTv)
 
-        root.addView(topRow)
-        root.addView(fairPriceTv)
-        root.addView(profitTv)
+        cardRoot.addView(topRow)
+        cardRoot.addView(fareRow)
+        cardRoot.addView(profitContainer)
+        cardRoot.addView(distContainer)
 
-        // ROW 4: 1-CLICK ZONE MANAGEMENT (Pick-up & Drop-off addresses)
+        // ROW 5 & 6: 1-CLICK ZONE MANAGEMENT (Pick-up & Drop-off addresses)
         if (card.pickupAddress.isNotBlank()) {
-            root.addView(buildZoneAddressActionRow(card.pickupAddress, "التحرك", holder, density))
+            cardRoot.addView(buildZoneAddressActionRow(card.pickupAddress, "التحرك", holder, density))
         }
 
         if (card.dropoffAddress.isNotBlank()) {
-            root.addView(buildZoneAddressActionRow(card.dropoffAddress, "الوصول", holder, density))
+            cardRoot.addView(buildZoneAddressActionRow(card.dropoffAddress, "الوصول", holder, density))
         }
 
-        holder.container.addView(root)
+        backdrop.addView(cardRoot)
+        holder.container.addView(backdrop)
     }
 
     private fun buildZoneAddressActionRow(
