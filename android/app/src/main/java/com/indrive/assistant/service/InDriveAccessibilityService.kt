@@ -271,28 +271,15 @@ class InDriveAccessibilityService : AccessibilityService() {
             val results = mutableListOf<ParsedRideData>()
             val seenBounds = mutableSetOf<String>()
 
-            // 0. Check if this is a Single Full-Screen Ride Details screen ("Ride request" / "طلب مشوار")
+            // 1. Collect screen texts for contextual fallback & map pins
             val allScreenTexts = mutableListOf<String>()
             collectNodeTexts(root, allScreenTexts)
             val normalizedAll = allScreenTexts.map { normalizeArabicDigits(it.trim()) }
 
-            val isFullScreenRide = normalizedAll.any {
-                it.contains("Ride request", ignoreCase = true) ||
-                it.contains("طلب مشوار", ignoreCase = true) ||
-                it.contains("طلب رحلة", ignoreCase = true)
-            } || (normalizedAll.any { it.equals("Skip", ignoreCase = true) || it.equals("تخطي", ignoreCase = true) }
-                    && normalizedAll.any { it.contains("EGP", ignoreCase = true) || it.contains("ج.م") || it.contains("قبول") })
+            // Check if this screen is an Incoming Offer Modal (has Skip / تخطي)
+            val hasSkipButton = normalizedAll.any { it.equals("Skip", ignoreCase = true) || it.equals("تخطي", ignoreCase = true) }
 
-            if (isFullScreenRide) {
-                val rootBounds = android.graphics.Rect()
-                root.getBoundsInScreen(rootBounds)
-                val single = parseRideScreen(allScreenTexts, rootBounds, null)
-                if (single != null) {
-                    return listOf(single)
-                }
-            }
-
-            // 1. Otherwise: Search for individual offer anchor nodes in the feed/list
+            // 2. Search for individual offer anchor nodes across the screen
             val anchorNodes = mutableListOf<AccessibilityNodeInfo>()
             findOfferAnchors(root, anchorNodes)
 
@@ -311,9 +298,20 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val bounds = android.graphics.Rect()
                 cardNode.getBoundsInScreen(bounds)
 
+                // Ensure bounds are tied to the card item, not the entire root window
+                val cardBounds = if (bounds.top > 60 && bounds.height() in 100..1400) {
+                    bounds
+                } else if (anchorBounds.top > 60) {
+                    // Fallback using anchor position so HUD never jumps to 0,0
+                    val top = (anchorBounds.top - 180).coerceAtLeast(80)
+                    android.graphics.Rect(anchorBounds.left, top, anchorBounds.right, anchorBounds.bottom)
+                } else {
+                    bounds
+                }
+
                 // Deduplicate by card vertical bounds or anchor position
-                val boundsKey = if (bounds.height() in 120..1300) {
-                    "${bounds.left}_${bounds.top}_${bounds.bottom}"
+                val boundsKey = if (cardBounds.height() in 100..1400) {
+                    "${cardBounds.left}_${cardBounds.top}_${cardBounds.bottom}"
                 } else {
                     "${anchorBounds.left}_${anchorBounds.top}_${anchorBounds.bottom}"
                 }
@@ -326,7 +324,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val texts = mutableListOf<String>()
                 collectNodeTexts(cardNode, texts)
 
-                val parsed = parseRideScreen(texts, bounds, anchorBounds)
+                val parsed = parseRideScreen(texts, cardBounds, anchorBounds, if (hasSkipButton) allScreenTexts else null)
                 if (parsed != null) {
                     results.add(parsed)
                 }
@@ -334,7 +332,14 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             // Fallback: If no distinct containers isolated, parse whole screen
             if (results.isEmpty()) {
-                val single = parseRideScreen(allScreenTexts, null)
+                val rootBounds = android.graphics.Rect()
+                root.getBoundsInScreen(rootBounds)
+                val fallbackBounds = if (hasSkipButton) {
+                    android.graphics.Rect(0, (rootBounds.height() * 0.45).toInt(), rootBounds.width(), rootBounds.height())
+                } else {
+                    android.graphics.Rect(0, 320, rootBounds.width(), rootBounds.height())
+                }
+                val single = parseRideScreen(allScreenTexts, fallbackBounds, null, allScreenTexts)
                 if (single != null) {
                     results.add(single)
                 }
@@ -348,13 +353,19 @@ class InDriveAccessibilityService : AccessibilityService() {
             val text = node.text?.toString() ?: ""
             val desc = node.contentDescription?.toString() ?: ""
             val combined = "$text $desc"
+            val norm = normalizeArabicDigits(combined.trim())
 
-            val isAnchor = combined.contains("Accept for", ignoreCase = true) ||
-                    combined.contains("قبول مقابل", ignoreCase = true) ||
-                    combined.contains("Offer your fare", ignoreCase = true) ||
-                    combined.contains("اقترح سعرك", ignoreCase = true) ||
-                    Regex("""^(?:EGP|ج\.?م|جنيه)\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(combined) ||
-                    Regex("""^\d+\s*(?:EGP|ج\.?م|جنيه)""", RegexOption.IGNORE_CASE).containsMatchIn(combined)
+            val isAnchor = norm.contains("Accept for", ignoreCase = true) ||
+                    norm.contains("قبول مقابل", ignoreCase = true) ||
+                    norm.contains("Offer your fare", ignoreCase = true) ||
+                    norm.contains("اقترح سعرك", ignoreCase = true) ||
+                    norm.contains("تقديم عرض", ignoreCase = true) ||
+                    norm.contains("قدم عرض", ignoreCase = true) ||
+                    norm.equals("Skip", ignoreCase = true) ||
+                    norm.equals("تخطي", ignoreCase = true) ||
+                    Regex("""(?:EGP|ج\.?م|جنيه|جم)\s*\d+""", RegexOption.IGNORE_CASE).containsMatchIn(norm) ||
+                    Regex("""\d+\s*(?:EGP|ج\.?م|جنيه|جم)""", RegexOption.IGNORE_CASE).containsMatchIn(norm) ||
+                    Regex("""~\s*\d+(?:[.,]\d+)?\s*(?:km|كم|متر|م)""", RegexOption.IGNORE_CASE).containsMatchIn(norm)
 
             if (isAnchor) {
                 anchors.add(node)
@@ -432,31 +443,23 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
 
         fun parseAllRidesFromScreen(texts: List<String>): List<ParsedRideData> {
-            val single = parseRideScreen(texts, null)
+            val single = parseRideScreen(texts, null, null, texts)
             return if (single != null) listOf(single) else emptyList()
         }
 
         fun parseRideScreen(
             texts: List<String>,
             bounds: android.graphics.Rect? = null,
-            anchorBounds: android.graphics.Rect? = null
+            anchorBounds: android.graphics.Rect? = null,
+            allScreenTexts: List<String>? = null
         ): ParsedRideData? {
             if (texts.isEmpty()) return null
 
             val normalizedTexts = texts.map { normalizeArabicDigits(it.trim()) }
+            val normalizedAll = allScreenTexts?.map { normalizeArabicDigits(it.trim()) } ?: normalizedTexts
 
-            // Verify if this is an inDrive ride request screen
-            val hasRideKeywords = normalizedTexts.any {
-                it.contains("Ride request", ignoreCase = true) ||
-                it.contains("طلب مشوار", ignoreCase = true) ||
-                it.contains("Accept for", ignoreCase = true) ||
-                it.contains("قبول مقابل", ignoreCase = true) ||
-                it.contains("Fair price", ignoreCase = true) ||
-                it.contains("Offer your fare", ignoreCase = true) ||
-                it.contains("اقترح سعرك", ignoreCase = true)
-            }
-
-            if (!hasRideKeywords) return null
+            val isModal = normalizedTexts.any { it.equals("Skip", ignoreCase = true) || it.equals("تخطي", ignoreCase = true) } ||
+                    normalizedAll.any { it.equals("Skip", ignoreCase = true) || it.equals("تخطي", ignoreCase = true) }
 
             // 1. Extract Passenger Name & Rating
             var passengerName = "عميل إن درايف"
@@ -487,8 +490,19 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             if (fare == null) {
                 for (t in normalizedTexts) {
-                    val fareMatch = Regex("""^(?:EGP|ج\.?م|جنيه)\s*(\d+(?:[.,]\d+)?)$""", RegexOption.IGNORE_CASE).find(t)
-                        ?: Regex("""^(\d+(?:[.,]\d+)?)\s*(?:EGP|ج\.?م|جنيه)$""", RegexOption.IGNORE_CASE).find(t)
+                    val fareMatch = Regex("""(?:EGP|ج\.?م|جنيه|جم)\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(t)
+                        ?: Regex("""(\d+(?:[.,]\d+)?)\s*(?:EGP|ج\.?م|جنيه|جم)""", RegexOption.IGNORE_CASE).find(t)
+                    if (fareMatch != null) {
+                        fare = fareMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
+                        break
+                    }
+                }
+            }
+
+            if (fare == null && isModal) {
+                for (t in normalizedAll) {
+                    val fareMatch = Regex("""(?:EGP|ج\.?م|جنيه|جم)\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(t)
+                        ?: Regex("""(\d+(?:[.,]\d+)?)\s*(?:EGP|ج\.?م|جنيه|جم)""", RegexOption.IGNORE_CASE).find(t)
                     if (fareMatch != null) {
                         fare = fareMatch.groupValues[1].replace(',', '.').toDoubleOrNull()
                         break
@@ -497,11 +511,13 @@ class InDriveAccessibilityService : AccessibilityService() {
             }
 
             // 3. Extract Distances (Supports km, meters, Arabic numerals, RTL reversals, Point A / Point B pins)
-            val (pickupKm, tripKm) = extractDistancesFromTexts(normalizedTexts)
+            val textsForDistances = if (isModal) normalizedAll else normalizedTexts
+            val (pickupKm, tripKm) = extractDistancesFromTexts(textsForDistances)
 
             // 4. Extract Counter Bids
             val counterBids = mutableListOf<Int>()
-            for (t in normalizedTexts) {
+            val textsForBids = if (isModal) normalizedAll else normalizedTexts
+            for (t in textsForBids) {
                 val bidMatch = Regex("""^EGP\s*(\d+)$""", RegexOption.IGNORE_CASE).find(t)
                 if (bidMatch != null) {
                     val b = bidMatch.groupValues[1].toIntOrNull()
@@ -542,109 +558,113 @@ class InDriveAccessibilityService : AccessibilityService() {
             var pickupKm: Double? = null
             var tripKm: Double? = null
 
-            val allKmList = mutableListOf<Double>()
-            val tildeKmList = mutableListOf<Double>()
-            val regularKmList = mutableListOf<Double>()
+            val allDistances = mutableListOf<Double>()
+            val tildeDistances = mutableListOf<Double>()
+            val nonTildeDistances = mutableListOf<Double>()
 
-            // Strategy 1: Map Marker Pin association (Point A = pickup, Point B = trip)
+            // Strategy 1: Map Marker association (A = pickup, B = trip)
             for (i in normalizedTexts.indices) {
                 val t = normalizedTexts[i]
                 val prev = if (i > 0) normalizedTexts[i - 1] else ""
                 val next = if (i < normalizedTexts.size - 1) normalizedTexts[i + 1] else ""
 
-                if (t.equals("A", ignoreCase = true) || prev.equals("A", ignoreCase = true) || next.equals("A", ignoreCase = true)) {
-                    val d = parseDistanceValue(t) ?: parseDistanceValue(prev) ?: parseDistanceValue(next)
-                    if (d != null && d > 0.05) {
-                        pickupKm = d
-                    }
-                }
+                val isNearA = t.equals("A", ignoreCase = true) || prev.equals("A", ignoreCase = true) || next.equals("A", ignoreCase = true)
+                val isNearB = t.equals("B", ignoreCase = true) || prev.equals("B", ignoreCase = true) || next.equals("B", ignoreCase = true)
 
-                if (t.equals("B", ignoreCase = true) || prev.equals("B", ignoreCase = true) || next.equals("B", ignoreCase = true)) {
-                    val d = parseDistanceValue(t) ?: parseDistanceValue(prev) ?: parseDistanceValue(next)
-                    if (d != null && d > 0.05) {
-                        tripKm = d
-                    }
+                val dists = extractAllDistancesFromString(t) + extractAllDistancesFromString(prev) + extractAllDistancesFromString(next)
+                if (isNearA && dists.isNotEmpty()) {
+                    if (pickupKm == null) pickupKm = dists.first()
+                }
+                if (isNearB && dists.isNotEmpty()) {
+                    if (tripKm == null) tripKm = dists.first()
                 }
             }
 
-            // Strategy 2: Extract all distances across texts
+            // Strategy 2: Collect all distances across texts
             for (t in normalizedTexts) {
                 val isCurrency = t.contains("EGP", ignoreCase = true) ||
                         t.contains("ج.م") || t.contains("جنيه") || t.contains("جم")
                 if (isCurrency) continue
 
                 val hasTilde = t.contains("~")
-                val dist = parseDistanceValue(t)
-                if (dist != null && dist > 0.05) {
-                    if (!allKmList.contains(dist)) {
-                        allKmList.add(dist)
+                val found = extractAllDistancesFromString(t)
+                for (d in found) {
+                    if (!allDistances.contains(d)) {
+                        allDistances.add(d)
                     }
-                    if (hasTilde && !tildeKmList.contains(dist)) {
-                        tildeKmList.add(dist)
-                    } else if (!hasTilde && !regularKmList.contains(dist)) {
-                        regularKmList.add(dist)
+                    if (hasTilde && !tildeDistances.contains(d)) {
+                        tildeDistances.add(d)
+                    } else if (!hasTilde && !nonTildeDistances.contains(d)) {
+                        nonTildeDistances.add(d)
                     }
                 }
             }
 
-            // If Marker check didn't catch pickup, check tilde
-            if (pickupKm == null && tildeKmList.isNotEmpty()) {
-                pickupKm = tildeKmList.first()
+            // Pickup indicated by tilde (~3.2 km or ~800 m)
+            if (pickupKm == null && tildeDistances.isNotEmpty()) {
+                pickupKm = tildeDistances.first()
             }
 
-            // If Marker check didn't catch trip, check non-tilde distances
+            // Trip is non-tilde distance
             if (tripKm == null) {
-                val candidates = regularKmList.filter { it != pickupKm }
+                val candidates = nonTildeDistances.filter { it != pickupKm }
                 if (candidates.isNotEmpty()) {
                     tripKm = candidates.first()
                 }
             }
 
-            if (pickupKm == null && allKmList.size >= 2) {
-                pickupKm = allKmList[0]
-                tripKm = allKmList[1]
-            } else if (pickupKm == null && allKmList.size == 1) {
-                if (tildeKmList.isNotEmpty()) {
-                    pickupKm = tildeKmList.first()
-                    tripKm = 4.0
-                } else {
-                    tripKm = allKmList[0]
-                    pickupKm = 1.0
-                }
-            } else if (tripKm == null && allKmList.isNotEmpty()) {
-                tripKm = allKmList.firstOrNull { it != pickupKm } ?: 4.0
+            // Fallback resolution
+            if (pickupKm == null && allDistances.size >= 2) {
+                pickupKm = allDistances[0]
+                tripKm = allDistances[1]
+            } else if (pickupKm != null && tripKm == null && allDistances.size >= 2) {
+                tripKm = allDistances.firstOrNull { it != pickupKm } ?: 3.5
+            } else if (pickupKm == null && allDistances.size == 1) {
+                pickupKm = allDistances[0]
+                tripKm = 3.5
+            } else if (tripKm == null && allDistances.size == 1) {
+                tripKm = allDistances[0]
+                pickupKm = 1.0
             }
 
             return Pair(pickupKm ?: 1.0, tripKm ?: 4.0)
         }
 
-        private fun parseDistanceValue(str: String): Double? {
-            // Km formats (e.g., "3,2 km", "3.2 km", "~3,2 كم", "كم 3.2", "2,3 km")
-            val kmMatch1 = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم)\b""", RegexOption.IGNORE_CASE).find(str)
-            if (kmMatch1 != null) {
-                return kmMatch1.groupValues[1].replace(',', '.').toDoubleOrNull()
-            }
-            val kmMatch2 = Regex("""\b(?:km|كم)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE).find(str)
-            if (kmMatch2 != null) {
-                return kmMatch2.groupValues[1].replace(',', '.').toDoubleOrNull()
+        private fun extractAllDistancesFromString(str: String): List<Double> {
+            val list = mutableListOf<Double>()
+            if (str.isEmpty()) return list
+
+            // 1. Matches like 3.2 km, 3,2 كم, ~3.2 km, 11 min 2,3 km
+            val kmRegex = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم|ك\.?م)""", RegexOption.IGNORE_CASE)
+            kmRegex.findAll(str).forEach { match ->
+                val v = match.groupValues[1].replace(',', '.').toDoubleOrNull()
+                if (v != null && v in 0.05..150.0 && !list.contains(v)) {
+                    list.add(v)
+                }
             }
 
-            // Meter formats (e.g., "600 م", "600 متر", "500m")
-            val mMatch1 = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)\b""", RegexOption.IGNORE_CASE).find(str)
-            if (mMatch1 != null) {
-                val meters = mMatch1.groupValues[1].toDoubleOrNull()
-                if (meters != null && meters in 30.0..999.0) {
-                    return Math.round((meters / 1000.0) * 10.0) / 10.0
+            // 2. Prefix format: km 3.2, كم 3.2
+            val prefixKmRegex = Regex("""(?:km|كم|ك\.?م)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+            prefixKmRegex.findAll(str).forEach { match ->
+                val v = match.groupValues[1].replace(',', '.').toDoubleOrNull()
+                if (v != null && v in 0.05..150.0 && !list.contains(v)) {
+                    list.add(v)
                 }
             }
-            val mMatch2 = Regex("""\b(?:متر|م)\s*(?:~)?\s*(\d+)""", RegexOption.IGNORE_CASE).find(str)
-            if (mMatch2 != null) {
-                val meters = mMatch2.groupValues[1].toDoubleOrNull()
+
+            // 3. Meters: 600 م, 600 متر, ~800m
+            val mRegex = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)(?:\s|$|[^\p{L}\d])""", RegexOption.IGNORE_CASE)
+            mRegex.findAll(str).forEach { match ->
+                val meters = match.groupValues[1].toDoubleOrNull()
                 if (meters != null && meters in 30.0..999.0) {
-                    return Math.round((meters / 1000.0) * 10.0) / 10.0
+                    val km = Math.round((meters / 1000.0) * 10.0) / 10.0
+                    if (!list.contains(km)) {
+                        list.add(km)
+                    }
                 }
             }
-            return null
+
+            return list
         }
     }
 }

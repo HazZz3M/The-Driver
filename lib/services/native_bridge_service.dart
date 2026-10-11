@@ -66,4 +66,14 @@ class NativeBridgeService {
       return false;
     }
   }
+
+  /// Triggers the native Android package installer for a downloaded APK file
+  static Future<bool> installApk(String filePath) async {
+    try {
+      final bool? result = await _channel.invokeMethod<bool>('installApk', {'filePath': filePath});
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

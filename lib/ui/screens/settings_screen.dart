@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/driver_settings.dart';
 import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../services/native_bridge_service.dart';
 import '../../utils/update_manager.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -16,6 +17,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   bool _isCheckingUpdate = false;
+  bool _isDownloadingApk = false;
+  double _downloadProgress = 0.0;
   UpdateInfo? _updateInfo;
 
   @override
@@ -538,7 +541,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
               ),
               const SizedBox(height: 6),
               const Text(
-                "الإصدار الحالي: v1.5.1 (Build 7) • كود أصلي Flutter",
+                "الإصدار الحالي: ${UpdateManager.currentAppVersion} • كود أصلي Flutter",
                 style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
               ),
               const SizedBox(height: 12),
@@ -555,11 +558,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                       )
                     : const Icon(Icons.cloud_download, size: 18),
                 label: const Text("فحص وجود تحديث جديد", style: TextStyle(fontWeight: FontWeight.bold)),
-                onPressed: _isCheckingUpdate
+                onPressed: (_isCheckingUpdate || _isDownloadingApk)
                     ? null
                     : () async {
                         setState(() => _isCheckingUpdate = true);
-                        final info = await UpdateManager.checkForUpdate("v1.5.1");
+                        final info = await UpdateManager.checkForUpdate();
                         setState(() {
                           _isCheckingUpdate = false;
                           _updateInfo = info;
@@ -583,34 +586,125 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
               if (_updateInfo != null && _updateInfo!.isAvailable) ...[
                 const SizedBox(height: 12),
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: AppColors.darkSurfaceVariant,
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.neonGreen.withOpacity(0.4)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        "إصدار جديد متوفر: ${_updateInfo!.versionName}",
-                        style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 13),
+                      Row(
+                        children: [
+                          const Icon(Icons.new_releases, color: AppColors.neonGreen, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            "إصدار جديد متوفر: ${_updateInfo!.versionName}",
+                            style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(
                         _updateInfo!.releaseNotes,
                         style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
                       ),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        icon: const Icon(Icons.download, size: 16),
-                        label: const Text("تحميل APK وتثبيته مباشرة"),
-                        onPressed: () async {
-                          final uri = Uri.parse(_updateInfo!.downloadUrl);
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
-                          }
-                        },
-                      ),
+                      const SizedBox(height: 12),
+                      if (_isDownloadingApk) ...[
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text("جاري تحميل ملف التحديث...", style: TextStyle(color: AppColors.textPrimary, fontSize: 12)),
+                                Text("${(_downloadProgress * 100).toInt()}%", style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: _downloadProgress > 0 ? _downloadProgress : null,
+                                backgroundColor: AppColors.darkBackground,
+                                color: AppColors.neonGreen,
+                                minHeight: 6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.neonGreen,
+                                  foregroundColor: AppColors.darkBackground,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                ),
+                                icon: const Icon(Icons.install_mobile, size: 18),
+                                label: const Text("تثبيت التحديث مباشرة (APK)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                onPressed: () async {
+                                  setState(() {
+                                    _isDownloadingApk = true;
+                                    _downloadProgress = 0.0;
+                                  });
+
+                                  final file = await UpdateManager.downloadApk(
+                                    _updateInfo!.downloadUrl,
+                                    onProgress: (p, rec, tot) {
+                                      if (mounted) setState(() => _downloadProgress = p);
+                                    },
+                                  );
+
+                                  setState(() => _isDownloadingApk = false);
+
+                                  if (!mounted) return;
+                                  if (file != null && await file.exists()) {
+                                    final success = await NativeBridgeService.installApk(file.path);
+                                    if (!success && mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text("يرجى السماح بتثبيت التطبيقات من مصادر غير معروفة لتثبيت التحديث")),
+                                      );
+                                    }
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text("فشل تحميل التحديث، يمكنك فتحه عبر المتصفح")),
+                                    );
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              tooltip: "فتح رابط التحميل في المتصفح",
+                              style: IconButton.styleFrom(
+                                backgroundColor: AppColors.darkSurface,
+                                foregroundColor: AppColors.textPrimary,
+                              ),
+                              icon: const Icon(Icons.open_in_browser),
+                              onPressed: () async {
+                                final uri = Uri.parse(_updateInfo!.downloadUrl);
+                                try {
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                } catch (_) {
+                                  try {
+                                    await launchUrl(uri, mode: LaunchMode.platformDefault);
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text("تعذر فتح الرابط: $e")),
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -71,8 +71,8 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.8.0
-        name: "The Driver v1.8.0 - Full-Screen Map Marker Precision, Outside-Dismiss & Single-Expanded Overlay"
+        tag_name: v1.9.0
+        name: "The Driver v1.9.0 - Multi-Card Feed Popups, In-App Direct APK Downloader & Full-Screen Distance Fix"
         body: |
           ### The Driver v1.8.0 - Full-Screen Map Marker & Ergonomic UX Release
           - **Full-Screen Ride Details Scanner**: Specifically identifies full-screen "Ride request" screens and extracts Point A marker distance (pickup) and Point B marker distance (trip) directly from the map pins and bottom sheet.

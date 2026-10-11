@@ -52,6 +52,24 @@ class MainActivity : FlutterActivity() {
                 "isFloatingServiceRunning" -> {
                     result.success(FloatingHudService.isRunning())
                 }
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        val file = java.io.File(filePath)
+                        if (file.exists()) {
+                            try {
+                                com.indrive.assistant.util.UpdateManager.installApk(this, file)
+                                result.success(true)
+                            } catch (e: Exception) {
+                                result.error("INSTALL_ERROR", e.message, null)
+                            }
+                        } else {
+                            result.error("FILE_NOT_FOUND", "File not found: $filePath", null)
+                        }
+                    } else {
+                        result.error("INVALID_ARGUMENT", "filePath is required", null)
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
