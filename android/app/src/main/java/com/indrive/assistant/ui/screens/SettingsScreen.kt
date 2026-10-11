@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
@@ -46,6 +47,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -56,7 +58,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,10 +108,10 @@ fun SettingsScreen(
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     val tabs = listOf(
-        Pair("المركبات", Icons.Default.DirectionsCar),
-        Pair("التسعير", Icons.Default.AttachMoney),
+        Pair("القبول التلقائي", Icons.Default.Bolt),
         Pair("شكل العلامة", Icons.Default.Palette),
         Pair("المناطق", Icons.Default.Map),
+        Pair("التسعير والتشغيل", Icons.Default.AttachMoney),
         Pair("التطبيق", Icons.Default.Settings)
     )
 
@@ -123,7 +129,7 @@ fun SettingsScreen(
                 color = TextPrimary
             )
             Text(
-                text = "إدارة بروفايلات المركبات، تسعير الكيلومتر، ستايل الـ HUD، والمظهر",
+                text = "القبول والمزايدة التلقائية، ستايل الـ HUD، فلترة المناطق، وتزامن الاستهلاك",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary
             )
@@ -169,10 +175,10 @@ fun SettingsScreen(
                 .padding(16.dp)
         ) {
             when (selectedTab) {
-                0 -> VehiclesTab(viewModel = viewModel)
-                1 -> PricingTab(viewModel = viewModel)
-                2 -> OverlayStyleTab(viewModel = viewModel)
-                3 -> ZonesTab(viewModel = viewModel)
+                0 -> AutoAcceptTab(viewModel = viewModel)
+                1 -> OverlayStyleTab(viewModel = viewModel)
+                2 -> ZonesTab(viewModel = viewModel)
+                3 -> PricingTab(viewModel = viewModel)
                 4 -> AppSettingsTab(viewModel = viewModel)
             }
         }
@@ -180,177 +186,406 @@ fun SettingsScreen(
 }
 
 // =============================================================================
-// TAB 1: VEHICLE PROFILES SYSTEM (نظام بروفايل المركبة)
+// TAB 1: AUTO-ACCEPT & SMART BIDDING AUTOMATION (نظام القبول والمزايدة التلقائية)
 // =============================================================================
 @Composable
-fun VehiclesTab(viewModel: AssistantViewModel) {
+fun AutoAcceptTab(viewModel: AssistantViewModel) {
     val context = LocalContext.current
-    val profiles by viewModel.vehicleProfiles.collectAsState()
-    val activeId by viewModel.activeVehicleId.collectAsState()
+    val currentSettings by viewModel.driverSettings.collectAsState()
 
-    var showAddDialog by remember { mutableStateOf(false) }
+    var enabled by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptEnabled) }
+    var minNetProfit by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptMinNetProfit.toString()) }
+    var minProfitPerKm by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptMinProfitPerKm.toString()) }
+    var maxPickupKm by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptMaxPickupKm.toString()) }
+    var onlyFavZones by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptOnlyFavoriteZones) }
+    var ignoreBlacklist by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptIgnoreBlacklist) }
+    var bidMode by remember(currentSettings) { mutableStateOf(currentSettings.autoBidMode) }
+    var delaySec by remember(currentSettings) { mutableStateOf(currentSettings.autoAcceptDelaySeconds.toFloat()) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Master Switch Card
         item {
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (enabled) InDriveNeonGreen.copy(alpha = 0.12f) else DarkSurface
+                ),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.5.dp,
+                    if (enabled) InDriveNeonGreen else DarkCardBorder
+                )
             ) {
-                Column {
-                    Text(
-                        text = "أسطول المركبات المسجلة (${profiles.size})",
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        fontSize = 16.sp
-                    )
-                    Text(
-                        text = "اختر المركبة النشطة بضغطة زر لتحديث معدلات الاستهلاك فوراً",
-                        color = TextSecondary,
-                        fontSize = 12.sp
-                    )
-                }
-
-                Button(
-                    onClick = { showAddDialog = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = InDriveNeonGreen,
-                        contentColor = Color(0xFF0F172A)
-                    ),
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("إضافة مركبة", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = if (enabled) InDriveNeonGreen else TextSecondary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "نظام القبول والمزايدة التلقائية",
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                fontSize = 15.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (enabled)
+                                "النظام يعمل: قبول فوري للطلبات المطابقة لشروطك المالية بمجرد ظهورها"
+                            else
+                                "النظام متوقف: قم بالتفعيل لتسريع قبول المشاوير بدون لمس الهاتف",
+                            color = if (enabled) InDriveNeonGreen else TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = {
+                            enabled = it
+                            val updated = currentSettings.copy(autoAcceptEnabled = it)
+                            viewModel.saveDriverSettings(updated)
+                            Toast.makeText(
+                                context,
+                                if (it) "تم تفعيل القبول التلقائي" else "تم إيقاف القبول التلقائي",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF070B14),
+                            checkedTrackColor = InDriveNeonGreen,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = DarkSurfaceVariant
+                        )
+                    )
                 }
             }
         }
 
-        items(profiles, key = { it.id }) { profile ->
-            val isActive = profile.id == activeId
+        // Financial Criteria Card
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = androidx.compose.ui.graphics.SolidColor(
-                        if (isActive) InDriveNeonGreen else DarkCardBorder
-                    )
-                )
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = "معايير وشروط القبول المالي",
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        fontSize = 14.sp
+                    )
+
+                    // Min Net Profit
+                    Column {
+                        SettingTextField(
+                            label = "الحد الأدنى لصافي ربح الرحلة (${currentSettings.currency})",
+                            value = minNetProfit,
+                            onValueChange = { minNetProfit = it },
+                            hint = "الربح الصافي للرحلة بعد خصم الوقود وعمولة المنصة والإهلاك"
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("15", "20", "25", "30", "40").forEach { p ->
+                                QuickChip(text = "$p ج.م", isSelected = minNetProfit == p) {
+                                    minNetProfit = p
+                                }
+                            }
+                        }
+                    }
+
+                    // Min Profit Per Km
+                    Column {
+                        SettingTextField(
+                            label = "الحد الأدنى لربح الكيلومتر (${currentSettings.currency}/كم)",
+                            value = minProfitPerKm,
+                            onValueChange = { minProfitPerKm = it },
+                            hint = "معدل الربح الصافي مقسوماً على مسافة المشوار الإجمالية"
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("3.0", "4.0", "5.0", "6.0", "8.0").forEach { k ->
+                                QuickChip(text = "$k ج/كم", isSelected = minProfitPerKm == k) {
+                                    minProfitPerKm = k
+                                }
+                            }
+                        }
+                    }
+
+                    // Max Pickup Distance
+                    Column {
+                        SettingTextField(
+                            label = "أقصى مسافة وصول مقبولة للعميل (كم)",
+                            value = maxPickupKm,
+                            onValueChange = { maxPickupKm = it },
+                            hint = "استبعاد الرحلات البعيدة التي تزيد تكلفة وصولها عن فائدتها"
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("1.5", "2.0", "3.0", "4.0", "5.0").forEach { d ->
+                                QuickChip(text = "$d كم", isSelected = maxPickupKm == d) {
+                                    maxPickupKm = d
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Zone Safety Filters Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = "فلترة المناطق الجغرافية والأمان",
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        fontSize = 14.sp
+                    )
+
+                    // Strict Blacklist
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.DirectionsCar,
-                                contentDescription = null,
-                                tint = if (isActive) InDriveNeonGreen else TextSecondary,
-                                modifier = Modifier.size(24.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "حظر واستبعاد المناطق السوداء تماماً",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = profile.name,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary,
-                                    fontSize = 15.sp
-                                )
-                                Text(
-                                    text = "${profile.fuelType} • موديل ${profile.modelYear.ifBlank { "غير محدد" }}",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Text(
+                                text = "رفض فوري لأي رحلة تتجه أو تبدأ من منطقة غير مرغوبة",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
                         }
-
-                        if (isActive) {
-                            Surface(
-                                color = InDriveNeonGreen.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(8.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, InDriveNeonGreen)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = InDriveNeonGreen, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("النشطة حالياً", color = InDriveNeonGreen, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                }
-                            }
-                        } else {
-                            TextButton(onClick = {
-                                viewModel.switchActiveVehicle(profile)
-                                Toast.makeText(context, "تم تفعيل '${profile.name}' للمحاسبة", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Text("تفعيل", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-                        }
+                        Switch(
+                            checked = !ignoreBlacklist,
+                            onCheckedChange = { ignoreBlacklist = !it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF070B14),
+                                checkedTrackColor = Color(0xFFFF3355)
+                            )
+                        )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Divider(color = DarkCardBorder.copy(alpha = 0.5f))
 
-                    // Vehicle Metrics Grid
+                    // Only Favorite Zones
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "قبول رحلات المناطق المفضلة فقط",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "القبول فقط عندما تكون المنطقة ضمن قائمتك المفضلة",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Switch(
+                            checked = onlyFavZones,
+                            onCheckedChange = { onlyFavZones = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFF070B14),
+                                checkedTrackColor = Color(0xFFFFB800)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Mode & Execution Timing Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = "نمط التنفيذ وسرعة القبول",
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        fontSize = 14.sp
+                    )
+
+                    // Bidding Mode
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Surface(
-                            modifier = Modifier.weight(1f),
-                            color = DarkSurfaceVariant,
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { bidMode = "fare" },
+                            color = if (bidMode == "fare") InDriveNeonGreen.copy(alpha = 0.15f) else DarkSurfaceVariant,
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (bidMode == "fare") InDriveNeonGreen else DarkCardBorder
+                            )
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text("معدل الاستهلاك", color = TextSecondary, fontSize = 10.sp)
-                                Text("${profile.fuelConsumptionLPer100Km} لتر/100كم", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "قبول فوري",
+                                    color = if (bidMode == "fare") InDriveNeonGreen else TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "القبول بسعر الراكب المباشر",
+                                    color = TextSecondary,
+                                    fontSize = 10.5.sp
+                                )
                             }
                         }
 
                         Surface(
-                            modifier = Modifier.weight(1f),
-                            color = DarkSurfaceVariant,
-                            shape = RoundedCornerShape(10.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { bidMode = "counter_bid" },
+                            color = if (bidMode == "counter_bid") Color(0xFF00D4FF).copy(alpha = 0.15f) else DarkSurfaceVariant,
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (bidMode == "counter_bid") Color(0xFF00D4FF) else DarkCardBorder
+                            )
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text("سعر لتر الوقود", color = TextSecondary, fontSize = 10.sp)
-                                Text("${profile.fuelPricePerLiter} ج.م", color = InDriveNeonGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-                        }
-
-                        Surface(
-                            modifier = Modifier.weight(1f),
-                            color = DarkSurfaceVariant,
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text("معدل الإهلاك", color = TextSecondary, fontSize = 10.sp)
-                                Text("${profile.wearAndTearPerKm} ج/كم", color = Color(0xFFF59E0B), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "مزايدة ذكية",
+                                    color = if (bidMode == "counter_bid") Color(0xFF00D4FF) else TextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(
+                                    text = "المزايدة بأعلى خيار متاح",
+                                    color = TextSecondary,
+                                    fontSize = 10.5.sp
+                                )
                             }
                         }
                     }
 
-                    if (profiles.size > 1 && !isActive) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = {
-                                val updated = profiles.filter { it.id != profile.id }
-                                viewModel.saveVehicleProfiles(updated)
-                                Toast.makeText(context, "تم حذف المركبة", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("حذف المركبة", color = Color(0xFFEF4444), fontSize = 11.sp)
-                            }
+                    // Delay Slider
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "مهلة التأخير قبل الضغط:",
+                                color = TextPrimary,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "${String.format("%.1f", delaySec)} ثانية",
+                                color = InDriveNeonGreen,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                        Slider(
+                            value = delaySec,
+                            onValueChange = { delaySec = it },
+                            valueRange = 0.3f..5.0f,
+                            steps = 9,
+                            colors = SliderDefaults.colors(
+                                thumbColor = InDriveNeonGreen,
+                                activeTrackColor = InDriveNeonGreen,
+                                inactiveTrackColor = DarkSurfaceVariant
+                            )
+                        )
+                        Text(
+                            text = "مهلة الأمان تتيح لك قراءة العرض على الشاشة وتمنع الاشتباه بالنقر الآلي السريع.",
+                            color = TextSecondary,
+                            fontSize = 10.5.sp
+                        )
                     }
                 }
+            }
+        }
+
+        // Save Button
+        item {
+            Button(
+                onClick = {
+                    val updated = currentSettings.copy(
+                        autoAcceptEnabled = enabled,
+                        autoAcceptMinNetProfit = minNetProfit.toDoubleOrNull() ?: 15.0,
+                        autoAcceptMinProfitPerKm = minProfitPerKm.toDoubleOrNull() ?: 4.0,
+                        autoAcceptMaxPickupKm = maxPickupKm.toDoubleOrNull() ?: 3.0,
+                        autoAcceptOnlyFavoriteZones = onlyFavZones,
+                        autoAcceptIgnoreBlacklist = ignoreBlacklist,
+                        autoBidMode = bidMode,
+                        autoAcceptDelaySeconds = delaySec.toDouble()
+                    )
+                    viewModel.saveDriverSettings(updated)
+                    Toast.makeText(context, "تم حفظ إعدادات القبول التلقائي بنجاح", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = InDriveNeonGreen,
+                    contentColor = Color(0xFF070B14)
+                )
+            ) {
+                Icon(imageVector = Icons.Default.Save, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("حفظ وتطبيق إعدادات القبول التلقائي", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
         }
 
@@ -358,119 +593,35 @@ fun VehiclesTab(viewModel: AssistantViewModel) {
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
-
-    if (showAddDialog) {
-        AddVehicleDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { newProfile ->
-                val updated = profiles.toMutableList().apply { add(newProfile) }
-                viewModel.saveVehicleProfiles(updated)
-                showAddDialog = false
-                Toast.makeText(context, "تمت إضافة '${newProfile.name}' بنجاح", Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
 }
 
 @Composable
-fun AddVehicleDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (VehicleProfile) -> Unit
+fun QuickChip(
+    text: String,
+    isSelected: Boolean,
+    onSelect: () -> Unit
 ) {
-    var nameText by remember { mutableStateOf("") }
-    var yearText by remember { mutableStateOf("2021") }
-    var fuelTypeText by remember { mutableStateOf("بنزين 92") }
-    var consumptionText by remember { mutableStateOf("8.5") }
-    var priceText by remember { mutableStateOf("15.25") }
-    var wearTearText by remember { mutableStateOf("1.2") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = DarkSurface,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.DirectionsCar, contentDescription = null, tint = InDriveNeonGreen)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("إضافة مركبة جديدة إلى الأسطول", fontWeight = FontWeight.Bold, color = TextPrimary)
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = nameText,
-                    onValueChange = { nameText = it },
-                    label = { Text("اسم أو وصف المركبة") },
-                    placeholder = { Text("مثال: فيرنا 2019 أو نيسان صني") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = yearText,
-                        onValueChange = { yearText = it },
-                        label = { Text("سنة الصنع") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = fuelTypeText,
-                        onValueChange = { fuelTypeText = it },
-                        label = { Text("نوع الوقود") },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = consumptionText,
-                        onValueChange = { consumptionText = it },
-                        label = { Text("استهلاك لتر/100كم") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = priceText,
-                        onValueChange = { priceText = it },
-                        label = { Text("سعر لتر الوقود") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                OutlinedTextField(
-                    value = wearTearText,
-                    onValueChange = { wearTearText = it },
-                    label = { Text("معدل الإهلاك لكل كم (ج/كم)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (nameText.isNotBlank()) {
-                        onConfirm(
-                            VehicleProfile(
-                                name = nameText.trim(),
-                                modelYear = yearText.trim(),
-                                fuelType = fuelTypeText.trim(),
-                                fuelConsumptionLPer100Km = consumptionText.toDoubleOrNull() ?: 8.5,
-                                fuelPricePerLiter = priceText.toDoubleOrNull() ?: 15.25,
-                                wearAndTearPerKm = wearTearText.toDoubleOrNull() ?: 1.2
-                            )
-                        )
-                    }
-                },
-                enabled = nameText.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = InDriveNeonGreen, contentColor = Color(0xFF0F172A))
-            ) {
-                Text("حفظ المركبة", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("إلغاء", color = TextSecondary) }
+    Surface(
+        color = if (isSelected) InDriveNeonGreen.copy(alpha = 0.2f) else DarkSurfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (isSelected) InDriveNeonGreen else DarkCardBorder
+        ),
+        modifier = Modifier.clickable { onSelect() }
+    ) {
+        Box(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                color = if (isSelected) InDriveNeonGreen else TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
-    )
+    }
 }
 
 // =============================================================================
@@ -493,6 +644,42 @@ fun PricingTab(viewModel: AssistantViewModel) {
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0xFF00D4FF).copy(alpha = 0.12f),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00D4FF).copy(alpha = 0.4f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = null,
+                        tint = Color(0xFF00D4FF),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "تزامن استهلاك المركبة النشطة مع الحسابات",
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            fontSize = 13.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "عند اختيار أي مركبة من شاشة (المركبات والمصاريف)، يتم تطبيق استهلاكها وسعر وقودها وإهلاكها تلقائياً على كل العمليات. لتسجيل استهلاك مركبة جديدة أو متابعة فواتير البنزين، استخدم قسم المصاريف.",
+                            color = TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Text(
                 text = "سعر الوقود السريع (محطات مصر)",
@@ -929,7 +1116,7 @@ fun AppSettingsTab(viewModel: AssistantViewModel) {
     val coroutineScope = rememberCoroutineScope()
     val themeMode by viewModel.themeMode.collectAsState()
 
-    val currentAppVersion = "v1.5.0"
+    val currentAppVersion = "v1.5.1"
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var updateResult by remember { mutableStateOf<UpdateInfo?>(null) }
     var updateCheckMessage by remember { mutableStateOf<String?>(null) }
@@ -1008,7 +1195,7 @@ fun AppSettingsTab(viewModel: AssistantViewModel) {
                     ) {
                         Column {
                             Text("تحديثات التطبيق التلقائية", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
-                            Text("الإصدار الحالي: $currentAppVersion (بناء 6)", color = TextSecondary, fontSize = 12.sp)
+                            Text("الإصدار الحالي: $currentAppVersion (بناء 7)", color = TextSecondary, fontSize = 12.sp)
                         }
 
                         Button(
@@ -1129,7 +1316,7 @@ fun AppSettingsTab(viewModel: AssistantViewModel) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text("The Driver - نظام مساعد الكابتن الذكي", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("الإصدار: v1.5.0 • محرك تحليل تسعير فوري • صفر استهلاك للبطارية في وضع الخمول", color = TextSecondary, fontSize = 11.5.sp)
+                    Text("الإصدار: v1.5.1 (بناء 7) • محرك تحليل تسعير فوري • صفر استهلاك للبطارية في وضع الخمول", color = TextSecondary, fontSize = 11.5.sp)
                 }
             }
         }

@@ -309,6 +309,15 @@ class AssistantViewModel(
     fun updateSettings(newSettings: DriverSettings) {
         repository.updateDriverSettings(newSettings)
     }
+
+    fun saveDriverSettings(newSettings: DriverSettings) {
+        repository.updateDriverSettings(newSettings)
+    }
+
+    fun addFavoriteZone(zone: String): Boolean = repository.addFavoriteZone(zone)
+    fun removeFavoriteZone(zone: String): Boolean = repository.removeFavoriteZone(zone)
+    fun addBlacklistZone(zone: String): Boolean = repository.addBlacklistZone(zone)
+    fun removeBlacklistZone(zone: String): Boolean = repository.removeBlacklistZone(zone)
 }
 
 class AssistantViewModelFactory(

@@ -45,7 +45,15 @@ class PreferencesManager(context: Context) {
             favoriteZones = prefs.getString(KEY_FAVORITE_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
                 ?: listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
             blacklistedZones = prefs.getString(KEY_BLACKLISTED_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-                ?: listOf("شبرا الخيمة", "حلوان", "المرج")
+                ?: listOf("شبرا الخيمة", "حلوان", "المرج"),
+            autoAcceptEnabled = prefs.getBoolean(KEY_AUTO_ACCEPT_ENABLED, false),
+            autoAcceptMinProfitPerKm = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_PROFIT_KM, 10.0f).toDouble(),
+            autoAcceptMinNetProfit = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_NET_PROFIT, 25.0f).toDouble(),
+            autoAcceptMaxPickupKm = prefs.getFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, 3.5f).toDouble(),
+            autoAcceptOnlyFavoriteZones = prefs.getBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, false),
+            autoAcceptIgnoreBlacklist = prefs.getBoolean(KEY_AUTO_ACCEPT_IGNORE_BLACK, true),
+            autoBidMode = prefs.getString(KEY_AUTO_BID_MODE, "RECOMMENDED") ?: "RECOMMENDED",
+            autoAcceptDelaySeconds = prefs.getFloat(KEY_AUTO_ACCEPT_DELAY, 1.5f).toDouble()
         )
     }
 
@@ -60,6 +68,15 @@ class PreferencesManager(context: Context) {
             putString(KEY_CURRENCY, settings.currency)
             putString(KEY_FAVORITE_ZONES, settings.favoriteZones.joinToString(","))
             putString(KEY_BLACKLISTED_ZONES, settings.blacklistedZones.joinToString(","))
+
+            putBoolean(KEY_AUTO_ACCEPT_ENABLED, settings.autoAcceptEnabled)
+            putFloat(KEY_AUTO_ACCEPT_MIN_PROFIT_KM, settings.autoAcceptMinProfitPerKm.toFloat())
+            putFloat(KEY_AUTO_ACCEPT_MIN_NET_PROFIT, settings.autoAcceptMinNetProfit.toFloat())
+            putFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, settings.autoAcceptMaxPickupKm.toFloat())
+            putBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, settings.autoAcceptOnlyFavoriteZones)
+            putBoolean(KEY_AUTO_ACCEPT_IGNORE_BLACK, settings.autoAcceptIgnoreBlacklist)
+            putString(KEY_AUTO_BID_MODE, settings.autoBidMode)
+            putFloat(KEY_AUTO_ACCEPT_DELAY, settings.autoAcceptDelaySeconds.toFloat())
             apply()
         }
         _settingsFlow.value = settings
@@ -96,6 +113,14 @@ class PreferencesManager(context: Context) {
         return true
     }
 
+    fun removeFavoriteZone(zone: String): Boolean {
+        val clean = zone.trim()
+        val current = loadSettings()
+        val updated = current.favoriteZones.filterNot { it.equals(clean, ignoreCase = true) }
+        saveSettings(current.copy(favoriteZones = updated))
+        return true
+    }
+
     fun addBlacklistZone(zone: String): Boolean {
         val clean = zone.trim()
         if (clean.isEmpty()) return false
@@ -104,6 +129,22 @@ class PreferencesManager(context: Context) {
         val updated = current.blacklistedZones.toMutableList().apply { add(clean) }
         saveSettings(current.copy(blacklistedZones = updated))
         return true
+    }
+
+    fun removeBlacklistZone(zone: String): Boolean {
+        val clean = zone.trim()
+        val current = loadSettings()
+        val updated = current.blacklistedZones.filterNot { it.equals(clean, ignoreCase = true) }
+        saveSettings(current.copy(blacklistedZones = updated))
+        return true
+    }
+
+    fun isFavoriteZone(zone: String): Boolean {
+        return loadSettings().isFavorite(zone)
+    }
+
+    fun isBlacklistedZone(zone: String): Boolean {
+        return loadSettings().isBlacklisted(zone)
     }
 
     // =========================================================================
@@ -223,5 +264,14 @@ class PreferencesManager(context: Context) {
         private const val KEY_OVERLAY_SIZE = "overlay_size"
         private const val KEY_VEHICLE_PROFILES = "vehicle_profiles"
         private const val KEY_ACTIVE_VEHICLE_ID = "active_vehicle_id"
+
+        private const val KEY_AUTO_ACCEPT_ENABLED = "auto_accept_enabled"
+        private const val KEY_AUTO_ACCEPT_MIN_PROFIT_KM = "auto_accept_min_profit_km"
+        private const val KEY_AUTO_ACCEPT_MIN_NET_PROFIT = "auto_accept_min_net_profit"
+        private const val KEY_AUTO_ACCEPT_MAX_PICKUP_KM = "auto_accept_max_pickup_km"
+        private const val KEY_AUTO_ACCEPT_ONLY_FAV = "auto_accept_only_fav"
+        private const val KEY_AUTO_ACCEPT_IGNORE_BLACK = "auto_accept_ignore_black"
+        private const val KEY_AUTO_BID_MODE = "auto_bid_mode"
+        private const val KEY_AUTO_ACCEPT_DELAY = "auto_accept_delay"
     }
 }

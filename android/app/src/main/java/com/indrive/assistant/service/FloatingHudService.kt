@@ -278,6 +278,28 @@ class FloatingHudService : Service() {
         }
 
         holder.container.addView(badgeView)
+
+        // Subtle (!) micro-badge to alert driver that zone management is available on tap
+        if (holder.ride.pickupAddress.isNotBlank() || holder.ride.dropoffAddress.isNotBlank()) {
+            val alertBadge = TextView(this).apply {
+                text = "!"
+                setTextColor(Color.parseColor("#070B14"))
+                textSize = 8.5f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                val badgeDiameter = (14 * density).toInt()
+                layoutParams = FrameLayout.LayoutParams(badgeDiameter, badgeDiameter).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    setMargins(0, 0, 0, 0)
+                }
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (isFav) Color.parseColor("#FFB800") else Color.parseColor("#00F59B"))
+                    setStroke((1 * density).toInt(), Color.parseColor("#070B14"))
+                }
+            }
+            holder.container.addView(alertBadge)
+        }
     }
 
     // Style 1: COMPACT_CIRCLE (قرص دائري مصغر)
@@ -600,6 +622,10 @@ class FloatingHudService : Service() {
         holder: CardPopupViewHolder,
         density: Float
     ): View {
+        val repo = InDriveAssistantApp.instance.repository
+        val isFav = repo.isFavoriteZone(address)
+        val isBlack = repo.isBlacklistedZone(address)
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
@@ -610,20 +636,67 @@ class FloatingHudService : Service() {
             }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8 * density
-                setColor(Color.parseColor("#131D31"))
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#0F1728"))
+                setStroke((1.5f * density).toInt(), when {
+                    isFav -> Color.parseColor("#FFB800")
+                    isBlack -> Color.parseColor("#FF3355")
+                    else -> Color.parseColor("#223554")
+                })
             }
-            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+            setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
+        }
+
+        // Row 1: Alert badge (!) + Clickable Address Title
+        val addrRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val alertBadge = TextView(this).apply {
+            text = "!"
+            setTextColor(Color.parseColor("#070B14"))
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            val badgeDiameter = (18 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(badgeDiameter, badgeDiameter).apply {
+                setMargins(0, 0, (8 * density).toInt(), 0)
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(when {
+                    isFav -> Color.parseColor("#FFB800")
+                    isBlack -> Color.parseColor("#FF3355")
+                    else -> Color.parseColor("#00F59B")
+                })
+            }
+        }
+
+        val statusTag = when {
+            isFav -> " (مفضلة)"
+            isBlack -> " (محظورة)"
+            else -> ""
         }
 
         val addrTv = TextView(this).apply {
-            text = "$prefix: $address"
-            setTextColor(Color.parseColor("#F8FAFC"))
-            textSize = 10.5f
+            text = "$prefix: $address$statusTag"
+            setTextColor(Color.parseColor(if (isFav) "#FFB800" else if (isBlack) "#FF3355" else "#F8FAFC"))
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
+        addrRow.addView(alertBadge)
+        addrRow.addView(addrTv)
+
+        // Row 2: 1-Tap Action Chips
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
@@ -631,56 +704,58 @@ class FloatingHudService : Service() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(0, (4 * density).toInt(), 0, 0)
+                setMargins(0, (6 * density).toInt(), 0, 0)
             }
         }
 
         val favBtn = TextView(this).apply {
-            text = "+ مفضلة"
-            setTextColor(Color.parseColor("#0F172A"))
-            textSize = 10f
+            text = if (isFav) "إلغاء المفضلة" else "+ مفضلة"
+            setTextColor(if (isFav) Color.WHITE else Color.parseColor("#070B14"))
+            textSize = 10.5f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 6 * density
-                setColor(Color.parseColor("#F59E0B"))
+                cornerRadius = 8 * density
+                setColor(if (isFav) Color.parseColor("#475569") else Color.parseColor("#FFB800"))
             }
             setOnClickListener {
-                val success = InDriveAssistantApp.instance.repository.addFavoriteZone(address)
-                Toast.makeText(
-                    this@FloatingHudService,
-                    if (success) "تمت إضافة '$address' إلى المناطق المفضلة بنجاح" else "المنطقة مسجلة بالفعل",
-                    Toast.LENGTH_SHORT
-                ).show()
+                if (isFav) {
+                    repo.removeFavoriteZone(address)
+                    Toast.makeText(this@FloatingHudService, "تمت إزالة '$address' من المفضلة", Toast.LENGTH_SHORT).show()
+                } else {
+                    repo.addFavoriteZone(address)
+                    Toast.makeText(this@FloatingHudService, "تمت إضافة '$address' للمناطق المفضلة", Toast.LENGTH_SHORT).show()
+                }
                 refreshAnalysis(holder)
             }
         }
 
         val blackBtn = TextView(this).apply {
-            text = "+ سوداء"
+            text = if (isBlack) "إلغاء الحظر" else "+ محظورة"
             setTextColor(Color.WHITE)
-            textSize = 10f
+            textSize = 10.5f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding((8 * density).toInt(), (3 * density).toInt(), (8 * density).toInt(), (3 * density).toInt())
+            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins((6 * density).toInt(), 0, 0, 0)
+                setMargins((8 * density).toInt(), 0, 0, 0)
             }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 6 * density
-                setColor(Color.parseColor("#DC2626"))
+                cornerRadius = 8 * density
+                setColor(if (isBlack) Color.parseColor("#475569") else Color.parseColor("#FF3355"))
             }
             setOnClickListener {
-                val success = InDriveAssistantApp.instance.repository.addBlacklistZone(address)
-                Toast.makeText(
-                    this@FloatingHudService,
-                    if (success) "تمت إضافة '$address' إلى المناطق السوداء بنجاح" else "المنطقة مسجلة بالفعل",
-                    Toast.LENGTH_SHORT
-                ).show()
+                if (isBlack) {
+                    repo.removeBlacklistZone(address)
+                    Toast.makeText(this@FloatingHudService, "تم إلغاء حظر '$address'", Toast.LENGTH_SHORT).show()
+                } else {
+                    repo.addBlacklistZone(address)
+                    Toast.makeText(this@FloatingHudService, "تمت إضافة '$address' للمناطق المحظورة", Toast.LENGTH_SHORT).show()
+                }
                 refreshAnalysis(holder)
             }
         }
@@ -688,8 +763,29 @@ class FloatingHudService : Service() {
         btnRow.addView(favBtn)
         btnRow.addView(blackBtn)
 
-        container.addView(addrTv)
+        container.addView(addrRow)
         container.addView(btnRow)
+
+        // Make the address row and (!) badge directly clickable to cycle status with 1 tap!
+        val rowTapListener = View.OnClickListener {
+            if (!isFav && !isBlack) {
+                repo.addFavoriteZone(address)
+                Toast.makeText(this@FloatingHudService, "تم حفظ '$address' كمفضلة بنجاح", Toast.LENGTH_SHORT).show()
+            } else if (isFav) {
+                repo.removeFavoriteZone(address)
+                repo.addBlacklistZone(address)
+                Toast.makeText(this@FloatingHudService, "تم نقل '$address' إلى المناطق المحظورة", Toast.LENGTH_SHORT).show()
+            } else {
+                repo.removeBlacklistZone(address)
+                Toast.makeText(this@FloatingHudService, "تمت إزالة تصنيف '$address'", Toast.LENGTH_SHORT).show()
+            }
+            refreshAnalysis(holder)
+        }
+
+        addrRow.setOnClickListener(rowTapListener)
+        alertBadge.setOnClickListener(rowTapListener)
+        addrTv.setOnClickListener(rowTapListener)
+
         return container
     }
 

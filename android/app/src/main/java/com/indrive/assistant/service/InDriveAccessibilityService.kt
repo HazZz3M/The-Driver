@@ -7,7 +7,14 @@ import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.accessibilityservice.GestureDescription
+import android.graphics.Path
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
+import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.data.model.ParsedRideData
+import com.indrive.assistant.engine.FareCalculatorEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 class InDriveAccessibilityService : AccessibilityService() {
 
     private var lastScanTimestamp = 0L
+    private var lastAutoAcceptedFingerprint = ""
+    private var lastAutoAcceptTimestamp = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -57,10 +66,116 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             // Synchronize popup hints on each visible card
             FloatingHudService.onCardsSync(parsedRides)
+
+            // Evaluate Auto-Accept & Auto-Bidding automation
+            checkAndTriggerAutoAccept(parsedRides)
         } catch (e: Exception) {
             Log.e(TAG, "Error in accessibility event processing: ${e.message}")
         } finally {
             root.recycle()
+        }
+    }
+
+    private fun checkAndTriggerAutoAccept(rides: List<ParsedRideData>) {
+        if (rides.isEmpty()) return
+        val app = InDriveAssistantApp.instance ?: return
+        val settings = app.repository.getDriverSettings()
+
+        if (!settings.autoAcceptEnabled) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastAutoAcceptTimestamp < 5000L) {
+            return
+        }
+
+        for (card in rides) {
+            val anchor = card.anchorBounds ?: continue
+            if (card.fingerprint == lastAutoAcceptedFingerprint) continue
+
+            // 1. Blacklist check
+            if (!settings.autoAcceptIgnoreBlacklist) {
+                if (settings.isBlacklisted(card.pickupAddress) || settings.isBlacklisted(card.dropoffAddress)) {
+                    Log.d(TAG, "Auto-accept: Skipped due to blacklisted zone")
+                    continue
+                }
+            }
+
+            // 2. Favorite only check
+            if (settings.autoAcceptOnlyFavoriteZones) {
+                if (!settings.isFavorite(card.pickupAddress) && !settings.isFavorite(card.dropoffAddress)) {
+                    Log.d(TAG, "Auto-accept: Skipped because zone is not in favorites")
+                    continue
+                }
+            }
+
+            // 3. Max pickup distance check
+            if (card.pickupDistanceKm > settings.autoAcceptMaxPickupKm) {
+                Log.d(TAG, "Auto-accept: Skipped because pickup distance ${card.pickupDistanceKm} > ${settings.autoAcceptMaxPickupKm}")
+                continue
+            }
+
+            // 4. Financial thresholds check
+            val analysis = FareCalculatorEngine.analyze(
+                pickupDistanceKm = card.pickupDistanceKm,
+                tripDistanceKm = card.tripDistanceKm,
+                estimatedMinutes = ((card.totalDistanceKm) * 2.3).toInt(),
+                offeredFare = card.fare,
+                settings = settings,
+                pickupAddress = card.pickupAddress,
+                dropoffAddress = card.dropoffAddress
+            )
+
+            if (analysis.netProfit < settings.autoAcceptMinNetProfit) {
+                Log.d(TAG, "Auto-accept: Net profit ${analysis.netProfit} < ${settings.autoAcceptMinNetProfit}")
+                continue
+            }
+
+            if (analysis.profitPerKm < settings.autoAcceptMinProfitPerKm) {
+                Log.d(TAG, "Auto-accept: Profit/km ${analysis.profitPerKm} < ${settings.autoAcceptMinProfitPerKm}")
+                continue
+            }
+
+            // All conditions met! Auto-accept this offer
+            lastAutoAcceptedFingerprint = card.fingerprint
+            lastAutoAcceptTimestamp = now
+            val targetX = anchor.centerX().toFloat()
+            val targetY = anchor.centerY().toFloat()
+            val delayMs = (settings.autoAcceptDelaySeconds * 1000).toLong().coerceIn(200L, 8000L)
+
+            Log.i(TAG, "Auto-accepting ride at ($targetX, $targetY) after ${delayMs}ms. Net profit: ${analysis.netProfit}")
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                dispatchClickGesture(targetX, targetY)
+                try {
+                    Toast.makeText(
+                        applicationContext,
+                        "تم القبول التلقائي للطلب (ربح متوقع: ${analysis.netProfit.toInt()} ج.م)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } catch (_: Exception) {}
+            }, delayMs)
+
+            break
+        }
+    }
+
+    fun dispatchClickGesture(x: Float, y: Float) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            val clickPath = Path().apply {
+                moveTo(x, y)
+            }
+            val stroke = GestureDescription.StrokeDescription(clickPath, 0, 60)
+            val gesture = GestureDescription.Builder()
+                .addStroke(stroke)
+                .build()
+            dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    Log.d(TAG, "Gesture click completed at ($x, $y)")
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    Log.w(TAG, "Gesture click cancelled at ($x, $y)")
+                }
+            }, null)
         }
     }
 
@@ -173,10 +288,13 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
                 seenBounds.add(boundsKey)
 
+                val anchorBounds = android.graphics.Rect()
+                anchor.getBoundsInScreen(anchorBounds)
+
                 val texts = mutableListOf<String>()
                 collectNodeTexts(cardNode, texts)
 
-                val parsed = parseRideScreen(texts, bounds)
+                val parsed = parseRideScreen(texts, bounds, anchorBounds)
                 if (parsed != null) {
                     results.add(parsed)
                 }
@@ -269,7 +387,11 @@ class InDriveAccessibilityService : AccessibilityService() {
             return if (single != null) listOf(single) else emptyList()
         }
 
-        fun parseRideScreen(texts: List<String>, bounds: android.graphics.Rect? = null): ParsedRideData? {
+        fun parseRideScreen(
+            texts: List<String>,
+            bounds: android.graphics.Rect? = null,
+            anchorBounds: android.graphics.Rect? = null
+        ): ParsedRideData? {
             if (texts.isEmpty()) return null
 
             val normalizedTexts = texts.map { normalizeArabicDigits(it.trim()) }
@@ -379,7 +501,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                     pickupAddress = pickupAddress,
                     dropoffAddress = dropoffAddress,
                     counterBids = counterBids.sorted(),
-                    screenBounds = bounds
+                    screenBounds = bounds,
+                    anchorBounds = anchorBounds
                 )
             }
 

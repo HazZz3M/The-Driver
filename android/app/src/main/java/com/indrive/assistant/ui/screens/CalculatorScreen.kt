@@ -28,7 +28,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -288,6 +290,112 @@ fun CalculatorScreen(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 2.5 Quick Zone Evaluator & Tagger with (!) badge
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DarkCardBorder)
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFFFB800),
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("!", color = Color(0xFF070B14), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "فحص وتصنيف المنطقة (!)",
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            fontSize = 13.5.sp
+                        )
+                    }
+                    Text(
+                        text = "اضغط (!) لإضافة المنطقة",
+                        color = TextSecondary,
+                        fontSize = 10.5.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                var zoneInputText by remember { mutableStateOf("") }
+                val isFav = remember(zoneInputText, settings) { settings.isFavorite(zoneInputText) }
+                val isBlack = remember(zoneInputText, settings) { settings.isBlacklisted(zoneInputText) }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = zoneInputText,
+                        onValueChange = { zoneInputText = it },
+                        placeholder = { Text("اكتب اسم منطقة لفحصها أو تصنيفها...") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    if (zoneInputText.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Button(
+                            onClick = {
+                                if (isFav) {
+                                    viewModel.removeFavoriteZone(zoneInputText)
+                                    Toast.makeText(context, "تمت إزالة '$zoneInputText' من المفضلة", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.addFavoriteZone(zoneInputText)
+                                    Toast.makeText(context, "تمت إضافة '$zoneInputText' للمفضلة", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isFav) Color(0xFF475569) else Color(0xFFFFB800),
+                                contentColor = Color(0xFF070B14)
+                            )
+                        ) {
+                            Text(if (isFav) "مفضلة" else "+ مفضلة", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        Button(
+                            onClick = {
+                                if (isBlack) {
+                                    viewModel.removeBlacklistZone(zoneInputText)
+                                    Toast.makeText(context, "تم إلغاء حظر '$zoneInputText'", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.addBlacklistZone(zoneInputText)
+                                    Toast.makeText(context, "تمت إضافة '$zoneInputText' للمحظورة", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isBlack) Color(0xFF475569) else Color(0xFFFF3355),
+                                contentColor = Color.WHITE
+                            )
+                        ) {
+                            Text(if (isBlack) "محظورة" else "+ محظورة", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

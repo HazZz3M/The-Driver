@@ -9,5 +9,15 @@ data class DriverSettings(
     val minProfitPerKm: Double = 8.0,
     val currency: String = "EGP",
     val favoriteZones: List<String> = listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
-    val blacklistedZones: List<String> = listOf("شبرا الخيمة", "حلوان", "المرج")
+    val blacklistedZones: List<String> = listOf("شبرا الخيمة", "حلوان", "المرج"),
+
+    // Auto-Accept & Auto-Bidding Automation
+    val autoAcceptEnabled: Boolean = false,
+    val autoAcceptMinProfitPerKm: Double = 10.0,
+    val autoAcceptMinNetProfit: Double = 25.0,
+    val autoAcceptMaxPickupKm: Double = 3.5,
+    val autoAcceptOnlyFavoriteZones: Boolean = false,
+    val autoAcceptIgnoreBlacklist: Boolean = true,
+    val autoBidMode: String = "RECOMMENDED", // "RECOMMENDED" or "PASSENGER_FARE"
+    val autoAcceptDelaySeconds: Double = 1.5
 )

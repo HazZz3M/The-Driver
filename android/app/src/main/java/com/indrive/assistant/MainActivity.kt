@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Settings
@@ -69,8 +70,8 @@ fun MainAppContent(viewModel: AssistantViewModel) {
     val navItems = listOf(
         NavItem("الحاسبة", Icons.Default.Calculate),
         NavItem("الوردية", Icons.Default.Dashboard),
+        NavItem("المركبات والمصاريف", Icons.Default.DirectionsCar),
         NavItem("الزر العائم", Icons.Default.Layers),
-        NavItem("المصاريف", Icons.Default.LocalGasStation),
         NavItem("الإعدادات", Icons.Default.Settings)
     )
 
@@ -79,7 +80,8 @@ fun MainAppContent(viewModel: AssistantViewModel) {
         bottomBar = {
             NavigationBar(
                 containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-                contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 8.dp
             ) {
                 navItems.forEachIndexed { index, item ->
                     val isSelected = selectedIndex == index
@@ -97,12 +99,12 @@ fun MainAppContent(viewModel: AssistantViewModel) {
                             Text(
                                 text = item.title,
                                 color = if (isSelected) InDriveNeonGreen else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = Color(0x1F00EA80)
+                            indicatorColor = InDriveNeonGreen.copy(alpha = 0.15f)
                         )
                     )
                 }
@@ -112,8 +114,8 @@ fun MainAppContent(viewModel: AssistantViewModel) {
         when (selectedIndex) {
             0 -> CalculatorScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
             1 -> ShiftDashboardScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
-            2 -> OverlayControlScreen(modifier = Modifier.padding(innerPadding))
-            3 -> ExpensesScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
+            2 -> ExpensesScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
+            3 -> OverlayControlScreen(modifier = Modifier.padding(innerPadding))
             4 -> SettingsScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
         }
     }

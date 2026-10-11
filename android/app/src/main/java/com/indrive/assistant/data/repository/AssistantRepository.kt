@@ -50,7 +50,11 @@ class AssistantRepository(
     }
 
     fun addFavoriteZone(zone: String): Boolean = preferencesManager.addFavoriteZone(zone)
+    fun removeFavoriteZone(zone: String): Boolean = preferencesManager.removeFavoriteZone(zone)
     fun addBlacklistZone(zone: String): Boolean = preferencesManager.addBlacklistZone(zone)
+    fun removeBlacklistZone(zone: String): Boolean = preferencesManager.removeBlacklistZone(zone)
+    fun isFavoriteZone(zone: String): Boolean = preferencesManager.isFavoriteZone(zone)
+    fun isBlacklistedZone(zone: String): Boolean = preferencesManager.isBlacklistedZone(zone)
     fun getPreferencesManager(): PreferencesManager = preferencesManager
 
     // Trips

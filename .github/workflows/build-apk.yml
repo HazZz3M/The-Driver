@@ -66,20 +66,15 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.5.0
-        name: "The Driver v1.5.0 - Multi-Vehicle Profiles, Ultra-Compact Badges & Spare Parts"
+        tag_name: v1.5.1
+        name: "The Driver v1.5.1 - Auto-Accept, Expense Hub & Telematics UI"
         body: |
-          ### The Driver v1.5.0 - Major Telematics Upgrade
-          - **App Rebranded**: Now titled **The Driver**.
-          - **Multi-Vehicle Profiles System**: Create and manage multiple vehicle profiles (fuel consumption, fuel type, price, wear & tear) with 1-tap switching.
-          - **Ultra-Compact Floating HUD Overlay**: Redesigned from large cards to miniature badges (6 distinct visual styles: Coin Badge, Slim Pill, Speedo Gauge, Price Tag, Corner Notch, Glow Dot) so they never cover inDrive's original ride card details.
-          - **Pulsating Light Glow Animation**: Favorite zones pulse with radiant breathing light to distinguish them from standard yellow warnings.
-          - **1-Tap Quick Zone Categorization**: Categorize pickup and dropoff addresses into Favorite or Blacklisted zones with one tap directly from popup hints.
-          - **Spare Parts & True Wear-and-Tear**: Record spare parts with optional kilometer lifespan, calculating the true wear-and-tear rate per km to enhance pricing accuracy.
-          - **Segmented Settings Architecture**: Clean 5-tab settings navigation separating Vehicle Profiles, Pricing, HUD Styles, Zones, and App Settings.
-          - **Dark & Light Themes**: High-contrast dark mode and crisp light mode support.
-          - **Fast Pricing Analyzer**: Quick bid increment chips (+5, +10, +15, +20 EGP) and active vehicle switcher directly inside the calculator.
-          - **In-App Auto Update**: Seamless 1-tap update downloads directly within the app.
+          ### The Driver v1.5.1 - Telematics & Automation Upgrade
+          - **Auto-Accept & Automated Bidding Engine**: Configurable smart acceptance/bidding based on net profit, profit/km, pickup distance, and zone filters, with automated accessibility taps and safety debounce.
+          - **Unified Vehicles & Expenses Hub**: Centralized active vehicle switching, consumption tracking, fuel refills, oil changes, and spare parts management.
+          - **Interactive (!) Alert Badge on Addresses**: Visual badge on ride addresses indicating 1-tap fast categorization to Favorite or Blacklisted zones.
+          - **Next-Gen Telematics Obsidian Design**: High-contrast, fatigue-free automotive cockpit palette with rounded squircle buttons and zero emojis.
+          - **Seamless In-App Update Engine**: Signed with permanent keystore for conflict-free updates.
         files: |
           The-Driver.apk
           inDrive-Assistant.apk
