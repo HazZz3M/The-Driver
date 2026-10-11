@@ -209,7 +209,7 @@ class FloatingHudService : Service() {
         }
     }
 
-    fun togglePopupExpanded(holder: CardPopupViewHolder) {
+    private fun togglePopupExpanded(holder: CardPopupViewHolder) {
         val wm = windowManager ?: return
         if (holder.isExpanded) {
             collapseAllPopups()
