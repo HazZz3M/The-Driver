@@ -42,24 +42,57 @@ An intelligent Android application built with **Kotlin**, **Jetpack Compose (Mat
      - Detailed expense log with analytical badges (Km, Consumption, Cost/Km).
 
 6. **📱 Live Web Simulator & Native Android Source**:
-   - Includes full native Android Gradle project ready for **Android Studio**.
+   - Full Flutter application with reactive state management, Material 3 Dark/Light themes, Arabic RTL localization.
+   - Native Android background overlay service and Accessibility integration via MethodChannel.
    - Includes interactive browser-based Android phone simulator for instant testing and demonstration.
 
 ---
 
-## 📂 Project Structure
+## 📂 Flutter Project Structure (هيكل مشروع فلاتر)
 
 ```
 INDRIVE ASSESSTANT/
-├── android/                      # Native Android Kotlin + Jetpack Compose Codebase
-│   ├── app/                      # App module (Compose UI, ViewModels, Room DB, Services)
-│   ├── gradle/wrapper/           # Gradle Wrapper files
-│   ├── build.gradle.kts          # Root build script
-│   ├── settings.gradle.kts       # Gradle settings
-│   └── gradle.properties         # JVM & Android properties
-├── web-preview/                  # Live interactive Android Phone Simulator
-│   ├── index.html                # Simulator UI & InDrive Driver HUD
-│   ├── style.css                 # Sleek dark mode styling
-│   └── app.js                    # Calculation engine & interactive simulator logic
+├── pubspec.yaml                  # Flutter package definition & dependencies
+├── lib/                          # Flutter Codebase (Dart)
+│   ├── main.dart                 # App Entry Point, RTL Localization & Theme Setup
+│   ├── theme/                    # Design System & Cockpit Tokens
+│   │   ├── app_colors.dart       # Obsidian Dark & Electric Neon Green Palette
+│   │   └── app_theme.dart        # Material 3 Dark & Light ThemeData
+│   ├── data/
+│   │   ├── models/               # Domain Models
+│   │   │   ├── driver_settings.dart   # Auto-Accept, Zone Rules & Cost Settings
+│   │   │   ├── vehicle_profile.dart   # Fleet Vehicles & Consumption Profiles
+│   │   │   ├── expense.dart           # Fuel, Oil & Spare Parts Expenses
+│   │   │   ├── trip.dart              # Completed Trips & Profit Metrics
+│   │   │   ├── parsed_ride_data.dart  # Ride OCR & Distance Breakdown
+│   │   │   └── shift_state.dart       # Shift Tracking & Daily Targets
+│   │   ├── local/
+│   │   │   ├── preferences_manager.dart # Settings & State Persistence
+│   │   │   └── database_service.dart    # Trips & Expenses Local Storage
+│   │   └── repository/
+│   │       └── assistant_repository.dart# Unified Data Repository
+│   ├── engine/
+│   │   └── fare_calculator_engine.dart  # 10s Smart Bid & Zone Analysis Engine
+│   ├── providers/
+│   │   └── assistant_provider.dart      # Reactive Provider State Management
+│   ├── services/
+│   │   └── native_bridge_service.dart   # MethodChannel Bridge to Android HUD
+│   ├── utils/
+│   │   └── update_manager.dart          # GitHub In-App Release Updater
+│   └── ui/
+│       ├── components/           # Reusable Widgets
+│       │   ├── profit_status_banner.dart# Live Profit & Zone Alerts
+│       │   ├── quick_input_slider.dart  # Interactive Distance/Fare Sliders
+│       │   ├── smart_bid_card.dart      # Floor, Recommended & Aggressive Bids
+│       │   └── cost_item_row.dart       # Operating Costs Breakdown
+│       └── screens/              # App Screens
+│           ├── main_navigation_screen.dart # Navigation Bar & Page Controller
+│           ├── calculator_screen.dart      # Smart Fare Calculator
+│           ├── shift_dashboard_screen.dart # Daily Targets & Shift Tracker
+│           ├── expenses_screen.dart        # Vehicle Fleet & Expense Logger
+│           ├── overlay_control_screen.dart # Floating HUD Service Controls
+│           └── settings_screen.dart        # 5 Tabbed Customization Settings
+├── android/                      # Native Android Host & Foreground Services
+├── web-preview/                  # Browser Phone Simulator
 └── README.md
 ```

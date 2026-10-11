@@ -1,123 +1,59 @@
 package com.indrive.assistant
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.viewModels
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Calculate
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.LocalGasStation
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.collectAsState
-import com.indrive.assistant.ui.screens.CalculatorScreen
-import com.indrive.assistant.ui.screens.ExpensesScreen
-import com.indrive.assistant.ui.screens.OverlayControlScreen
-import com.indrive.assistant.ui.screens.ShiftDashboardScreen
-import com.indrive.assistant.ui.screens.SettingsScreen
-import com.indrive.assistant.ui.theme.InDriveAssistantTheme
-import com.indrive.assistant.ui.theme.InDriveNeonGreen
-import com.indrive.assistant.ui.viewmodel.AssistantViewModel
-import com.indrive.assistant.ui.viewmodel.AssistantViewModelFactory
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import android.provider.Settings
+import android.content.Intent
+import android.net.Uri
+import com.indrive.assistant.service.FloatingHudService
+import com.indrive.assistant.service.InDriveAccessibilityService
 
-data class NavItem(
-    val title: String,
-    val icon: ImageVector
-)
+class MainActivity : FlutterActivity() {
+    private val CHANNEL = "com.indrive.assistant/hud"
 
-class MainActivity : ComponentActivity() {
-
-    private val viewModel: AssistantViewModel by viewModels {
-        AssistantViewModelFactory(InDriveAssistantApp.instance.repository)
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        setContent {
-            val themeMode by viewModel.themeMode.collectAsState()
-            InDriveAssistantTheme(themeMode = themeMode) {
-                MainAppContent(viewModel = viewModel)
-            }
-        }
-    }
-}
-
-@Composable
-fun MainAppContent(viewModel: AssistantViewModel) {
-    var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
-
-    val navItems = listOf(
-        NavItem("الحاسبة", Icons.Default.Calculate),
-        NavItem("الوردية", Icons.Default.Dashboard),
-        NavItem("المركبات والمصاريف", Icons.Default.DirectionsCar),
-        NavItem("الزر العائم", Icons.Default.Layers),
-        NavItem("الإعدادات", Icons.Default.Settings)
-    )
-
-    Scaffold(
-        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
-        bottomBar = {
-            NavigationBar(
-                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-                contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
-                tonalElevation = 8.dp
-            ) {
-                navItems.forEachIndexed { index, item ->
-                    val isSelected = selectedIndex == index
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = { selectedIndex = index },
-                        icon = {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.title,
-                                tint = if (isSelected) InDriveNeonGreen else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = item.title,
-                                color = if (isSelected) InDriveNeonGreen else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = InDriveNeonGreen.copy(alpha = 0.15f)
-                        )
-                    )
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "checkOverlayPermission" -> {
+                    result.success(if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
                 }
+                "requestOverlayPermission" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                        startActivity(intent)
+                    }
+                    result.success(true)
+                }
+                "checkAccessibilityPermission" -> {
+                    result.success(InDriveAccessibilityService.isAccessibilityEnabled(this))
+                }
+                "openAccessibilitySettings" -> {
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    startActivity(intent)
+                    result.success(true)
+                }
+                "startFloatingService" -> {
+                    val intent = Intent(this, FloatingHudService::class.java)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(true)
+                }
+                "stopFloatingService" -> {
+                    stopService(Intent(this, FloatingHudService::class.java))
+                    result.success(true)
+                }
+                "isFloatingServiceRunning" -> {
+                    result.success(FloatingHudService.isRunning())
+                }
+                else -> result.notImplemented()
             }
-        }
-    ) { innerPadding ->
-        when (selectedIndex) {
-            0 -> CalculatorScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
-            1 -> ShiftDashboardScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
-            2 -> ExpensesScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
-            3 -> OverlayControlScreen(modifier = Modifier.padding(innerPadding))
-            4 -> SettingsScreen(viewModel = viewModel, modifier = Modifier.padding(innerPadding))
         }
     }
 }
