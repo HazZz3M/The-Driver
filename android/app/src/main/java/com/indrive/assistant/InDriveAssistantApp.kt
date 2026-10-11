@@ -4,7 +4,6 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
-import com.indrive.assistant.data.local.AppDatabase
 import com.indrive.assistant.data.local.PreferencesManager
 import com.indrive.assistant.data.repository.AssistantRepository
 
@@ -17,9 +16,8 @@ class InDriveAssistantApp : Application() {
         super.onCreate()
         instance = this
 
-        val database = AppDatabase.getDatabase(this)
         val preferencesManager = PreferencesManager(this)
-        repository = AssistantRepository(database, preferencesManager)
+        repository = AssistantRepository(preferencesManager)
 
         createNotificationChannel()
     }

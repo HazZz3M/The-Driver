@@ -51,7 +51,18 @@ jobs:
 
     - name: Build Flutter Debug APK
       run: |
-        flutter build apk --debug -v 2>&1 | tee flutter_build.log || (echo "### Build Error Log" >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && tail -n 80 flutter_build.log >> $GITHUB_STEP_SUMMARY && echo '```' >> $GITHUB_STEP_SUMMARY && exit 1)
+        flutter --version
+        echo "Building Flutter debug APK..."
+        flutter build apk --debug --verbose > flutter_build.log 2>&1 || BUILD_EXIT=$?
+        if [ ! -f build/app/outputs/flutter-apk/app-debug.apk ]; then
+          echo "### Flutter Build Failed (Exit code: ${BUILD_EXIT:-1})" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 120 flutter_build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "=== LAST 120 LINES OF LOG ==="
+          tail -n 120 flutter_build.log
+          exit 1
+        fi
         cp build/app/outputs/flutter-apk/app-debug.apk The-Driver.apk
         cp build/app/outputs/flutter-apk/app-debug.apk inDrive-Assistant.apk
         ls -lh The-Driver.apk
@@ -69,10 +80,10 @@ jobs:
       uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/heads/main')
       with:
-        tag_name: v1.5.1
-        name: "The Driver v1.5.1 - Converted to Flutter (Dart Engine & Cockpit UI)"
+        tag_name: v1.6.0
+        name: "The Driver v1.6.0 - Converted to Flutter (Dart Engine & Cockpit UI)"
         body: |
-          ### The Driver v1.5.1 - Full Flutter Transformation
+          ### The Driver v1.6.0 - Full Flutter Transformation
           - **100% Flutter Codebase**: Completely migrated from Jetpack Compose to high-performance Flutter & Dart.
           - **Obsidian Dark & Neon Cockpit UI**: Fatigue-free driver display optimized for high-contrast day & night driving.
           - **Smart 10s Counter-Bidding Engine**: Mathematical floor, recommended sweet-spot, and surge margin analytics.

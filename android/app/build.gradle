@@ -1,6 +1,6 @@
 plugins {
     id "com.android.application"
-    id "kotlin-android"
+    id "org.jetbrains.kotlin.android"
     id "dev.flutter.flutter-gradle-plugin"
 }
 
@@ -14,12 +14,12 @@ if (localPropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
-    flutterVersionCode = '7'
+    flutterVersionCode = '8'
 }
 
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
-    flutterVersionName = '1.5.1'
+    flutterVersionName = '1.6.0'
 }
 
 android {
@@ -76,10 +76,6 @@ flutter {
 dependencies {
     implementation "androidx.core:core-ktx:1.13.1"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.5"
-
-    // Room Database for background overlay service
-    implementation "androidx.room:room-runtime:2.6.1"
-    implementation "androidx.room:room-ktx:2.6.1"
 
     // Coroutines
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"

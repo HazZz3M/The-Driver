@@ -1,11 +1,6 @@
 package com.indrive.assistant.data.model
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "expenses")
 data class Expense(
-    @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val timestamp: Long = System.currentTimeMillis(),
     val category: String, // FUEL, OIL_CHANGE, MAINTENANCE, CAR_WASH, OTHER
@@ -32,4 +27,3 @@ data class Expense(
     val odometerKm: Double? = null,
     val description: String = ""
 )
-
