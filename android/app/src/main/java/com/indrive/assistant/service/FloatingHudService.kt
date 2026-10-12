@@ -81,6 +81,11 @@ class FloatingHudService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_CAPTURE) {
+            InDriveAccessibilityService.captureRequested = true
+            toast("أغلق الإشعارات وافتح شاشة الطلبات في إن درايف: سيتم الالتقاط تلقائياً")
+            return START_STICKY
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             Log.w(TAG, "Overlay permission missing; stopping HUD service")
             stopSelf()
@@ -109,6 +114,16 @@ class FloatingHudService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(openIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent)
+            .addAction(
+                android.R.drawable.ic_menu_camera,
+                "التقاط للتشخيص",
+                PendingIntent.getService(
+                    this,
+                    2,
+                    Intent(this, FloatingHudService::class.java).setAction(ACTION_CAPTURE),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
             .setOngoing(true)
             .build()
     }
@@ -287,12 +302,12 @@ class FloatingHudService : Service() {
 
     /** Profitability decides the colour; zones only add a marker and a label. */
     private fun themeFor(ride: ParsedRideData, analysis: FareAnalysisResult): BadgeTheme {
-        if (ride.distanceEstimated) return BadgeTheme(COLOR_UNKNOWN, "المسافة غير مؤكدة - راجع الطلب")
+        if (ride.distanceUnknown) return BadgeTheme(COLOR_UNKNOWN, "لم تُقرأ المسافة - راجع الطلب")
         val zoneSuffix = when {
             analysis.matchedBlacklistZone != null -> " • منطقة محظورة (${analysis.matchedBlacklistZone})"
             analysis.matchedFavoriteZone != null -> " • ★ منطقة مفضلة (${analysis.matchedFavoriteZone})"
             else -> ""
-        }
+        } + if (ride.distanceEstimated) " • ربح تقريبي" else ""
         return when (analysis.profitabilityLevel) {
             ProfitabilityLevel.EXCELLENT_PROFIT -> BadgeTheme(COLOR_EXCELLENT, "ربح ممتاز$zoneSuffix")
             ProfitabilityLevel.GOOD_PROFIT -> BadgeTheme(COLOR_GOOD, "عرض رابح$zoneSuffix")
@@ -306,7 +321,7 @@ class FloatingHudService : Service() {
         val a = holder.analysis
         val r = holder.ride
         val key = listOf(
-            holder.isExpanded, r.distanceEstimated, r.fare.toInt(), a.netProfit.roundToInt(),
+            holder.isExpanded, r.pickupKnown, r.tripKnown, r.addressCandidates, r.fare.toInt(), a.netProfit.roundToInt(),
             a.recommendedFare.toInt(), a.profitabilityLevel, a.matchedFavoriteZone, a.matchedBlacklistZone,
             r.pickupAddress, r.dropoffAddress, String.format(Locale.US, "%.1f/%.1f", r.pickupDistanceKm, r.tripDistanceKm),
             prefs.overlayStyleFlow.value, prefs.overlaySizeFlow.value,
@@ -331,11 +346,15 @@ class FloatingHudService : Service() {
         }
     }
 
-    /** Compact badge text: the ride's net profit, or "?" when the distance is a guess. */
+    /**
+     * Compact badge text: the ride's net profit. Prefixed with "≈" when one distance had to be
+     * assumed, and "؟" when no distance could be read at all.
+     */
     private fun badgeValue(holder: CardPopupViewHolder): String {
-        if (holder.ride.distanceEstimated) return "؟"
+        if (holder.ride.distanceUnknown) return "؟"
         val p = holder.analysis.netProfit.roundToInt()
-        return if (p >= 0) "+$p" else "−${abs(p)}"
+        val value = if (p >= 0) "+$p" else "−${abs(p)}"
+        return if (holder.ride.distanceEstimated) "≈$value" else value
     }
 
     private fun renderCompactBadge(holder: CardPopupViewHolder, theme: BadgeTheme) {
@@ -349,7 +368,7 @@ class FloatingHudService : Service() {
         }
 
         val value = badgeValue(holder)
-        val isFav = holder.analysis.isFavoriteZone && !holder.ride.distanceEstimated
+        val isFav = holder.analysis.isFavoriteZone && !holder.ride.distanceUnknown
 
         val badgeView = when (style) {
             "SLIM_PILL" -> buildSlimPill(value, theme.colorHex, sizeScale, density)
@@ -640,13 +659,13 @@ class FloatingHudService : Service() {
         )
 
         // ROW 4: Distances
-        val distText = if (card.distanceEstimated) {
-            "المسافة: لم تُقرأ بدقة (الأرقام تقديرية) - راجع الطلب في إن درايف"
+        fun km(v: Double, known: Boolean) =
+            if (known) String.format(Locale.US, "%.1f", v) else String.format(Locale.US, "~%.0f؟", v)
+        val distText = if (card.distanceUnknown) {
+            "المسافة: لم تُقرأ من الكارت - راجع الطلب في إن درايف"
         } else {
-            String.format(
-                Locale.US, "المسافة: %.1f كم  (%.1f وصول + %.1f مشوار)",
-                card.totalDistanceKm, card.pickupDistanceKm, card.tripDistanceKm
-            )
+            "المسافة: ${km(card.pickupDistanceKm, card.pickupKnown)} وصول + ${km(card.tripDistanceKm, card.tripKnown)} مشوار (كم)" +
+                if (card.distanceEstimated) "\nالرقم الذي عليه ؟ غير ظاهر في الكارت وتم افتراضه" else ""
         }
         val distRow = infoRow(distText, if (card.distanceEstimated) "#FBBF24" else "#F8FAFC", density, bold = false)
 
@@ -655,11 +674,25 @@ class FloatingHudService : Service() {
         cardRoot.addView(profitRow)
         cardRoot.addView(distRow)
 
+        // Zone tagging: pickup / drop-off if recognised, plus any other place names on the card.
+        val shown = mutableListOf<String>()
         if (card.pickupAddress.isNotBlank()) {
             cardRoot.addView(buildZoneAddressActionRow(card.pickupAddress, "التحرك", holder, density))
+            shown.add(card.pickupAddress)
         }
-        if (card.dropoffAddress.isNotBlank()) {
+        if (card.dropoffAddress.isNotBlank() && card.dropoffAddress !in shown) {
             cardRoot.addView(buildZoneAddressActionRow(card.dropoffAddress, "الوصول", holder, density))
+            shown.add(card.dropoffAddress)
+        }
+        card.addressCandidates.filter { it !in shown }.take(2).forEach {
+            cardRoot.addView(buildZoneAddressActionRow(it, "مكان", holder, density))
+            shown.add(it)
+        }
+        if (shown.isEmpty()) {
+            cardRoot.addView(infoRow(
+                "لم يُعثر على اسم منطقة في هذا الكارت. استخدم \"التقاط للتشخيص\" من الإشعار وأرسل الملف للمطور.",
+                "#94A3B8", density, bold = false
+            ))
         }
 
         holder.container.addView(cardRoot)
@@ -944,6 +977,7 @@ class FloatingHudService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val BADGE_MARGIN_X = 20
         const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
+        const val ACTION_CAPTURE = "com.indrive.assistant.action.CAPTURE_SCREEN"
 
         private const val COLOR_EXCELLENT = "#10B981"
         private const val COLOR_GOOD = "#00EA80"

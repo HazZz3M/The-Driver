@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../services/native_bridge_service.dart';
 import '../../theme/app_colors.dart';
 import '../components/dialogs.dart';
@@ -71,6 +72,30 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
     }
     await Future.delayed(const Duration(milliseconds: 300));
     await _refreshPermissions();
+  }
+
+  Future<void> _armCapture() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (!_hasAccessibilityPermission) {
+      messenger.showSnackBar(const SnackBar(content: Text("فعّل خدمة قراءة الشاشة أولاً")));
+      return;
+    }
+    await NativeBridgeService.requestScreenCapture();
+    messenger.showSnackBar(const SnackBar(
+      duration: Duration(seconds: 6),
+      content: Text("افتح إن درايف على شاشة الطلبات (والكروت ظاهرة)، سيتم الالتقاط تلقائياً ثم ارجع هنا واضغط \"نسخ اللقطة\""),
+    ));
+  }
+
+  Future<void> _copyDump() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final dump = await NativeBridgeService.getLastScreenDump();
+    if (dump == null || dump.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text("لا توجد لقطة بعد. اضغط \"التقاط\" أولاً")));
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: dump));
+    messenger.showSnackBar(const SnackBar(content: Text("تم نسخ اللقطة. الصقها في رسالة للمطور")));
   }
 
   Future<void> _refreshPermissions() async {
@@ -245,6 +270,61 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
                     "• اسحب العلامة لتغيير موضعها، واضغط عليها لعرض التفاصيل وإدارة المناطق.\n"
                     "• لإيقاف المساعد بسرعة استخدم زر \"إيقاف\" في الإشعار.",
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Diagnostics: capture the real structure of an inDrive screen for parser tuning
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.darkSurface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.darkCardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.bug_report_outlined, color: AppColors.accentAmber, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "تشخيص قراءة الكروت",
+                          style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    "إذا ظهرت المسافة أو العنوان بشكل خاطئ: التقط شاشة الطلبات وأرسل النص للمطور. "
+                    "اللقطة تحتوي على نصوص الشاشة (أسماء الركاب والعناوين) ولا تُرسل لأي جهة تلقائياً.",
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                          label: const Text("التقاط", style: TextStyle(fontSize: 12.5)),
+                          onPressed: _armCapture,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.copy, size: 18),
+                          label: const Text("نسخ اللقطة", style: TextStyle(fontSize: 12.5)),
+                          onPressed: _copyDump,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

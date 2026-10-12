@@ -108,6 +108,26 @@ class NativeBridgeService {
     }
   }
 
+  /// Arms a one-shot diagnostic capture of the next inDrive screen the service reads.
+  static Future<bool> requestScreenCapture() async {
+    try {
+      return await _channel.invokeMethod<bool>('requestScreenCapture') ?? false;
+    } catch (e) {
+      debugPrint("requestScreenCapture failed: $e");
+      return false;
+    }
+  }
+
+  /// The last diagnostic capture (node tree + parsed cards), or null if none was taken yet.
+  static Future<String?> getLastScreenDump() async {
+    try {
+      return await _channel.invokeMethod<String>('getLastScreenDump');
+    } catch (e) {
+      debugPrint("getLastScreenDump failed: $e");
+      return null;
+    }
+  }
+
   /// The installed app's versionName (from the APK, not a hard-coded constant).
   static Future<String?> getAppVersion() async {
     try {

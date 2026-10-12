@@ -71,6 +71,13 @@ class MainActivity : FlutterActivity() {
                 "getNativeZones" -> {
                     result.success(InDriveAssistantApp.instance.repository.zonesAsJson().toString())
                 }
+                "requestScreenCapture" -> {
+                    InDriveAccessibilityService.captureRequested = true
+                    result.success(true)
+                }
+                "getLastScreenDump" -> {
+                    result.success(InDriveAccessibilityService.readLastDump(this))
+                }
                 "getAppVersion" -> {
                     val info = packageManager.getPackageInfo(packageName, 0)
                     result.success(info.versionName ?: "")

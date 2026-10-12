@@ -2,7 +2,6 @@ package com.indrive.assistant.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
-import android.graphics.Point
 import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
@@ -17,6 +16,7 @@ import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.data.model.DriverSettings
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.engine.FareCalculatorEngine
+import java.io.File
 
 class InDriveAccessibilityService : AccessibilityService() {
 
@@ -79,12 +79,76 @@ class InDriveAccessibilityService : AccessibilityService() {
                 return
             }
             val rides = findRideCards(root)
+            if (captureRequested) {
+                captureRequested = false
+                saveDiagnosticDump(root, pkg, rides)
+            }
             FloatingHudService.onCardsSync(rides)
             maybeScheduleAutoAccept(rides)
         } catch (e: Exception) {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
             root.recycle()
+        }
+    }
+
+    // =========================================================================
+    // DIAGNOSTIC CAPTURE (lets the driver send us the real structure of an inDrive screen)
+    // =========================================================================
+
+    private fun saveDiagnosticDump(root: AccessibilityNodeInfo, pkg: String, rides: List<ParsedRideData>) {
+        val sb = StringBuilder()
+        sb.append("The Driver screen dump | pkg=").append(pkg)
+            .append(" | time=").append(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
+            .append('\n')
+        sb.append("== PARSED CARDS (").append(rides.size).append(") ==\n")
+        rides.forEachIndexed { i, r ->
+            sb.append("#").append(i + 1)
+                .append(" fare=").append(r.fare)
+                .append(" pickup=").append(if (r.pickupKnown) r.pickupDistanceKm.toString() else "?")
+                .append(" trip=").append(if (r.tripKnown) r.tripDistanceKm.toString() else "?")
+                .append(" name='").append(r.passengerName).append("'")
+                .append(" from='").append(r.pickupAddress).append("'")
+                .append(" to='").append(r.dropoffAddress).append("'")
+                .append(" candidates=").append(r.addressCandidates)
+                .append(" bounds=").append(r.screenBounds?.toShortString())
+                .append('\n')
+        }
+        sb.append("== NODE TREE ==\n")
+        val count = intArrayOf(0)
+        dumpNode(root, 0, sb, count)
+        if (count[0] >= MAX_DUMP_NODES) sb.append("... (truncated at ").append(MAX_DUMP_NODES).append(" nodes)\n")
+
+        val text = sb.toString()
+        lastDump = text
+        try {
+            File(filesDir, DUMP_FILE).writeText(text)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not write diagnostic dump", e)
+        }
+        mainHandler.post {
+            Toast.makeText(applicationContext, "تم التقاط الشاشة للتشخيص (${rides.size} كارت). ارجع للتطبيق لنسخها.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun dumpNode(node: AccessibilityNodeInfo, depth: Int, sb: StringBuilder, count: IntArray) {
+        if (count[0] >= MAX_DUMP_NODES) return
+        count[0]++
+        val r = Rect()
+        node.getBoundsInScreen(r)
+        sb.append("  ".repeat(depth.coerceAtMost(30)))
+            .append(node.className?.toString()?.substringAfterLast('.') ?: "?")
+        node.viewIdResourceName?.let { sb.append(" id=").append(it.substringAfterLast('/')) }
+        node.text?.let { sb.append(" t='").append(it.toString().replace('\n', '⏎')).append("'") }
+        node.contentDescription?.let { sb.append(" d='").append(it.toString().replace('\n', '⏎')).append("'") }
+        sb.append(" [").append(r.left).append(',').append(r.top).append(',').append(r.right).append(',').append(r.bottom).append(']')
+        if (node.isClickable) sb.append(" click")
+        if (node.isScrollable) sb.append(" scroll")
+        sb.append('\n')
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            dumpNode(child, depth + 1, sb, count)
+            child.recycle()
         }
     }
 
@@ -134,8 +198,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "Auto-accept aborted: card bounds unknown")
                 return
             }
-            val clicked = clickAcceptButtonInside(root, cardBounds)
-            if (clicked) {
+            if (clickAcceptButtonInside(root, cardBounds)) {
                 lastAutoAcceptedFingerprint = fingerprint
                 lastAutoAcceptTimestamp = System.currentTimeMillis()
                 val analysis = analyze(card, settings)
@@ -237,24 +300,44 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val TAG = "InDriveA11y"
         private const val SCAN_DELAY_MS = 200L
         private const val AUTO_ACCEPT_COOLDOWN_MS = 5000L
+        private const val MAX_DUMP_NODES = 900
+        const val DUMP_FILE = "inDrive_screen_dump.txt"
 
         @Volatile
         private var instance: InDriveAccessibilityService? = null
 
-        // ---- Precompiled patterns (previously rebuilt for every node on every scan) ----
-        private val CURRENCY_PREFIX_AMOUNT = Regex("""(?:EGP|ج\.?م|جنيه|جم)\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
-        private val CURRENCY_SUFFIX_AMOUNT = Regex("""(\d+(?:[.,]\d+)?)\s*(?:EGP|ج\.?م|جنيه|جم)""", RegexOption.IGNORE_CASE)
-        private val TILDE_DISTANCE = Regex("""~\s*\d+(?:[.,]\d+)?\s*(?:km|كم|متر|م)""", RegexOption.IGNORE_CASE)
-        private val ACCEPT_FOR_FARE = Regex("""(?:Accept for EGP|Accept for|قبول مقابل)\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
-        private val ACCEPT_BUTTON_REGEX = Regex("""^(?:Accept|قبول)(?:\s|$)|Accept for|قبول مقابل""", RegexOption.IGNORE_CASE)
-        private val COUNTER_BID = Regex("""^EGP\s*(\d+)$""", RegexOption.IGNORE_CASE)
-        private val RATING = Regex("""^(\d\.\d)(?:\s*\(\d+\))?$""")
-        private val KM_SUFFIX = Regex("""(?:~)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم|ك\.?م)""", RegexOption.IGNORE_CASE)
-        private val KM_PREFIX = Regex("""(?:km|كم|ك\.?م)\s*(?:~)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
-        private val METERS = Regex("""(?:~)?\s*(\d+)\s*(?:متر|م|m)(?:\s|$|[^\p{L}\d])""", RegexOption.IGNORE_CASE)
-        private val ANCHOR_PHRASES = listOf("Accept for", "قبول مقابل", "Offer your fare", "اقترح سعرك", "تقديم عرض", "قدم عرض")
+        /** Set by the app / HUD notification; the next inDrive scan writes a diagnostic dump. */
+        @Volatile
+        var captureRequested = false
 
-        // Placeholders used only when a distance cannot be read; such cards are flagged as estimated.
+        @Volatile
+        private var lastDump: String? = null
+
+        fun readLastDump(context: Context): String? =
+            lastDump ?: File(context.filesDir, DUMP_FILE).takeIf { it.exists() }?.readText()
+
+        // ---- Precompiled patterns ----
+        private const val CURRENCY = """(?:EGP|E£|ج\.?\s?م|جنيه|جم)"""
+        private val CURRENCY_PREFIX_AMOUNT = Regex("""$CURRENCY\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+        private val CURRENCY_SUFFIX_AMOUNT = Regex("""(\d+(?:[.,]\d+)?)\s*$CURRENCY""", RegexOption.IGNORE_CASE)
+        private val ACCEPT_FOR_FARE = Regex("""(?:Accept for|قبول مقابل|قبول بـ?)\s*(?:$CURRENCY)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+        private val ACCEPT_BUTTON_REGEX = Regex("""^(?:Accept|قبول)(?:\s|$)|Accept for|قبول مقابل""", RegexOption.IGNORE_CASE)
+        private val COUNTER_BID = Regex("""^(?:EGP|ج\.?م)?\s*(\d+)\s*(?:EGP|ج\.?م)?$""", RegexOption.IGNORE_CASE)
+        private val RATING = Regex("""^(\d\.\d{1,2})(?:\s*\(\d+\))?$""")
+        private val KM_SUFFIX = Regex("""(?:~|≈)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم|ك\.?م|كيلو(?:متر)?)""", RegexOption.IGNORE_CASE)
+        private val KM_PREFIX = Regex("""(?:km|كم)\s*(?:~|≈)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
+        private val METERS = Regex("""(?:~|≈)?\s*(\d+)\s*(?:متر|م|m)(?:\s|$|[^\p{L}\d])""", RegexOption.IGNORE_CASE)
+        private val TIME_ONLY = Regex("""^[~≈]?\s*\d+\s*(?:min|mins|minute|minutes|h|hr|hrs|د|دق|دقيقة|دقائق|ساعة|ساعات)\.?$""", RegexOption.IGNORE_CASE)
+        private val LETTER = Regex("""\p{L}""")
+        private val PICKUP_HINTS = listOf("~", "≈", "away", "to pickup", "to client", "منك", "إليك", "اليك", "للعميل", "للراكب", "وصول")
+
+        /** UI labels that are never addresses. */
+        private val NON_ADDRESS_LABELS = listOf(
+            "accept", "skip", "offer", "fair price", "decline", "cash", "card", "comment", "passenger",
+            "قبول", "تخطي", "اقترح", "قدم عرض", "تقديم عرض", "سعر مناسب", "رفض", "نقد", "كاش", "بطاقة", "تعليق", "راكب"
+        )
+
+        // Placeholders used only when a distance cannot be read; flagged via pickupKnown/tripKnown.
         private const val PLACEHOLDER_PICKUP_KM = 1.0
         private const val PLACEHOLDER_TRIP_KM = 4.0
 
@@ -295,80 +378,66 @@ class InDriveAccessibilityService : AccessibilityService() {
                 when (c) {
                     in '٠'..'٩' -> sb.append(c - '٠')
                     in '۰'..'۹' -> sb.append(c - '۰')
-                    '٫', '،' -> sb.append('.')
+                    '٫' -> sb.append('.')
                     else -> sb.append(c)
                 }
             }
             return sb.toString()
         }
 
-        fun findRideCards(root: AccessibilityNodeInfo): List<ParsedRideData> {
-            val parsedCards = mutableListOf<ParsedRideData>()
-            val seenBounds = mutableSetOf<String>()
+        private fun hasFareText(norm: String): Boolean =
+            ACCEPT_FOR_FARE.containsMatchIn(norm) ||
+                CURRENCY_PREFIX_AMOUNT.containsMatchIn(norm) ||
+                CURRENCY_SUFFIX_AMOUNT.containsMatchIn(norm)
 
-            // 1. Collect screen texts for contextual fallback & map pins
+        private fun isSkipLabel(s: String) = s.equals("Skip", ignoreCase = true) || s.equals("تخطي", ignoreCase = true)
+
+        /**
+         * Splits the screen into ride cards.
+         *
+         * A feed card is the item of the vertical list (RecyclerView / LazyColumn) that contains a
+         * fare text. All fare texts of one card (price, "Accept for N", counter-bid chips) map to
+         * the same list item, so a card is always parsed as a whole, never as a lone price node.
+         * Screens without such a list (full-screen request, incoming-offer modal) are parsed as a
+         * single card.
+         */
+        fun findRideCards(root: AccessibilityNodeInfo): List<ParsedRideData> {
+            val rootBounds = Rect()
+            root.getBoundsInScreen(rootBounds)
+
             val allScreenTexts = mutableListOf<String>()
             collectNodeTexts(root, allScreenTexts)
-            val normalizedAll = allScreenTexts.map { normalizeArabicDigits(it.trim()) }
+            val hasSkipButton = allScreenTexts.any { isSkipLabel(normalizeArabicDigits(it.trim())) }
 
-            // Incoming-offer modal (has Skip / تخطي)
-            val hasSkipButton = normalizedAll.any { isSkipLabel(it) }
+            val parsedCards = mutableListOf<ParsedRideData>()
 
-            // 2. Search for individual offer anchor nodes across the screen
-            val anchorNodes = mutableListOf<AccessibilityNodeInfo>()
-            findOfferAnchors(root, anchorNodes)
+            if (!hasSkipButton) {
+                val fareNodes = mutableListOf<AccessibilityNodeInfo>()
+                findFareNodes(root, fareNodes)
 
-            val anchorCenters = anchorNodes.map { node ->
-                val r = Rect()
-                node.getBoundsInScreen(r)
-                Point(r.centerX(), r.centerY())
+                val seenItems = mutableSetOf<String>()
+                for (fareNode in fareNodes) {
+                    val item = findListItemAncestor(fareNode) ?: continue
+                    val itemBounds = Rect()
+                    item.getBoundsInScreen(itemBounds)
+                    val key = itemBounds.toShortString()
+                    if (!seenItems.add(key)) continue
+
+                    val texts = mutableListOf<String>()
+                    collectNodeTexts(item, texts)
+                    parseCard(texts, itemBounds)?.let { parsedCards.add(it) }
+                }
+                fareNodes.filter { it !== root }.forEach { it.recycle() }
             }
 
-            for ((index, anchor) in anchorNodes.withIndex()) {
-                val anchorBounds = Rect()
-                anchor.getBoundsInScreen(anchorBounds)
-
-                val otherCenters = anchorCenters.filterIndexed { i, _ -> i != index }
-                val cardNode = findEnclosingCardContainer(anchor, otherCenters) ?: anchor
-                val bounds = Rect()
-                cardNode.getBoundsInScreen(bounds)
-
-                // Ensure bounds are tied to the card item, not the entire root window
-                val cardBounds = if (bounds.top > 60 && bounds.height() in 100..1400) {
-                    bounds
-                } else if (anchorBounds.top > 60) {
-                    val top = (anchorBounds.top - 180).coerceAtLeast(80)
-                    Rect(anchorBounds.left, top, anchorBounds.right, anchorBounds.bottom)
-                } else {
-                    bounds
-                }
-
-                val boundsKey = if (cardBounds.height() in 100..1400) {
-                    "${cardBounds.left}_${cardBounds.top}_${cardBounds.bottom}"
-                } else {
-                    "${anchorBounds.left}_${anchorBounds.top}_${anchorBounds.bottom}"
-                }
-                if (!seenBounds.add(boundsKey)) continue
-
-                val texts = mutableListOf<String>()
-                collectNodeTexts(cardNode, texts)
-
-                parseRideScreen(texts, cardBounds, anchorBounds, if (hasSkipButton) allScreenTexts else null)
-                    ?.let { parsedCards.add(it) }
-            }
-            // The root is owned (and recycled) by the caller.
-            anchorNodes.filter { it !== root }.forEach { it.recycle() }
-
-            // Fallback: If no distinct containers isolated, parse whole screen
+            // Full-screen request / modal / unknown layout: one card made of the whole screen.
             if (parsedCards.isEmpty()) {
-                val rootBounds = Rect()
-                root.getBoundsInScreen(rootBounds)
-                val fallbackBounds = if (hasSkipButton) {
+                val bounds = if (hasSkipButton) {
                     Rect(0, (rootBounds.height() * 0.45).toInt(), rootBounds.width(), rootBounds.height())
                 } else {
                     Rect(0, 320, rootBounds.width(), rootBounds.height())
                 }
-                parseRideScreen(allScreenTexts, fallbackBounds, null, allScreenTexts)?.let { parsedCards.add(it) }
+                parseCard(allScreenTexts, bounds)?.let { parsedCards.add(it) }
             }
 
             // Give identical-looking cards distinct identities so each keeps its own popup.
@@ -380,58 +449,43 @@ class InDriveAccessibilityService : AccessibilityService() {
             }
         }
 
-        private fun isSkipLabel(s: String) = s.equals("Skip", ignoreCase = true) || s.equals("تخطي", ignoreCase = true)
-
-        private fun findOfferAnchors(node: AccessibilityNodeInfo, anchors: MutableList<AccessibilityNodeInfo>) {
+        private fun findFareNodes(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
             val norm = normalizeArabicDigits("${node.text ?: ""} ${node.contentDescription ?: ""}".trim())
-
-            val isAnchor = norm.isNotEmpty() && (
-                ANCHOR_PHRASES.any { norm.contains(it, ignoreCase = true) } ||
-                    isSkipLabel(norm) ||
-                    CURRENCY_PREFIX_AMOUNT.containsMatchIn(norm) ||
-                    CURRENCY_SUFFIX_AMOUNT.containsMatchIn(norm) ||
-                    TILDE_DISTANCE.containsMatchIn(norm)
-                )
-            if (isAnchor) anchors.add(node)
-
+            if (norm.isNotEmpty() && hasFareText(norm)) out.add(node)
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
-                findOfferAnchors(child, anchors)
-                if (anchors.none { it === child }) child.recycle()
+                findFareNodes(child, out)
+                if (out.none { it === child }) child.recycle()
             }
         }
 
-        private fun findEnclosingCardContainer(
-            node: AccessibilityNodeInfo,
-            otherAnchorCenters: List<Point>
-        ): AccessibilityNodeInfo? {
-            var curr: AccessibilityNodeInfo = node
-            var bestCandidate: AccessibilityNodeInfo = node
-
-            while (true) {
-                val parent = curr.parent ?: break
-                val parentBounds = Rect()
-                parent.getBoundsInScreen(parentBounds)
-
-                // If parent contains ANY other anchor on the screen, stop climbing to avoid merging cards
-                if (otherAnchorCenters.any { parentBounds.contains(it.x, it.y) }) return bestCandidate
-
+        /**
+         * Climbs from [node] to the child of the nearest *vertical* list container (its item).
+         * Horizontal rows (e.g. counter-bid chips) are skipped: their items are much narrower than
+         * the row. Returns null when the node is not inside a list.
+         */
+        private fun findListItemAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            var child: AccessibilityNodeInfo = node
+            var depth = 0
+            while (depth < 40) {
+                val parent = child.parent ?: return null
                 val pClass = parent.className?.toString() ?: ""
-                val isListContainer = parent.isScrollable ||
+                val isList = parent.isScrollable ||
                     pClass.contains("RecyclerView", ignoreCase = true) ||
-                    pClass.contains("ListView", ignoreCase = true) ||
-                    pClass.contains("ViewPager", ignoreCase = true) ||
-                    pClass.contains("ScrollView", ignoreCase = true)
-                if (isListContainer) return curr
-
-                if (parentBounds.height() > 1300) return bestCandidate
-
-                if (parentBounds.height() in 120..1150 && parentBounds.width() >= 250) {
-                    bestCandidate = parent
+                    pClass.contains("ListView", ignoreCase = true)
+                if (isList) {
+                    val pb = Rect()
+                    val cb = Rect()
+                    parent.getBoundsInScreen(pb)
+                    child.getBoundsInScreen(cb)
+                    val spansWidth = pb.width() > 0 && cb.width() >= pb.width() * 0.75
+                    val isCardSized = cb.height() in 120..(pb.height().coerceAtLeast(121))
+                    if (spansWidth && isCardSized) return child
                 }
-                curr = parent
+                child = parent
+                depth++
             }
-            return bestCandidate
+            return null
         }
 
         private fun collectNodeTexts(node: AccessibilityNodeInfo, texts: MutableList<String>) {
@@ -446,158 +500,173 @@ class InDriveAccessibilityService : AccessibilityService() {
             }
         }
 
-        fun parseRideScreen(
-            texts: List<String>,
-            bounds: Rect? = null,
-            anchorBounds: Rect? = null,
-            allScreenTexts: List<String>? = null
-        ): ParsedRideData? {
+        /** Parses one card's texts (in reading order). Returns null when no fare is found. */
+        fun parseCard(rawTexts: List<String>, bounds: Rect?): ParsedRideData? {
+            // Merged semantics (Compose) can put several lines in one node: split them.
+            val texts = rawTexts.flatMap { it.split('\n') }.map { it.trim() }.filter { it.isNotEmpty() }
             if (texts.isEmpty()) return null
+            val norm = texts.map { normalizeArabicDigits(it) }
 
-            val normalizedTexts = texts.map { normalizeArabicDigits(it.trim()) }
-            val normalizedAll = allScreenTexts?.map { normalizeArabicDigits(it.trim()) } ?: normalizedTexts
-            val isModal = normalizedTexts.any { isSkipLabel(it) } || normalizedAll.any { isSkipLabel(it) }
+            // 1. Fare: prefer the explicit "Accept for N" label, else the first currency amount.
+            var fare: Double? = null
+            for (t in norm) {
+                val v = ACCEPT_FOR_FARE.find(t)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
+                if (v != null) { fare = v; break }
+            }
+            if (fare == null) {
+                for (t in norm) {
+                    val m = CURRENCY_PREFIX_AMOUNT.find(t) ?: CURRENCY_SUFFIX_AMOUNT.find(t) ?: continue
+                    val v = m.groupValues[1].replace(',', '.').toDoubleOrNull()
+                    if (v != null) { fare = v; break }
+                }
+            }
+            if (fare == null || fare <= 0.0) return null
 
-            // 1. Passenger Name & Rating
+            // 2. Passenger name & rating
             var passengerName = ""
             var passengerRating = ""
-            val ratingIdx = normalizedTexts.indexOfFirst { RATING.matches(it) }
-            if (ratingIdx > 0) {
-                val candidateName = texts[ratingIdx - 1].trim()
-                if (!candidateName.contains("min", ignoreCase = true) &&
-                    !candidateName.contains("km", ignoreCase = true) &&
-                    !candidateName.equals("A", ignoreCase = true) &&
-                    !candidateName.equals("B", ignoreCase = true) &&
-                    candidateName.length in 2..30
-                ) {
-                    passengerName = candidateName
-                }
+            val ratingIdx = norm.indexOfFirst { RATING.matches(it) }
+            if (ratingIdx >= 0) {
                 passengerRating = texts[ratingIdx]
+                if (ratingIdx > 0) {
+                    val candidate = texts[ratingIdx - 1]
+                    if (candidate.length in 2..30 && !hasFareText(norm[ratingIdx - 1]) &&
+                        extractDistances(norm[ratingIdx - 1]).isEmpty()
+                    ) {
+                        passengerName = candidate
+                    }
+                }
             }
 
-            // 2. Fare: prefer the explicit "Accept for N" button label
-            var fare: Double? = null
-            for (t in normalizedTexts) {
-                val m = ACCEPT_FOR_FARE.find(t) ?: continue
-                fare = m.groupValues[1].replace(',', '.').toDoubleOrNull()
-                if (fare != null) break
-            }
-            if (fare == null) fare = firstCurrencyAmount(normalizedTexts)
-            if (fare == null && isModal) fare = firstCurrencyAmount(normalizedAll)
+            // 3. Distances (currency amounts are stripped first so merged texts still count)
+            val distances = resolveDistances(norm)
 
-            // 3. Distances
-            val textsForDistances = if (isModal) normalizedAll else normalizedTexts
-            val distances = extractDistancesFromTexts(textsForDistances)
-
-            // 4. Counter Bids
-            val counterBids = mutableListOf<Int>()
-            for (t in (if (isModal) normalizedAll else normalizedTexts)) {
-                val b = COUNTER_BID.find(t)?.groupValues?.get(1)?.toIntOrNull() ?: continue
-                if (b.toDouble() != fare && !counterBids.contains(b)) counterBids.add(b)
-            }
+            // 4. Counter bids (chips like "EGP 90" / "90")
+            val counterBids = norm.mapNotNull { COUNTER_BID.find(it)?.groupValues?.get(1)?.toIntOrNull() }
+                .filter { it.toDouble() != fare && it in 5..5000 }
+                .distinct()
+                .sorted()
 
             // 5. Addresses
+            val candidates = addressCandidates(texts, norm, passengerName)
             var pickupAddress = ""
             var dropoffAddress = ""
-            val fairPriceIdx = normalizedTexts.indexOfFirst { it.equals("Fair price", ignoreCase = true) || it.contains("سعر مناسب") }
-            if (fairPriceIdx != -1 && fairPriceIdx + 2 < texts.size) {
-                pickupAddress = texts[fairPriceIdx + 1]
-                dropoffAddress = texts[fairPriceIdx + 2]
+            val fairIdx = norm.indexOfFirst { it.equals("Fair price", ignoreCase = true) || it.contains("سعر مناسب") }
+            if (fairIdx != -1 && fairIdx + 2 < texts.size) {
+                pickupAddress = texts[fairIdx + 1]
+                dropoffAddress = texts[fairIdx + 2]
+            } else {
+                pickupAddress = textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
+                dropoffAddress = textAfterMarker(texts, norm, "B", candidates)
+                    ?: candidates.firstOrNull { it != pickupAddress } ?: ""
             }
 
-            if (fare == null || fare <= 0.0) return null
             return ParsedRideData(
                 passengerName = passengerName,
                 passengerRating = passengerRating,
                 fare = fare,
                 pickupDistanceKm = distances.pickupKm ?: PLACEHOLDER_PICKUP_KM,
                 tripDistanceKm = distances.tripKm ?: PLACEHOLDER_TRIP_KM,
-                distanceEstimated = distances.pickupKm == null || distances.tripKm == null,
+                pickupKnown = distances.pickupKm != null,
+                tripKnown = distances.tripKm != null,
                 pickupAddress = pickupAddress,
                 dropoffAddress = dropoffAddress,
-                counterBids = counterBids.sorted(),
+                addressCandidates = candidates,
+                counterBids = counterBids,
                 screenBounds = bounds,
-                anchorBounds = anchorBounds
+                anchorBounds = bounds
             )
         }
 
-        private fun firstCurrencyAmount(texts: List<String>): Double? {
-            for (t in texts) {
-                val m = CURRENCY_PREFIX_AMOUNT.find(t) ?: CURRENCY_SUFFIX_AMOUNT.find(t) ?: continue
-                val v = m.groupValues[1].replace(',', '.').toDoubleOrNull()
-                if (v != null) return v
+        private fun textAfterMarker(texts: List<String>, norm: List<String>, marker: String, candidates: List<String>): String? {
+            val idx = norm.indexOfFirst { it.equals(marker, ignoreCase = false) }
+            if (idx == -1) return null
+            for (j in idx + 1 until texts.size) {
+                if (texts[j] in candidates) return texts[j]
             }
             return null
         }
 
+        /** Texts that look like place names: letters, not money, not a bare time/distance, not a UI label. */
+        private fun addressCandidates(texts: List<String>, norm: List<String>, passengerName: String): List<String> {
+            val result = mutableListOf<String>()
+            for (i in texts.indices) {
+                val t = texts[i]
+                val n = norm[i]
+                if (t.length !in 3..90) continue
+                if (t == passengerName) continue
+                if (LETTER.findAll(n).count() < 3) continue
+                if (hasFareText(n)) continue
+                if (RATING.matches(n) || TIME_ONLY.matches(n)) continue
+                if (extractDistances(n).isNotEmpty() && n.length < 20) continue
+                val lower = n.lowercase()
+                if (NON_ADDRESS_LABELS.any { lower == it || (lower.length < 25 && lower.contains(it)) }) continue
+                if (t !in result) result.add(t)
+                if (result.size >= 4) break
+            }
+            return result
+        }
+
         private data class Distances(val pickupKm: Double?, val tripKm: Double?)
 
-        private fun extractDistancesFromTexts(normalizedTexts: List<String>): Distances {
+        /**
+         * Pickup vs trip distance:
+         *  1. Texts next to map markers "A" (pickup) / "B" (destination).
+         *  2. A distance with a "~"/"≈" or pickup wording ("منك", "away") is the pickup distance.
+         *  3. Otherwise distances in reading order: first = pickup, second = trip.
+         *  A single unlabeled distance is treated as the pickup distance (what feed cards show);
+         *  the trip distance then stays unknown and the HUD marks the profit as approximate.
+         */
+        private fun resolveDistances(norm: List<String>): Distances {
             var pickupKm: Double? = null
             var tripKm: Double? = null
 
-            val allDistances = mutableListOf<Double>()
-            val tildeDistances = mutableListOf<Double>()
-            val nonTildeDistances = mutableListOf<Double>()
+            // 1. Map markers
+            for (i in norm.indices) {
+                val t = norm[i]
+                if (t == "A" && pickupKm == null) pickupKm = firstDistanceNear(norm, i)
+                if (t == "B" && tripKm == null) tripKm = firstDistanceNear(norm, i)
+            }
 
-            // Strategy 1: Map Marker association (A = pickup, B = trip)
-            for (i in normalizedTexts.indices) {
-                val t = normalizedTexts[i]
-                val prev = if (i > 0) normalizedTexts[i - 1] else ""
-                val next = if (i < normalizedTexts.size - 1) normalizedTexts[i + 1] else ""
-
-                val isNearA = t.equals("A", ignoreCase = true) || prev.equals("A", ignoreCase = true) || next.equals("A", ignoreCase = true)
-                val isNearB = t.equals("B", ignoreCase = true) || prev.equals("B", ignoreCase = true) || next.equals("B", ignoreCase = true)
-
-                val dists = extractAllDistancesFromString(t) + extractAllDistancesFromString(prev) + extractAllDistancesFromString(next)
-                if (isNearA && dists.isNotEmpty() && pickupKm == null) pickupKm = dists.first()
-                if (isNearB && dists.isNotEmpty() && tripKm == null) {
-                    tripKm = dists.firstOrNull { it != pickupKm } ?: dists.first()
+            // 2 & 3. Ordered distances with pickup hints
+            val ordered = mutableListOf<Pair<Double, Boolean>>() // value, looksLikePickup
+            for (t in norm) {
+                val stripped = t.replace(CURRENCY_PREFIX_AMOUNT, " ").replace(CURRENCY_SUFFIX_AMOUNT, " ")
+                val hint = PICKUP_HINTS.any { stripped.contains(it, ignoreCase = true) }
+                for (d in extractDistances(stripped)) {
+                    if (ordered.none { it.first == d }) ordered.add(d to hint)
                 }
             }
 
-            // Strategy 2: Collect all distances across texts
-            for (t in normalizedTexts) {
-                val isCurrency = t.contains("EGP", ignoreCase = true) || t.contains("ج.م") || t.contains("جنيه") || t.contains("جم")
-                if (isCurrency) continue
-
-                val hasTilde = t.contains("~")
-                for (d in extractAllDistancesFromString(t)) {
-                    if (!allDistances.contains(d)) allDistances.add(d)
-                    if (hasTilde) {
-                        if (!tildeDistances.contains(d)) tildeDistances.add(d)
-                    } else if (!nonTildeDistances.contains(d)) {
-                        nonTildeDistances.add(d)
-                    }
-                }
+            if (pickupKm == null) pickupKm = ordered.firstOrNull { it.second }?.first
+            val remaining = ordered.map { it.first }.filter { it != pickupKm }
+            if (pickupKm == null && tripKm == null) {
+                pickupKm = remaining.getOrNull(0)
+                tripKm = remaining.getOrNull(1)
+            } else if (tripKm == null) {
+                tripKm = remaining.firstOrNull { it != pickupKm }
+            } else if (pickupKm == null) {
+                pickupKm = remaining.firstOrNull { it != tripKm }
             }
-
-            // Pickup indicated by tilde (~3.2 km or ~800 m)
-            if (pickupKm == null && tildeDistances.isNotEmpty()) pickupKm = tildeDistances.first()
-
-            // Trip is a non-tilde distance
-            if (tripKm == null) tripKm = nonTildeDistances.firstOrNull { it != pickupKm }
-
-            // Positional fallback when both are present but unlabeled
-            if (pickupKm == null && tripKm == null && allDistances.size >= 2) {
-                pickupKm = allDistances[0]
-                tripKm = allDistances[1]
-            } else if (pickupKm != null && tripKm == null) {
-                tripKm = allDistances.firstOrNull { it != pickupKm }
-            }
-
-            // Anything still unknown stays null: the caller marks the card as estimated.
             return Distances(pickupKm, tripKm)
         }
 
-        private fun extractAllDistancesFromString(str: String): List<Double> {
+        private fun firstDistanceNear(norm: List<String>, i: Int): Double? {
+            for (j in listOf(i, i + 1, i - 1, i + 2)) {
+                if (j < 0 || j >= norm.size) continue
+                extractDistances(norm[j]).firstOrNull()?.let { return it }
+            }
+            return null
+        }
+
+        private fun extractDistances(str: String): List<Double> {
             val list = mutableListOf<Double>()
             if (str.isEmpty()) return list
 
             for (regex in listOf(KM_SUFFIX, KM_PREFIX)) {
                 regex.findAll(str).forEach { match ->
                     val v = match.groupValues[1].replace(',', '.').toDoubleOrNull()
-                    if (v != null && v in 0.05..150.0 && !list.contains(v)) list.add(v)
+                    if (v != null && v in 0.05..300.0 && !list.contains(v)) list.add(v)
                 }
             }
 

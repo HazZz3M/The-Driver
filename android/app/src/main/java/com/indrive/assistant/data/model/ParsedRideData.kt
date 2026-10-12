@@ -6,10 +6,13 @@ data class ParsedRideData(
     val fare: Double,
     val pickupDistanceKm: Double,
     val tripDistanceKm: Double,
-    /** True when at least one distance could not be read and a placeholder was used. */
-    val distanceEstimated: Boolean = false,
+    /** Whether each distance was actually read from the card (false = placeholder value). */
+    val pickupKnown: Boolean = true,
+    val tripKnown: Boolean = true,
     val pickupAddress: String = "",
     val dropoffAddress: String = "",
+    /** Place-like texts found on the card, offered in the HUD for 1-tap zone tagging. */
+    val addressCandidates: List<String> = emptyList(),
     val counterBids: List<Int> = emptyList(),
     val screenBounds: android.graphics.Rect? = null,
     val anchorBounds: android.graphics.Rect? = null,
@@ -19,6 +22,14 @@ data class ParsedRideData(
 ) {
     val totalDistanceKm: Double
         get() = pickupDistanceKm + tripDistanceKm
+
+    /** At least one distance is a placeholder: profit is approximate. */
+    val distanceEstimated: Boolean
+        get() = !pickupKnown || !tripKnown
+
+    /** No distance could be read at all: profit is meaningless. */
+    val distanceUnknown: Boolean
+        get() = !pickupKnown && !tripKnown
 
     /**
      * Identity of a card across re-scans. Deliberately excludes distances (which jitter between
