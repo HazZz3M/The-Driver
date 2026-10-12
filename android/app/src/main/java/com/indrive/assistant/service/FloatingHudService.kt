@@ -28,6 +28,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.MainActivity
+import com.indrive.assistant.data.model.HudPrefs
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.engine.FareAnalysisResult
 import com.indrive.assistant.engine.FareCalculatorEngine
@@ -64,7 +65,11 @@ class FloatingHudService : Service() {
         var dragOffsetX: Int = 0,
         var dragOffsetY: Int = 0,
         /** Content signature of the last render; views are only rebuilt when it changes. */
-        var renderKey: String = ""
+        var renderKey: String = "",
+        /** Screen edge the drag offset was measured from ("LEFT" / "RIGHT"). */
+        var side: String = "",
+        /** Pending auto-collapse of the expanded card, if enabled. */
+        var autoCollapse: Runnable? = null
     )
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -140,36 +145,57 @@ class FloatingHudService : Service() {
                 return@launch
             }
 
-            val currentFingerprints = cards.map { it.fingerprint }.toSet()
+            val hud = hudPrefs()
 
-            // 1. Remove popups for cards that disappeared from screen
+            // Cards with their analysis; losing/unknown rides are hidden when the driver chose so.
+            val visible = cards.map { it to analyze(it) }.filter { (card, analysis) ->
+                hud.showLossBadges ||
+                    (!card.distanceUnknown && analysis.profitabilityLevel != ProfitabilityLevel.LOSS_DANGER)
+            }
+            val currentFingerprints = visible.map { it.first.fingerprint }.toSet()
+
+            // 1. Remove popups for cards that disappeared from screen (or are now hidden)
             activePopups.keys.filter { it !in currentFingerprints }.forEach { fp ->
                 activePopups.remove(fp)?.let { removePopupWindow(wm, it) }
             }
 
             // 2. Add or update popups for each currently visible card
-            for (card in cards) {
-                val analysis = analyze(card)
+            for ((card, analysis) in visible) {
                 val existing = activePopups[card.fingerprint]
                 if (existing != null) {
                     existing.ride = card
                     existing.analysis = analysis
-                    if (!existing.isExpanded) {
-                        val targetX = BADGE_MARGIN_X + existing.dragOffsetX
-                        val targetY = calculatePopupY(card) + existing.dragOffsetY
-                        if (existing.params.x != targetX || existing.params.y != targetY) {
-                            existing.params.x = targetX
-                            existing.params.y = targetY
-                            safeUpdateLayout(existing)
-                        }
-                    }
+                    if (!existing.isExpanded && applyCompactPosition(existing)) safeUpdateLayout(existing)
                     renderPopupIfChanged(existing)
                 } else {
                     createAndAttachPopup(card, analysis)
-                    vibrateSingleShotOnce(card)
+                    vibrateSingleShotOnce(card, analysis)
                 }
             }
         }
+    }
+
+    private fun hudPrefs(): HudPrefs = InDriveAssistantApp.instance.repository.getHudPrefs()
+
+    /**
+     * Places a compact badge next to its card on the configured screen edge, keeping the
+     * driver's drag offset. Returns true when the window position changed.
+     */
+    private fun applyCompactPosition(holder: CardPopupViewHolder): Boolean {
+        val side = hudPrefs().side
+        if (holder.side != side) {
+            // Switching edges: the old drag offset was measured from the other side.
+            holder.side = side
+            holder.dragOffsetX = 0
+        }
+        val gravity = Gravity.TOP or (if (side == "RIGHT") Gravity.RIGHT else Gravity.LEFT)
+        val x = BADGE_MARGIN_X + holder.dragOffsetX
+        val y = calculatePopupY(holder.ride) + holder.dragOffsetY
+        if (holder.params.gravity == gravity && holder.params.x == x && holder.params.y == y) return false
+        holder.params.gravity = gravity
+        holder.params.x = x
+        holder.params.y = y
+        return true
     }
 
     private fun analyze(card: ParsedRideData): FareAnalysisResult {
@@ -206,20 +232,17 @@ class FloatingHudService : Service() {
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
+            gravity = Gravity.TOP or Gravity.LEFT
         }
     }
 
     private fun createAndAttachPopup(card: ParsedRideData, analysis: FareAnalysisResult) {
         val wm = windowManager ?: return
 
-        val params = baseLayoutParams().apply {
-            x = BADGE_MARGIN_X
-            y = calculatePopupY(card)
-        }
-
+        val params = baseLayoutParams()
         val container = FrameLayout(this)
         val holder = CardPopupViewHolder(ride = card, analysis = analysis, container = container, params = params)
+        applyCompactPosition(holder)
 
         // Touches outside an expanded card collapse it, while still reaching inDrive underneath.
         container.setOnTouchListener { _, event ->
@@ -241,6 +264,7 @@ class FloatingHudService : Service() {
 
     private fun removePopupWindow(wm: WindowManager, holder: CardPopupViewHolder) {
         holder.pulseAnimator?.cancel()
+        holder.autoCollapse?.let { holder.container.removeCallbacks(it) }
         try {
             wm.removeView(holder.container)
         } catch (_: IllegalArgumentException) {
@@ -258,10 +282,11 @@ class FloatingHudService : Service() {
 
     private fun collapsePopup(holder: CardPopupViewHolder) {
         if (!holder.isExpanded) return
+        holder.autoCollapse?.let { holder.container.removeCallbacks(it) }
+        holder.autoCollapse = null
         holder.isExpanded = false
         holder.params.width = WindowManager.LayoutParams.WRAP_CONTENT
-        holder.params.x = BADGE_MARGIN_X + holder.dragOffsetX
-        holder.params.y = calculatePopupY(holder.ride) + holder.dragOffsetY
+        applyCompactPosition(holder)
         renderPopupIfChanged(holder)
         safeUpdateLayout(holder)
     }
@@ -287,11 +312,19 @@ class FloatingHudService : Service() {
 
         holder.isExpanded = true
         holder.params.width = cardWidth
+        holder.params.gravity = Gravity.TOP or Gravity.LEFT
         holder.params.x = (screenWidth - cardWidth) / 2
         holder.params.y = calculatePopupY(holder.ride)
             .coerceIn((50 * density).toInt(), (screenHeight - (430 * density).toInt()).coerceAtLeast((50 * density).toInt()))
         renderPopupIfChanged(holder)
         safeUpdateLayout(holder)
+
+        val seconds = hudPrefs().autoCollapseSeconds
+        if (seconds > 0) {
+            val runnable = Runnable { collapsePopup(holder) }
+            holder.autoCollapse = runnable
+            holder.container.postDelayed(runnable, seconds * 1000L)
+        }
     }
 
     // =========================================================================
@@ -317,16 +350,16 @@ class FloatingHudService : Service() {
     }
 
     private fun renderPopupIfChanged(holder: CardPopupViewHolder) {
-        val prefs = InDriveAssistantApp.instance.repository.getPreferencesManager()
+        val repo = InDriveAssistantApp.instance.repository
         val a = holder.analysis
         val r = holder.ride
         val key = listOf(
             holder.isExpanded, r.pickupKnown, r.tripKnown, r.addressCandidates, r.fare.toInt(), a.netProfit.roundToInt(),
             a.recommendedFare.toInt(), a.profitabilityLevel, a.matchedFavoriteZone, a.matchedBlacklistZone,
             r.pickupAddress, r.dropoffAddress, String.format(Locale.US, "%.1f/%.1f", r.pickupDistanceKm, r.tripDistanceKm),
-            prefs.overlayStyleFlow.value, prefs.overlaySizeFlow.value,
-            prefs.isFavoriteZone(r.pickupAddress), prefs.isBlacklistedZone(r.pickupAddress),
-            prefs.isFavoriteZone(r.dropoffAddress), prefs.isBlacklistedZone(r.dropoffAddress)
+            hudPrefs(),
+            repo.isFavoriteZone(r.pickupAddress), repo.isBlacklistedZone(r.pickupAddress),
+            repo.isFavoriteZone(r.dropoffAddress), repo.isBlacklistedZone(r.dropoffAddress)
         ).joinToString("|")
         if (key == holder.renderKey) return
         holder.renderKey = key
@@ -340,28 +373,55 @@ class FloatingHudService : Service() {
 
         val theme = themeFor(holder.ride, holder.analysis)
         if (holder.isExpanded) {
+            holder.container.alpha = 1f
             renderExpandedDetailsCard(holder, theme)
         } else {
+            holder.container.alpha = hudPrefs().opacity.toFloat()
             renderCompactBadge(holder, theme)
         }
     }
 
+    private fun signedInt(v: Double): String {
+        val p = v.roundToInt()
+        return if (p >= 0) "+$p" else "−${abs(p)}"
+    }
+
     /**
-     * Compact badge text: the ride's net profit. Prefixed with "≈" when one distance had to be
-     * assumed, and "؟" when no distance could be read at all.
+     * Compact badge text, per the driver's choice of primary value. Profit-based values are
+     * prefixed with "≈" when one distance had to be assumed, and show "؟" when none was read.
      */
     private fun badgeValue(holder: CardPopupViewHolder): String {
-        if (holder.ride.distanceUnknown) return "؟"
-        val p = holder.analysis.netProfit.roundToInt()
-        val value = if (p >= 0) "+$p" else "−${abs(p)}"
-        return if (holder.ride.distanceEstimated) "≈$value" else value
+        val a = holder.analysis
+        val r = holder.ride
+        return when (hudPrefs().primaryValue) {
+            "OFFER" -> "${r.fare.roundToInt()}"
+            "RECOMMENDED" -> if (r.distanceUnknown) "؟" else "${a.recommendedFare.roundToInt()}"
+            "PROFIT_PER_KM" -> when {
+                r.distanceUnknown -> "؟"
+                r.distanceEstimated -> "≈" + String.format(Locale.US, "%.1f", a.profitPerKm)
+                else -> String.format(Locale.US, "%.1f", a.profitPerKm)
+            }
+            else -> when {
+                r.distanceUnknown -> "؟"
+                r.distanceEstimated -> "≈" + signedInt(a.netProfit)
+                else -> signedInt(a.netProfit)
+            }
+        }
+    }
+
+    /** Short caption under/next to the value, explaining what the number is. */
+    private fun badgeCaption(): String = when (hudPrefs().primaryValue) {
+        "OFFER" -> "العرض"
+        "RECOMMENDED" -> "اقترح"
+        "PROFIT_PER_KM" -> "ج/كم"
+        else -> "صافي"
     }
 
     private fun renderCompactBadge(holder: CardPopupViewHolder, theme: BadgeTheme) {
         val density = resources.displayMetrics.density
-        val prefs = InDriveAssistantApp.instance.repository.getPreferencesManager()
-        val style = prefs.overlayStyleFlow.value.uppercase()
-        val sizeScale = when (prefs.overlaySizeFlow.value.uppercase()) {
+        val hud = hudPrefs()
+        val style = hud.style.uppercase()
+        val sizeScale = when (hud.size.uppercase()) {
             "SMALL" -> 0.85f
             "LARGE" -> 1.22f
             else -> 1.0f
@@ -378,7 +438,7 @@ class FloatingHudService : Service() {
             "GLOW_DOT" -> buildGlowDot(value, theme.colorHex, sizeScale, density)
             else -> buildCompactCircle(value, theme.colorHex, sizeScale, density)
         }
-        badgeView.contentDescription = "${theme.label}: صافي الربح $value جنيه"
+        badgeView.contentDescription = "${theme.label}: ${badgeCaption()} $value"
 
         badgeView.setOnClickListener { togglePopupExpanded(holder) }
         setupDragTouchListener(badgeView, holder)
@@ -463,7 +523,7 @@ class FloatingHudService : Service() {
             }
         })
         layout.addView(TextView(this).apply {
-            text = "$value ج"
+            text = "$value ${badgeCaption()}"
             setTextColor(Color.WHITE)
             textSize = 12.5f * scale
             typeface = Typeface.DEFAULT_BOLD
@@ -502,7 +562,7 @@ class FloatingHudService : Service() {
             setPadding(0, (2 * density).toInt(), 0, 0)
         })
         layout.addView(TextView(this).apply {
-            text = "صافي"
+            text = badgeCaption()
             setTextColor(Color.parseColor("#94A3B8"))
             textSize = 9f * scale
             gravity = Gravity.CENTER
@@ -528,7 +588,7 @@ class FloatingHudService : Service() {
             elevation = 6 * density
         }
         layout.addView(TextView(this).apply {
-            text = "$value ج"
+            text = "$value ${badgeCaption()}"
             setTextColor(Color.parseColor("#0F172A"))
             textSize = 13f * scale
             typeface = Typeface.DEFAULT_BOLD
@@ -554,7 +614,7 @@ class FloatingHudService : Service() {
             elevation = 6 * density
         }
         layout.addView(TextView(this).apply {
-            text = "صافي $value"
+            text = "${badgeCaption()} $value"
             setTextColor(Color.parseColor(colorHex))
             textSize = 12f * scale
             typeface = Typeface.DEFAULT_BOLD
@@ -669,10 +729,27 @@ class FloatingHudService : Service() {
         }
         val distRow = infoRow(distText, if (card.distanceEstimated) "#FBBF24" else "#F8FAFC", density, bold = false)
 
+        // ROW 5 (optional): operating cost breakdown
+        val costRow = infoRow(
+            String.format(
+                Locale.US,
+                "التكاليف: بنزين %.1f + عمولة %.1f + استهلاك %.1f = %.1f ج.م",
+                analysis.fuelCost, analysis.commissionCost, analysis.wearAndTearCost, analysis.totalOperatingCost
+            ),
+            "#CBD5E1", density, bold = false
+        )
+
+        val hud = hudPrefs()
         cardRoot.addView(topRow)
-        cardRoot.addView(fareRow)
-        cardRoot.addView(profitRow)
-        cardRoot.addView(distRow)
+        if (hud.showFareComparison) cardRoot.addView(fareRow)
+        if (hud.showProfit) cardRoot.addView(profitRow)
+        if (hud.showDistance) cardRoot.addView(distRow)
+        if (hud.showCostBreakdown) cardRoot.addView(costRow)
+
+        if (!hud.showZones) {
+            holder.container.addView(cardRoot)
+            return
+        }
 
         // Zone tagging: pickup / drop-off if recognised, plus any other place names on the card.
         val shown = mutableListOf<String>()
@@ -914,7 +991,9 @@ class FloatingHudService : Service() {
                     val dy = event.rawY - initialTouchY
                     if (isDragging || Math.hypot(dx.toDouble(), dy.toDouble()) > 10) {
                         isDragging = true
-                        holder.params.x = initialX + dx.toInt()
+                        // With RIGHT gravity, x is measured from the right edge.
+                        val dirX = if ((holder.params.gravity and Gravity.HORIZONTAL_GRAVITY_MASK) == Gravity.RIGHT) -1 else 1
+                        holder.params.x = initialX + dirX * dx.toInt()
                         holder.params.y = initialY + dy.toInt()
                         holder.dragOffsetX = holder.params.x - BADGE_MARGIN_X
                         holder.dragOffsetY = holder.params.y - calculatePopupY(holder.ride)
@@ -940,7 +1019,15 @@ class FloatingHudService : Service() {
     // =========================================================================
     // SINGLE-SHOT HAPTIC ALERT
     // =========================================================================
-    private fun vibrateSingleShotOnce(card: ParsedRideData) {
+    private fun vibrateSingleShotOnce(card: ParsedRideData, analysis: FareAnalysisResult) {
+        val hud = hudPrefs()
+        if (!hud.vibrate) return
+        if (hud.vibrateProfitableOnly) {
+            val profitable = !card.distanceEstimated &&
+                (analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT ||
+                    analysis.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT)
+            if (!profitable) return
+        }
         val now = System.currentTimeMillis()
         if (card.fingerprint == lastVibratedFingerprint && (now - lastVibrateTimestamp) < 15000L) return
         if (now - lastVibrateTimestamp < 3500L) return

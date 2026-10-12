@@ -1,160 +1,111 @@
 import 'package:flutter/material.dart';
 import '../../engine/fare_calculator_engine.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
+import 'ui_kit.dart';
 
+/// Colour and short label for a profitability level.
+(Color, String, IconData) profitabilityStyle(ProfitabilityLevel level) => switch (level) {
+      ProfitabilityLevel.excellentProfit => (AppColors.emeraldLight, "ربح ممتاز", Icons.trending_up),
+      ProfitabilityLevel.goodProfit => (AppColors.emeraldPrimary, "عرض رابح", Icons.check_circle_outline),
+      ProfitabilityLevel.poorMargin => (AppColors.warningYellow, "هامش ضعيف", Icons.error_outline),
+      ProfitabilityLevel.lossDanger => (AppColors.lossRed, "رحلة خاسرة", Icons.warning_amber_rounded),
+    };
+
+/// Hero result of the calculator: verdict, big net profit and key ratios.
 class ProfitStatusBanner extends StatelessWidget {
   final FareAnalysisResult analysis;
   final String currency;
 
-  const ProfitStatusBanner({
-    super.key,
-    required this.analysis,
-    required this.currency,
-  });
+  const ProfitStatusBanner({super.key, required this.analysis, required this.currency});
 
   @override
   Widget build(BuildContext context) {
-    Color bannerBg;
-    Color bannerBorder;
-    Color statusColor;
-    IconData icon;
-
-    switch (analysis.profitabilityLevel) {
-      case ProfitabilityLevel.lossDanger:
-        bannerBg = AppColors.lossRed.withOpacity(0.18);
-        bannerBorder = AppColors.lossRed;
-        statusColor = AppColors.lossRed;
-        icon = Icons.warning_amber_rounded;
-        break;
-      case ProfitabilityLevel.poorMargin:
-        bannerBg = AppColors.warningYellow.withOpacity(0.14);
-        bannerBorder = AppColors.warningYellow;
-        statusColor = AppColors.warningYellow;
-        icon = Icons.warning_amber_rounded;
-        break;
-      case ProfitabilityLevel.excellentProfit:
-        bannerBg = AppColors.neonGreen.withOpacity(0.18);
-        bannerBorder = AppColors.neonGreen;
-        statusColor = AppColors.neonGreen;
-        icon = Icons.check_circle_rounded;
-        break;
-      case ProfitabilityLevel.goodProfit:
-        bannerBg = AppColors.profitGreen.withOpacity(0.14);
-        bannerBorder = AppColors.profitGreen;
-        statusColor = AppColors.profitGreen;
-        icon = Icons.check_circle_rounded;
-        break;
-    }
+    final (color, label, icon) = profitabilityStyle(analysis.profitabilityLevel);
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(Insets.lg + 2),
       decoration: BoxDecoration(
-        color: bannerBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: bannerBorder, width: 2),
+        borderRadius: BorderRadius.circular(Insets.radiusLg),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+          colors: [color.withValues(alpha: 0.16), AppColors.darkSurface],
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              StatusPill(label: label, color: color, icon: icon),
+              const Spacer(),
+              Text("صافي ربحك", style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: Row(
-                  children: [
-                    Icon(icon, color: statusColor, size: 24),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        analysis.statusMessage,
-                        style: TextStyle(
-                          color: statusColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  analysis.statusMessage,
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Text(
-                "${analysis.netProfit >= 0 ? "+" : ""}${analysis.netProfit.toStringAsFixed(1)} $currency",
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 20,
-                ),
+                signed(analysis.netProfit, decimals: 0),
+                style: TextStyle(color: color, fontSize: 36, fontWeight: FontWeight.w900, height: 1),
+              ),
+              const SizedBox(width: 4),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(currency, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
               ),
             ],
           ),
           if (analysis.warningNote != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              analysis.warningNote!,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 12.5,
-                height: 1.4,
-              ),
-            ),
+            const SizedBox(height: 10),
+            Text(analysis.warningNote!, style: const TextStyle(color: AppColors.textPrimary, fontSize: 12.5, height: 1.45)),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _buildSubMetric(
-                  label: "صافي/كم",
-                  value: "${analysis.profitPerKm.toStringAsFixed(1)} $currency",
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _buildSubMetric(
-                  label: "تكلفة الوقود",
-                  value: "${analysis.fuelCost.toStringAsFixed(1)} $currency",
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _buildSubMetric(
-                  label: "عمولة التطبيق",
-                  value: "${analysis.commissionCost.toStringAsFixed(1)} $currency",
-                ),
-              ),
+              _Ratio(label: "لكل كم", value: "${analysis.profitPerKm.toStringAsFixed(1)} $currency"),
+              _Ratio(label: "لكل ساعة", value: "${analysis.profitPerHour.toStringAsFixed(0)} $currency"),
+              _Ratio(label: "هامش الربح", value: "${analysis.profitMarginPercent.toStringAsFixed(0)}%"),
             ],
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSubMetric({required String label, required String value}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.darkSurfaceVariant.withOpacity(0.85),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+class _Ratio extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _Ratio({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsetsDirectional.only(end: 6),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+        decoration: BoxDecoration(
+          color: AppColors.darkBackground.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(Insets.radiusSm),
+        ),
+        child: Column(
           children: [
-            Text(
-              "$label: ",
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-            ),
-            Text(
-              value,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.bold,
-                fontSize: 11.5,
-              ),
+            Text(label, style: const TextStyle(color: AppColors.textTertiary, fontSize: 11)),
+            const SizedBox(height: 2),
+            FittedBox(
+              child: Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w700)),
             ),
           ],
         ),

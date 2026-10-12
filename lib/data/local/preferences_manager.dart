@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/driver_settings.dart';
+import '../models/hud_settings.dart';
 import '../models/vehicle_profile.dart';
 
 class PreferencesManager {
@@ -17,6 +18,8 @@ class PreferencesManager {
 
   static const String keyOverlayStyle = "overlay_style";
   static const String keyOverlaySize = "overlay_size";
+  static const String keyHudSettings = "hud_settings_json";
+  static const String keyCalculatorInputs = "calculator_last_inputs";
   static const String keyVehicleProfiles = "vehicle_profiles";
   static const String keyActiveVehicleId = "active_vehicle_id";
 
@@ -85,12 +88,38 @@ class PreferencesManager {
     ]);
   }
 
-  // Overlay Style
-  String getOverlayStyle() => prefs.getString(keyOverlayStyle) ?? "COMPACT_CIRCLE";
-  Future<void> setOverlayStyle(String style) async => await prefs.setString(keyOverlayStyle, style);
+  // Floating HUD settings (falls back to the pre-1.11 style/size keys)
+  HudSettings loadHudSettings() {
+    final legacy = HudSettings(
+      style: prefs.getString(keyOverlayStyle) ?? "COMPACT_CIRCLE",
+      size: prefs.getString(keyOverlaySize) ?? "MEDIUM",
+    );
+    final raw = prefs.getString(keyHudSettings);
+    if (raw == null || raw.isEmpty) return legacy;
+    try {
+      return HudSettings.fromJson(Map<String, dynamic>.from(jsonDecode(raw) as Map), fallback: legacy);
+    } catch (_) {
+      return legacy;
+    }
+  }
 
-  String getOverlaySize() => prefs.getString(keyOverlaySize) ?? "MEDIUM";
-  Future<void> setOverlaySize(String size) async => await prefs.setString(keyOverlaySize, size);
+  Future<void> saveHudSettings(HudSettings hud) async =>
+      await prefs.setString(keyHudSettings, jsonEncode(hud.toJson()));
+
+  // Calculator: remembered last inputs
+  Map<String, double> loadCalculatorInputs() {
+    final raw = prefs.getString(keyCalculatorInputs);
+    if (raw == null) return const {};
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map)
+          .map((k, v) => MapEntry(k, (v as num).toDouble()));
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> saveCalculatorInputs(Map<String, double> values) async =>
+      await prefs.setString(keyCalculatorInputs, jsonEncode(values));
 
   // Auto-accept consent (shown once, before the first enable)
   bool get autoAcceptConsentGiven => prefs.getBool(keyAutoAcceptConsentGiven) ?? false;

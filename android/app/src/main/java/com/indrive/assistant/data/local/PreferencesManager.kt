@@ -3,6 +3,7 @@ package com.indrive.assistant.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.indrive.assistant.data.model.DriverSettings
+import com.indrive.assistant.data.model.HudPrefs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,14 +26,33 @@ class PreferencesManager(context: Context) {
     private val _settingsFlow = MutableStateFlow(cachedSettings)
     val settingsFlow: StateFlow<DriverSettings> = _settingsFlow.asStateFlow()
 
-    private val _overlayStyleFlow = MutableStateFlow(prefs.getString(KEY_OVERLAY_STYLE, "COMPACT_CIRCLE") ?: "COMPACT_CIRCLE")
-    val overlayStyleFlow: StateFlow<String> = _overlayStyleFlow.asStateFlow()
-
-    private val _overlaySizeFlow = MutableStateFlow(prefs.getString(KEY_OVERLAY_SIZE, "MEDIUM") ?: "MEDIUM")
-    val overlaySizeFlow: StateFlow<String> = _overlaySizeFlow.asStateFlow()
+    @Volatile
+    private var cachedHud: HudPrefs = loadHudPrefs()
 
     /** In-memory copy; safe to call from the accessibility worker thread on every scan. */
     fun getSettings(): DriverSettings = cachedSettings
+
+    /** Floating HUD display preferences (in-memory copy). */
+    fun getHudPrefs(): HudPrefs = cachedHud
+
+    private fun loadHudPrefs(): HudPrefs {
+        val raw = prefs.getString(KEY_HUD_PREFS, null)
+        val legacy = HudPrefs(
+            style = prefs.getString(KEY_OVERLAY_STYLE, null) ?: "COMPACT_CIRCLE",
+            size = prefs.getString(KEY_OVERLAY_SIZE, null) ?: "MEDIUM"
+        )
+        if (raw.isNullOrBlank()) return legacy
+        return try {
+            HudPrefs.fromJson(JSONObject(raw), legacy)
+        } catch (_: Exception) {
+            legacy
+        }
+    }
+
+    private fun saveHudPrefs(hud: HudPrefs) {
+        prefs.edit().putString(KEY_HUD_PREFS, hud.toJson().toString()).apply()
+        cachedHud = hud
+    }
 
     private fun loadSettings(): DriverSettings {
         val d = DriverSettings()
@@ -118,8 +138,7 @@ class PreferencesManager(context: Context) {
         // Flutter has now seen (and merged) any HUD zone edits.
         prefs.edit().putBoolean(KEY_ZONES_DIRTY, false).apply()
 
-        json.optString("overlayStyle", "").takeIf { it.isNotEmpty() }?.let { setOverlayStyle(it) }
-        json.optString("overlaySize", "").takeIf { it.isNotEmpty() }?.let { setOverlaySize(it) }
+        json.optJSONObject("hud")?.let { saveHudPrefs(HudPrefs.fromJson(it, cachedHud)) }
     }
 
     /**
@@ -147,15 +166,6 @@ class PreferencesManager(context: Context) {
         prefs.edit().putBoolean(KEY_ZONES_DIRTY, true).apply()
     }
 
-    fun setOverlayStyle(style: String) {
-        prefs.edit().putString(KEY_OVERLAY_STYLE, style).apply()
-        _overlayStyleFlow.value = style
-    }
-
-    fun setOverlaySize(size: String) {
-        prefs.edit().putString(KEY_OVERLAY_SIZE, size).apply()
-        _overlaySizeFlow.value = size
-    }
 
     // =========================================================================
     // QUICK ZONE OPERATIONS (1-Tap from the HUD)
@@ -213,6 +223,7 @@ class PreferencesManager(context: Context) {
 
         private const val KEY_OVERLAY_STYLE = "overlay_style"
         private const val KEY_OVERLAY_SIZE = "overlay_size"
+        private const val KEY_HUD_PREFS = "hud_prefs_json"
 
         private const val KEY_AUTO_ACCEPT_ENABLED = "auto_accept_enabled"
         private const val KEY_AUTO_ACCEPT_MIN_PROFIT_KM = "auto_accept_min_profit_km"

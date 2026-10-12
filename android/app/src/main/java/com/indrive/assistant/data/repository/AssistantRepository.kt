@@ -2,6 +2,7 @@ package com.indrive.assistant.data.repository
 
 import com.indrive.assistant.data.local.PreferencesManager
 import com.indrive.assistant.data.model.DriverSettings
+import com.indrive.assistant.data.model.HudPrefs
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 
@@ -9,10 +10,10 @@ class AssistantRepository(
     private val preferencesManager: PreferencesManager
 ) {
     val driverSettingsFlow: StateFlow<DriverSettings> = preferencesManager.settingsFlow
-    val overlayStyleFlow = preferencesManager.overlayStyleFlow
-    val overlaySizeFlow = preferencesManager.overlaySizeFlow
 
     fun getDriverSettings(): DriverSettings = preferencesManager.getSettings()
+
+    fun getHudPrefs(): HudPrefs = preferencesManager.getHudPrefs()
 
     fun applySettingsFromFlutter(json: JSONObject) = preferencesManager.applyFromFlutter(json)
 
@@ -24,5 +25,4 @@ class AssistantRepository(
     fun removeBlacklistZone(zone: String): Boolean = preferencesManager.removeBlacklistZone(zone)
     fun isFavoriteZone(zone: String): Boolean = preferencesManager.isFavoriteZone(zone)
     fun isBlacklistedZone(zone: String): Boolean = preferencesManager.isBlacklistedZone(zone)
-    fun getPreferencesManager(): PreferencesManager = preferencesManager
 }

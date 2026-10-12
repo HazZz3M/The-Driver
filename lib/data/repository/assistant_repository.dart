@@ -2,6 +2,7 @@ import '../local/database_service.dart';
 import '../local/preferences_manager.dart';
 import '../models/driver_settings.dart';
 import '../models/expense.dart';
+import '../models/hud_settings.dart';
 import '../models/trip.dart';
 import '../models/vehicle_profile.dart';
 
@@ -24,11 +25,13 @@ class AssistantRepository {
   String getActiveVehicleId() => preferencesManager.getActiveVehicleId();
   Future<void> setActiveVehicleId(String id) => preferencesManager.setActiveVehicleId(id);
 
-  // Overlay
-  String getOverlayStyle() => preferencesManager.getOverlayStyle();
-  Future<void> setOverlayStyle(String style) => preferencesManager.setOverlayStyle(style);
-  String getOverlaySize() => preferencesManager.getOverlaySize();
-  Future<void> setOverlaySize(String size) => preferencesManager.setOverlaySize(size);
+  // Floating HUD
+  HudSettings getHudSettings() => preferencesManager.loadHudSettings();
+  Future<void> saveHudSettings(HudSettings hud) => preferencesManager.saveHudSettings(hud);
+
+  // Calculator inputs
+  Map<String, double> getCalculatorInputs() => preferencesManager.loadCalculatorInputs();
+  Future<void> saveCalculatorInputs(Map<String, double> values) => preferencesManager.saveCalculatorInputs(values);
 
   // Auto-accept consent
   bool get autoAcceptConsentGiven => preferencesManager.autoAcceptConsentGiven;

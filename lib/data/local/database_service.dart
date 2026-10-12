@@ -36,7 +36,9 @@ class DatabaseService {
   }
 
   Future<void> recordTrip(Trip trip) async {
-    final current = getAllTrips()..insert(0, trip);
+    final current = getAllTrips()
+      ..insert(0, trip)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     _cachedTrips = current;
     await prefs.setString(keyTrips, jsonEncode(current.map((t) => t.toJson()).toList()));
   }
@@ -95,7 +97,9 @@ class DatabaseService {
   }
 
   Future<void> recordExpense(Expense expense) async {
-    final current = getAllExpenses()..insert(0, expense);
+    final current = getAllExpenses()
+      ..insert(0, expense)
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     _cachedExpenses = current;
     await prefs.setString(keyExpenses, jsonEncode(current.map((e) => e.toJson()).toList()));
   }

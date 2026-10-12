@@ -7,6 +7,7 @@ import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
 import '../components/dialogs.dart';
+import '../components/ui_kit.dart';
 
 class ExpensesScreen extends StatefulWidget {
   const ExpensesScreen({super.key});
@@ -32,32 +33,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     return Scaffold(
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.xl),
           children: [
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "المركبات والمصاريف التشغيلية",
-                  style: TextStyle(color: AppColors.textPrimary, fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-                Text(
-                  "تكلفة الكيلومتر الحقيقية من البنزين والزيت وقطع الغيار",
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-                ),
-              ],
+            const PageHeader(
+              title: "المركبة والمصاريف",
+              subtitle: "تكلفة الكيلومتر الحقيقية من البنزين والزيت وقطع الغيار",
             ),
 
-            const SizedBox(height: 16),
-
             // 1. Active Vehicle Card
-            Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppColors.darkSurface,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.neonGreen.withOpacity(0.5)),
-              ),
+            AppCard(
+              borderColor: AppColors.emeraldPrimary.withValues(alpha: 0.4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -176,9 +161,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ),
             ),
 
-            const SizedBox(height: 16),
-
             // 2. Action Buttons
+            const SectionLabel("تسجيل مصروف"),
             Row(
               children: [
                 Expanded(child: _actionButton("تفويلة", Icons.local_gas_station, AppColors.neonGreen, () => _showFuelDialog(context, provider))),
@@ -189,9 +173,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               ],
             ),
 
-            const SizedBox(height: 16),
-
             // 3. Category Filter
+            const SectionLabel("السجل"),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -207,18 +190,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             const SizedBox(height: 12),
 
             if (filteredExpenses.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: AppColors.darkSurface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.darkCardBorder),
-                ),
-                alignment: Alignment.center,
-                child: const Text(
-                  "لا توجد مصاريف مسجلة في هذا القسم",
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                ),
+              const EmptyState(
+                icon: Icons.receipt_long_outlined,
+                title: "لا توجد مصاريف هنا",
+                message: "سجّل التفويلة أو غيار الزيت لحساب تكلفة الكيلومتر الحقيقية",
               )
             else
               ...filteredExpenses.map((exp) => _buildExpenseCard(context, exp, provider)),
@@ -317,13 +292,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.darkSurface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.darkCardBorder),
-        ),
+      child: AppCard(
+        padding: const EdgeInsets.fromLTRB(14, 10, 6, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -361,15 +331,10 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   tooltip: "حذف",
                   icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.lossRed),
                   onPressed: () async {
-                    final undoWear = exp.appliedWearPerKm != null && exp.appliedWearPerKm! > 0;
-                    final ok = await confirmAction(
-                      context,
-                      title: "حذف المصروف؟",
-                      message: undoWear
-                          ? "سيتم حذف هذا المصروف وخصم ${exp.appliedWearPerKm!.toStringAsFixed(2)} ج/كم من معدل الاستهلاك."
-                          : "سيتم حذف هذا المصروف نهائياً.",
-                    );
-                    if (ok) await provider.deleteExpense(exp);
+                    await provider.deleteExpense(exp);
+                    if (context.mounted) {
+                      showUndoSnackBar(context, "تم حذف المصروف", () => provider.restoreExpense(exp));
+                    }
                   },
                 ),
               ],

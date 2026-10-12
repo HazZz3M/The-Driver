@@ -1,7 +1,19 @@
-### The Driver v1.10.1 - Reading ride cards in the list
+### The Driver v1.11.0 - New interface and full control over the floating badge
 
-- **Ride data is read from the card itself, without opening it.** Each card in the list is read as a whole (price, distance, places), instead of just the price.
-- **No more "؟" on every ride.** "؟" now appears only when no distance at all appears on the card. If one distance (usually the trip) isn't on the card, the profit is shown as approximate "≈" and the missing number is clearly marked in the details.
-- **Zone tagging from the popup works.** The pickup and drop-off places, plus any place name on the card, now appear with "+ مفضلة" and "+ محظورة" buttons.
-- **New diagnostic capture tool** (from the floating-assistant screen or the notification). It captures the structure of the inDrive screen so you can send it to the developer to improve reading accuracy.
-- Auto-accept still doesn't act on any ride whose distance is approximate.
+**New design**
+- A professional, calmer interface: unified colours, clear cards, a new navigation bar and grouped settings.
+- Calculator: a large result card (net profit, per km, per hour, margin), easier inputs (tap the number to type it), a collapsible cost breakdown and compact bid cards. Your last inputs are remembered.
+- Shift: a daily-target ring, per-km and per-hour profit, a 7-day chart, and swipe a ride to delete it with undo.
+- Floating assistant: a clear 3-step setup checklist, a live preview of the badge, and an explanation of the colours.
+
+**New settings for the floating badge**
+- Choose the number shown: net profit, profit per km, passenger offer, or recommended bid.
+- Shape, size, opacity, and screen side (left or right).
+- Hide the badge on losing rides.
+- Choose what appears in the expanded card, including a new cost breakdown, plus auto-close after a few seconds.
+- Vibration on new requests, or for profitable requests only.
+
+**Ride-card reading (from v1.10.1)**
+- Reads the whole card from the list without opening it. "؟" appears only when no distance at all is on the card, and "≈" means the profit is approximate.
+- Pickup and drop-off places and the place names on the card appear in the expanded card for 1-tap tagging as favourite or blocked.
+- Diagnostic capture tool for the inDrive screen.

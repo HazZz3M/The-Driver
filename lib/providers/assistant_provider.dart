@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import '../data/models/driver_settings.dart';
+import 'dart:async';
 import '../data/models/expense.dart';
+import '../data/models/hud_settings.dart';
 import '../data/models/trip.dart';
 import '../data/models/vehicle_profile.dart';
 import '../data/repository/assistant_repository.dart';
@@ -14,8 +16,7 @@ class AssistantProvider extends ChangeNotifier {
   late DriverSettings driverSettings;
   late List<VehicleProfile> vehicleProfiles;
   late String activeVehicleId;
-  late String overlayStyle;
-  late String overlaySize;
+  late HudSettings hud;
 
   // Calculator inputs
   double pickupDistanceKm = 2.0;
@@ -43,8 +44,8 @@ class AssistantProvider extends ChangeNotifier {
     driverSettings = repository.getDriverSettings();
     vehicleProfiles = repository.getVehicleProfiles();
     activeVehicleId = repository.getActiveVehicleId();
-    overlayStyle = repository.getOverlayStyle();
-    overlaySize = repository.getOverlaySize();
+    hud = repository.getHudSettings();
+    _restoreCalculatorInputs();
     isShiftActive = repository.isShiftActive;
     shiftStartTime = repository.shiftStartTime;
 
@@ -95,8 +96,7 @@ class AssistantProvider extends ChangeNotifier {
 
   Future<void> _pushToNative() => NativeBridgeService.syncSettings({
         ...driverSettings.toJson(),
-        'overlayStyle': overlayStyle,
-        'overlaySize': overlaySize,
+        'hud': hud.toJson(),
       });
 
   void _recalculateAnalysis() {
@@ -130,6 +130,7 @@ class AssistantProvider extends ChangeNotifier {
     pickupDistanceKm = value;
     estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
     _recalculateAnalysis();
+    _scheduleSaveInputs();
     notifyListeners();
   }
 
@@ -137,12 +138,14 @@ class AssistantProvider extends ChangeNotifier {
     tripDistanceKm = value;
     estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
     _recalculateAnalysis();
+    _scheduleSaveInputs();
     notifyListeners();
   }
 
   void setOfferedFare(double value) {
     offeredFare = value;
     _recalculateAnalysis();
+    _scheduleSaveInputs();
     notifyListeners();
   }
 
@@ -384,18 +387,105 @@ class AssistantProvider extends ChangeNotifier {
   bool get autoAcceptConsentGiven => repository.autoAcceptConsentGiven;
   Future<void> recordAutoAcceptConsent() => repository.setAutoAcceptConsentGiven();
 
-  Future<void> setOverlayStyle(String style) async {
-    overlayStyle = style;
+  /// Updates what the floating HUD shows; applied live to the running overlay.
+  Future<void> updateHud(HudSettings newHud) async {
+    hud = newHud;
     notifyListeners();
-    await repository.setOverlayStyle(style);
+    await repository.saveHudSettings(newHud);
     await _pushToNative();
   }
 
-  Future<void> setOverlaySize(String size) async {
-    overlaySize = size;
+  // ---------------------------------------------------------------------------
+  // Calculator input memory
+  // ---------------------------------------------------------------------------
+  Timer? _saveInputsDebounce;
+
+  void _restoreCalculatorInputs() {
+    final saved = repository.getCalculatorInputs();
+    pickupDistanceKm = saved['pickup'] ?? pickupDistanceKm;
+    tripDistanceKm = saved['trip'] ?? tripDistanceKm;
+    offeredFare = saved['fare'] ?? offeredFare;
+    estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
+  }
+
+  void _scheduleSaveInputs() {
+    _saveInputsDebounce?.cancel();
+    _saveInputsDebounce = Timer(const Duration(milliseconds: 700), () {
+      repository.saveCalculatorInputs({'pickup': pickupDistanceKm, 'trip': tripDistanceKm, 'fare': offeredFare});
+    });
+  }
+
+  void resetCalculator() {
+    pickupDistanceKm = 2.0;
+    tripDistanceKm = 9.5;
+    offeredFare = 85.0;
+    estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
+    _recalculateAnalysis();
+    _scheduleSaveInputs();
     notifyListeners();
-    await repository.setOverlaySize(size);
-    await _pushToNative();
+  }
+
+  @override
+  void dispose() {
+    _saveInputsDebounce?.cancel();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Extra statistics
+  // ---------------------------------------------------------------------------
+  double get todayAverageProfitPerTrip => todayTrips.isEmpty ? 0.0 : todayTotalNetProfit / todayTrips.length;
+
+  double get todayAverageProfitPerKm {
+    final km = todayTrips.fold(0.0, (sum, t) => sum + t.totalDistanceKm);
+    return km <= 0 ? 0.0 : todayTotalNetProfit / km;
+  }
+
+  /// Net profit per hour of the running shift (null when no shift is active or it just started).
+  double? get shiftProfitPerHour {
+    if (!isShiftActive || shiftStartTime <= 0) return null;
+    final hours = shiftDuration.inMinutes / 60.0;
+    if (hours < 0.25) return null;
+    final shiftTrips = repository.getTripsSince(shiftStartTime);
+    return shiftTrips.fold(0.0, (sum, t) => sum + t.netProfit) / hours;
+  }
+
+  /// Last [days] days (oldest first): date, trip count, gross and net per day.
+  List<DaySummary> lastDaysSummary({int days = 7}) {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final trips = repository.getTripsSince(start.millisecondsSinceEpoch);
+    return List.generate(days, (i) {
+      final day = start.add(Duration(days: i));
+      final next = day.add(const Duration(days: 1));
+      final dayTrips = trips.where((t) =>
+          t.timestamp >= day.millisecondsSinceEpoch && t.timestamp < next.millisecondsSinceEpoch);
+      return DaySummary(
+        day: day,
+        trips: dayTrips.length,
+        gross: dayTrips.fold(0.0, (s, t) => s + t.offeredFare),
+        net: dayTrips.fold(0.0, (s, t) => s + t.netProfit),
+      );
+    });
+  }
+
+  // Undo support
+  Future<void> restoreTrip(Trip trip) async {
+    await repository.recordTrip(trip);
+    _tripsVersion++;
+    notifyListeners();
+  }
+
+  Future<void> restoreExpense(Expense expense) async {
+    await repository.recordExpense(expense);
+    final applied = expense.appliedWearPerKm;
+    if (applied != null && applied > 0) {
+      await updateSettings(driverSettings.copyWith(
+        wearAndTearPerKm: ((driverSettings.wearAndTearPerKm + applied) * 100).round() / 100.0,
+      ));
+    } else {
+      notifyListeners();
+    }
   }
 
   // Zone Actions
@@ -428,4 +518,14 @@ class AssistantProvider extends ChangeNotifier {
     ));
     return true;
   }
+}
+
+/// One day of trips for the weekly summary.
+class DaySummary {
+  final DateTime day;
+  final int trips;
+  final double gross;
+  final double net;
+
+  const DaySummary({required this.day, required this.trips, required this.gross, required this.net});
 }

@@ -3,6 +3,7 @@ import '../../engine/fare_calculator_engine.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
 
+/// Compact counter-offer option. Tapping it uses this price as the offer.
 class SmartBidCard extends StatelessWidget {
   final SmartBidOption bid;
   final String currency;
@@ -17,105 +18,54 @@ class SmartBidCard extends StatelessWidget {
     required this.onSelect,
   });
 
+  static const Map<String, String> _tagLabels = {"MINIMUM": "الحد الأدنى", "OPTIMAL": "موصى به", "HIGH MARGIN": "ذروة"};
+
   @override
   Widget build(BuildContext context) {
-    final borderColor = isSelected ? AppColors.neonGreen : AppColors.darkCardBorder;
-    final bgColor = isSelected ? AppColors.neonGreen.withOpacity(0.08) : AppColors.darkSurface;
+    final tagColor = switch (bid.tag) {
+      "MINIMUM" => AppColors.warningYellow,
+      "HIGH MARGIN" => AppColors.accentCyan,
+      _ => AppColors.emeraldPrimary,
+    };
 
-    Color tagColor;
-    switch (bid.tag) {
-      case "MINIMUM":
-        tagColor = AppColors.warningYellow;
-        break;
-      case "OPTIMAL":
-        tagColor = AppColors.neonGreen;
-        break;
-      case "HIGH MARGIN":
-        tagColor = AppColors.accentCyan;
-        break;
-      default:
-        tagColor = AppColors.neonGreen;
-    }
-
-    return InkWell(
-      onTap: onSelect,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: tagColor.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: tagColor.withOpacity(0.4)),
-                      ),
-                      child: Text(
-                        const {"MINIMUM": "أدنى", "OPTIMAL": "مثالي", "HIGH MARGIN": "ربح عالٍ"}[bid.tag] ?? bid.tag,
-                        style: TextStyle(
-                          color: tagColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        bid.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                  ),
+    return Material(
+      color: isSelected ? tagColor.withValues(alpha: 0.12) : AppColors.darkSurfaceVariant,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Insets.radiusMd),
+        side: BorderSide(color: isSelected ? tagColor : AppColors.darkCardBorder, width: isSelected ? 1.6 : 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onSelect,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+          child: Column(
+            children: [
+              Text(
+                _tagLabels[bid.tag] ?? bid.tag,
+                style: TextStyle(color: tagColor, fontSize: 11.5, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              FittedBox(
+                child: Text(
+                  "${bid.suggestedFare.toInt()}",
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w900),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  "${bid.suggestedFare.toInt()} $currency",
+              ),
+              Text(currency, style: const TextStyle(color: AppColors.textTertiary, fontSize: 10.5)),
+              const SizedBox(height: 6),
+              FittedBox(
+                child: Text(
+                  "صافي ${signed(bid.netProfit, decimals: 0)}",
                   style: TextStyle(
-                    color: isSelected ? AppColors.neonGreen : AppColors.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
+                    color: bid.netProfit >= 0 ? AppColors.emeraldLight : AppColors.lossRed,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              "صافي الربح المتوقع: ${signed(bid.netProfit)} $currency (${bid.profitPerKm.toStringAsFixed(1)} $currency/كم)",
-              style: TextStyle(
-                color: bid.netProfit >= 0 ? AppColors.accentCyan : AppColors.lossRed,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              bid.description,
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 11,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
