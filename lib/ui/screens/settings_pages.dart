@@ -576,7 +576,7 @@ class PricingPage extends StatelessWidget {
             icon: Icons.route_outlined,
             iconColor: AppColors.accentCyan,
             title: "مسافة المشوار المفترضة",
-            subtitle: "تُستخدم عندما لا يظهر طول المشوار في الكارت (≈). افتح الطلب مرة ليُقرأ طوله الحقيقي",
+            subtitle: "إن درايف لا يعرض طول المشوار كنص، لذا يُستخدم هذا الرقم للحساب (≈). اضبطه على متوسط مشاويرك",
             unit: "كم",
             value: s.assumedTripKm,
             step: 0.5,

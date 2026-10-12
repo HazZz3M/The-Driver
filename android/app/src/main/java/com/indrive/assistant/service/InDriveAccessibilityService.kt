@@ -582,6 +582,14 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val ID_PICKUP_DISTANCE = "order_info_stage_textview_distance"
         private const val ID_FROM_ADDRESS = "order_info_textview_from_address"
         private const val ID_TO_ADDRESS = "order_info_textview_to_addresses"
+        // Same fields on the full-screen "Ride request" view use different ids.
+        private const val ID_FROM_ADDRESS_REQUEST = "info_textview_pickup"
+        private const val ID_TO_ADDRESS_REQUEST = "info_textview_destination"
+
+        /** Map markers / internal ids exposed as content descriptions are never places. */
+        private fun isMachineLabel(text: String): Boolean =
+            text.contains(":id/") || text.startsWith("sinet.", ignoreCase = true) ||
+                text.equals("Google Map", ignoreCase = true) || text.contains("_info_window_")
         private const val ID_NAME = "driver_common_textview_name"
         private const val ID_RATING = "driver_common_textview_rating"
 
@@ -655,8 +663,8 @@ class InDriveAccessibilityService : AccessibilityService() {
             // inDrive shows the pickup place first and the destination second (with "A" / "B"
             // markers on the request screen); marker-less list cards keep the same order.
             val heuristic = addressCandidates(texts, norm, passengerName)
-            val idFrom = ids[ID_FROM_ADDRESS]
-            val idTo = ids[ID_TO_ADDRESS]
+            val idFrom = ids[ID_FROM_ADDRESS] ?: ids[ID_FROM_ADDRESS_REQUEST]
+            val idTo = ids[ID_TO_ADDRESS] ?: ids[ID_TO_ADDRESS_REQUEST]
             val candidates = (listOfNotNull(idFrom, idTo) + heuristic).distinct().take(4)
             val pickupAddress = idFrom
                 ?: textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
@@ -703,6 +711,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val n = norm[i]
                 if (t.length !in 3..90) continue
                 if (t == passengerName) continue
+                if (isMachineLabel(t)) continue
                 if (LETTER.findAll(n).count() < 3) continue
                 if (hasFareText(n)) continue
                 if (RATING.matches(n) || TIME_ONLY.matches(n)) continue
