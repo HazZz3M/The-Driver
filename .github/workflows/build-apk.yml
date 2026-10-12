@@ -79,7 +79,14 @@ jobs:
         ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       run: |
-        flutter build apk --release
+        set -o pipefail
+        if ! flutter build apk --release 2>&1 | tee build.log; then
+          # Surface compiler/Gradle errors as public annotations (raw logs require sign-in).
+          grep -E "^e: |error:|What went wrong|> |Lint found|FAILURE" build.log | head -n 40 | while IFS= read -r line; do
+            echo "::error::$line"
+          done
+          exit 1
+        fi
         cp build/app/outputs/flutter-apk/app-release.apk The-Driver.apk
         sha256sum The-Driver.apk | awk '{print $1}' > The-Driver.apk.sha256
         ls -lh The-Driver.apk

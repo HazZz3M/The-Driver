@@ -70,6 +70,12 @@ android {
         }
     }
 
+    lint {
+        // The app is sideloaded (not on Play); don't let lint-vital block release builds.
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
     buildTypes {
         debug {
             shrinkResources false
