@@ -12,6 +12,7 @@ class PreferencesManager {
   static const String keyWearPerKm = "wear_per_km";
   static const String keyDailyTarget = "daily_target";
   static const String keyMinProfitKm = "min_profit_km";
+  static const String keyAssumedTripKm = "assumed_trip_km";
   static const String keyCurrency = "currency";
   static const String keyFavoriteZones = "favorite_zones";
   static const String keyBlacklistedZones = "blacklisted_zones";
@@ -53,6 +54,7 @@ class PreferencesManager {
       wearAndTearPerKm: prefs.getDouble(keyWearPerKm) ?? d.wearAndTearPerKm,
       targetDailyEarnings: prefs.getDouble(keyDailyTarget) ?? d.targetDailyEarnings,
       minProfitPerKm: prefs.getDouble(keyMinProfitKm) ?? d.minProfitPerKm,
+      assumedTripKm: prefs.getDouble(keyAssumedTripKm) ?? d.assumedTripKm,
       currency: prefs.getString(keyCurrency) ?? d.currency,
       favoriteZones: prefs.getStringList(keyFavoriteZones) ?? d.favoriteZones,
       blacklistedZones: prefs.getStringList(keyBlacklistedZones) ?? d.blacklistedZones,
@@ -75,6 +77,7 @@ class PreferencesManager {
       prefs.setDouble(keyWearPerKm, s.wearAndTearPerKm),
       prefs.setDouble(keyDailyTarget, s.targetDailyEarnings),
       prefs.setDouble(keyMinProfitKm, s.minProfitPerKm),
+      prefs.setDouble(keyAssumedTripKm, s.assumedTripKm),
       prefs.setString(keyCurrency, s.currency),
       prefs.setStringList(keyFavoriteZones, s.favoriteZones),
       prefs.setStringList(keyBlacklistedZones, s.blacklistedZones),

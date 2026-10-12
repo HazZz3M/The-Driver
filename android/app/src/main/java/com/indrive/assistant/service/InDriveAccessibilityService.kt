@@ -334,12 +334,15 @@ class InDriveAccessibilityService : AccessibilityService() {
         /** UI labels that are never addresses. */
         private val NON_ADDRESS_LABELS = listOf(
             "accept", "skip", "offer", "fair price", "decline", "cash", "card", "comment", "passenger",
-            "قبول", "تخطي", "اقترح", "قدم عرض", "تقديم عرض", "سعر مناسب", "رفض", "نقد", "كاش", "بطاقة", "تعليق", "راكب"
+            "just now", "now", "ago", "ride request", "close", "online", "offline", "balance", "top it up",
+            "performance", "ride requests",
+            "قبول", "تخطي", "اقترح", "قدم عرض", "تقديم عرض", "سعر مناسب", "رفض", "نقد", "كاش", "بطاقة", "تعليق", "راكب",
+            "الآن", "منذ", "طلب رحلة", "إغلاق", "اغلاق", "متصل", "الرصيد"
         )
 
         // Placeholders used only when a distance cannot be read; flagged via pickupKnown/tripKnown.
         private const val PLACEHOLDER_PICKUP_KM = 1.0
-        private const val PLACEHOLDER_TRIP_KM = 4.0
+        private const val DEFAULT_PLACEHOLDER_TRIP_KM = 4.0
 
         /** inDrive ships as sinet.startup.inDriver (and regional "indriver" variants). Never our own app. */
         fun isTargetPackage(pkg: String, ownPackage: String): Boolean {
@@ -407,46 +410,102 @@ class InDriveAccessibilityService : AccessibilityService() {
 
             val allScreenTexts = mutableListOf<String>()
             collectNodeTexts(root, allScreenTexts)
-            val hasSkipButton = allScreenTexts.any { isSkipLabel(normalizeArabicDigits(it.trim())) }
+            val normalizedAll = allScreenTexts.map { normalizeArabicDigits(it.trim()) }
+
+            // One-request screens: the full-screen "Ride request" view (has "Accept for EGP22" and
+            // a horizontal row of counter-bid chips) and the incoming-offer modal (has "Skip").
+            // Feed list cards have neither, so they are split per list item instead.
+            val singleRequestScreen = normalizedAll.any {
+                isSkipLabel(it) || ACCEPT_FOR_FARE.containsMatchIn(it) ||
+                    it.equals("Ride request", ignoreCase = true) || it.contains("طلب رحلة")
+            }
+
+            val fareNodes = mutableListOf<AccessibilityNodeInfo>()
+            findFareNodes(root, fareNodes)
 
             val parsedCards = mutableListOf<ParsedRideData>()
+            try {
+                if (singleRequestScreen) {
+                    val card = parseCard(allScreenTexts, null)
+                    if (card != null) {
+                        val top = mainFareNodeTop(fareNodes, card.fare) ?: (rootBounds.height() * 0.45).toInt()
+                        val bounds = Rect(0, (top - 24).coerceAtLeast(0), rootBounds.width(), rootBounds.bottom)
+                        parsedCards.add(card.copy(screenBounds = bounds, anchorBounds = bounds))
+                    }
+                } else {
+                    val seenItems = mutableSetOf<String>()
+                    for (fareNode in fareNodes) {
+                        val item = findListItemAncestor(fareNode) ?: continue
+                        val itemBounds = Rect()
+                        item.getBoundsInScreen(itemBounds)
+                        if (!seenItems.add(itemBounds.toShortString())) continue
 
-            if (!hasSkipButton) {
-                val fareNodes = mutableListOf<AccessibilityNodeInfo>()
-                findFareNodes(root, fareNodes)
-
-                val seenItems = mutableSetOf<String>()
-                for (fareNode in fareNodes) {
-                    val item = findListItemAncestor(fareNode) ?: continue
-                    val itemBounds = Rect()
-                    item.getBoundsInScreen(itemBounds)
-                    val key = itemBounds.toShortString()
-                    if (!seenItems.add(key)) continue
-
-                    val texts = mutableListOf<String>()
-                    collectNodeTexts(item, texts)
-                    parseCard(texts, itemBounds)?.let { parsedCards.add(it) }
+                        val texts = mutableListOf<String>()
+                        collectNodeTexts(item, texts)
+                        parseCard(texts, itemBounds)?.let { parsedCards.add(it) }
+                    }
+                    // Unknown layout: fall back to one card made of the whole screen.
+                    if (parsedCards.isEmpty()) {
+                        parseCard(allScreenTexts, Rect(0, 320, rootBounds.width(), rootBounds.height()))
+                            ?.let { parsedCards.add(it) }
+                    }
                 }
+            } finally {
                 fareNodes.filter { it !== root }.forEach { it.recycle() }
             }
 
-            // Full-screen request / modal / unknown layout: one card made of the whole screen.
-            if (parsedCards.isEmpty()) {
-                val bounds = if (hasSkipButton) {
-                    Rect(0, (rootBounds.height() * 0.45).toInt(), rootBounds.width(), rootBounds.height())
-                } else {
-                    Rect(0, 320, rootBounds.width(), rootBounds.height())
-                }
-                parseCard(allScreenTexts, bounds)?.let { parsedCards.add(it) }
-            }
+            // Trip length learned on the "Ride request" screen fills it in on the list card later.
+            val withMemory = parsedCards.map { rememberOrRecallTrip(it) }
 
             // Give identical-looking cards distinct identities so each keeps its own popup.
             val seenFingerprints = mutableMapOf<String, Int>()
-            return parsedCards.map { card ->
+            return withMemory.map { card ->
                 val n = seenFingerprints.getOrDefault(card.fingerprint, 0)
                 seenFingerprints[card.fingerprint] = n + 1
                 if (n == 0) card else card.copy(duplicateIndex = n)
             }
+        }
+
+        /** Top of the node showing the ride's own price (not "Accept for…", not a bid chip). */
+        private fun mainFareNodeTop(fareNodes: List<AccessibilityNodeInfo>, fare: Double): Int? {
+            for (node in fareNodes) {
+                val norm = normalizeArabicDigits("${node.text ?: ""} ${node.contentDescription ?: ""}".trim())
+                if (ACCEPT_FOR_FARE.containsMatchIn(norm)) continue
+                val m = CURRENCY_PREFIX_AMOUNT.find(norm) ?: CURRENCY_SUFFIX_AMOUNT.find(norm) ?: continue
+                if (m.groupValues[1].replace(',', '.').toDoubleOrNull() == fare) {
+                    val r = Rect()
+                    node.getBoundsInScreen(r)
+                    return r.top
+                }
+            }
+            return null
+        }
+
+        // ---- Trip-length memory (worker thread only) ----
+        private const val TRIP_MEMORY_TTL_MS = 30 * 60 * 1000L
+        private val tripMemory = LinkedHashMap<String, Pair<Double, Long>>()
+
+        private fun rideKey(card: ParsedRideData): String? {
+            if (card.pickupAddress.isBlank() || card.dropoffAddress.isBlank()) return null
+            return FareCalculatorEngine.normalizeArabicText(card.pickupAddress) + "|" +
+                FareCalculatorEngine.normalizeArabicText(card.dropoffAddress)
+        }
+
+        private fun rememberOrRecallTrip(card: ParsedRideData): ParsedRideData {
+            val key = rideKey(card) ?: return card
+            val now = System.currentTimeMillis()
+            if (card.tripKnown) {
+                tripMemory.remove(key)
+                tripMemory[key] = card.tripDistanceKm to now
+                while (tripMemory.size > 60) tripMemory.remove(tripMemory.keys.first())
+                return card
+            }
+            val remembered = tripMemory[key] ?: return card
+            if (now - remembered.second > TRIP_MEMORY_TTL_MS) {
+                tripMemory.remove(key)
+                return card
+            }
+            return card.copy(tripDistanceKm = remembered.first, tripKnown = true)
         }
 
         private fun findFareNodes(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
@@ -548,17 +607,17 @@ class InDriveAccessibilityService : AccessibilityService() {
                 .sorted()
 
             // 5. Addresses
+            // inDrive shows the pickup place first and the destination second (with "A" / "B"
+            // markers on the request screen); marker-less list cards keep the same order.
             val candidates = addressCandidates(texts, norm, passengerName)
-            var pickupAddress = ""
-            var dropoffAddress = ""
-            val fairIdx = norm.indexOfFirst { it.equals("Fair price", ignoreCase = true) || it.contains("سعر مناسب") }
-            if (fairIdx != -1 && fairIdx + 2 < texts.size) {
-                pickupAddress = texts[fairIdx + 1]
-                dropoffAddress = texts[fairIdx + 2]
-            } else {
-                pickupAddress = textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
-                dropoffAddress = textAfterMarker(texts, norm, "B", candidates)
-                    ?: candidates.firstOrNull { it != pickupAddress } ?: ""
+            val pickupAddress = textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
+            val dropoffAddress = textAfterMarker(texts, norm, "B", candidates)
+                ?: candidates.firstOrNull { it != pickupAddress } ?: ""
+
+            val assumedTripKm = try {
+                InDriveAssistantApp.instance.repository.getDriverSettings().assumedTripKm
+            } catch (_: Exception) {
+                DEFAULT_PLACEHOLDER_TRIP_KM
             }
 
             return ParsedRideData(
@@ -566,7 +625,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 passengerRating = passengerRating,
                 fare = fare,
                 pickupDistanceKm = distances.pickupKm ?: PLACEHOLDER_PICKUP_KM,
-                tripDistanceKm = distances.tripKm ?: PLACEHOLDER_TRIP_KM,
+                tripDistanceKm = distances.tripKm ?: assumedTripKm,
                 pickupKnown = distances.pickupKm != null,
                 tripKnown = distances.tripKm != null,
                 pickupAddress = pickupAddress,

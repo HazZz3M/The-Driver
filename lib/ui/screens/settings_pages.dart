@@ -573,6 +573,18 @@ class PricingPage extends StatelessWidget {
             onChanged: (v) => change((x) => x.copyWith(minProfitPerKm: v)),
           ),
           NumberStepperTile(
+            icon: Icons.route_outlined,
+            iconColor: AppColors.accentCyan,
+            title: "مسافة المشوار المفترضة",
+            subtitle: "تُستخدم عندما لا يظهر طول المشوار في الكارت (≈). افتح الطلب مرة ليُقرأ طوله الحقيقي",
+            unit: "كم",
+            value: s.assumedTripKm,
+            step: 0.5,
+            min: 0.5,
+            max: 50,
+            onChanged: (v) => change((x) => x.copyWith(assumedTripKm: v)),
+          ),
+          NumberStepperTile(
             icon: Icons.emoji_events_outlined,
             iconColor: AppColors.accentCyan,
             title: "الهدف اليومي",

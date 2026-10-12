@@ -314,8 +314,16 @@ class FloatingHudService : Service() {
         holder.params.width = cardWidth
         holder.params.gravity = Gravity.TOP or Gravity.LEFT
         holder.params.x = (screenWidth - cardWidth) / 2
-        holder.params.y = calculatePopupY(holder.ride)
-            .coerceIn((50 * density).toInt(), (screenHeight - (430 * density).toInt()).coerceAtLeast((50 * density).toInt()))
+        // Prefer opening ABOVE the request card so its price and "Accept" button stay visible
+        // and tappable; fall back to the card's own position when there isn't room above.
+        val minY = (50 * density).toInt()
+        val cardTop = calculatePopupY(holder.ride)
+        val above = cardTop - (EXPANDED_HEIGHT_ESTIMATE_DP * density).toInt() - (8 * density).toInt()
+        holder.params.y = if (above >= minY) {
+            above
+        } else {
+            cardTop.coerceIn(minY, (screenHeight - (430 * density).toInt()).coerceAtLeast(minY))
+        }
         renderPopupIfChanged(holder)
         safeUpdateLayout(holder)
 
@@ -1063,6 +1071,7 @@ class FloatingHudService : Service() {
         private const val TAG = "FloatingHud"
         private const val NOTIFICATION_ID = 1001
         private const val BADGE_MARGIN_X = 20
+        private const val EXPANDED_HEIGHT_ESTIMATE_DP = 300
         const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
         const val ACTION_CAPTURE = "com.indrive.assistant.action.CAPTURE_SCREEN"
 

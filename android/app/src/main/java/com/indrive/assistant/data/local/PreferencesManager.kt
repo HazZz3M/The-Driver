@@ -63,6 +63,7 @@ class PreferencesManager(context: Context) {
             wearAndTearPerKm = prefs.getFloat(KEY_WEAR_PER_KM, d.wearAndTearPerKm.toFloat()).toDouble(),
             targetDailyEarnings = prefs.getFloat(KEY_DAILY_TARGET, d.targetDailyEarnings.toFloat()).toDouble(),
             minProfitPerKm = prefs.getFloat(KEY_MIN_PROFIT_KM, d.minProfitPerKm.toFloat()).toDouble(),
+            assumedTripKm = prefs.getFloat(KEY_ASSUMED_TRIP_KM, d.assumedTripKm.toFloat()).toDouble(),
             currency = prefs.getString(KEY_CURRENCY, d.currency) ?: d.currency,
             favoriteZones = decodeList(prefs.getString(KEY_FAVORITE_ZONES, null)) ?: d.favoriteZones,
             blacklistedZones = decodeList(prefs.getString(KEY_BLACKLISTED_ZONES, null)) ?: d.blacklistedZones,
@@ -84,6 +85,7 @@ class PreferencesManager(context: Context) {
             putFloat(KEY_WEAR_PER_KM, settings.wearAndTearPerKm.toFloat())
             putFloat(KEY_DAILY_TARGET, settings.targetDailyEarnings.toFloat())
             putFloat(KEY_MIN_PROFIT_KM, settings.minProfitPerKm.toFloat())
+            putFloat(KEY_ASSUMED_TRIP_KM, settings.assumedTripKm.toFloat())
             putString(KEY_CURRENCY, settings.currency)
             putString(KEY_FAVORITE_ZONES, JSONArray(settings.favoriteZones).toString())
             putString(KEY_BLACKLISTED_ZONES, JSONArray(settings.blacklistedZones).toString())
@@ -122,6 +124,7 @@ class PreferencesManager(context: Context) {
                 wearAndTearPerKm = dbl("wearAndTearPerKm", d.wearAndTearPerKm),
                 targetDailyEarnings = dbl("targetDailyEarnings", d.targetDailyEarnings),
                 minProfitPerKm = dbl("minProfitPerKm", d.minProfitPerKm),
+                assumedTripKm = dbl("assumedTripKm", d.assumedTripKm),
                 currency = json.optString("currency", d.currency),
                 favoriteZones = list("favoriteZones", d.favoriteZones),
                 blacklistedZones = list("blacklistedZones", d.blacklistedZones),
@@ -217,6 +220,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_WEAR_PER_KM = "wear_per_km"
         private const val KEY_DAILY_TARGET = "daily_target"
         private const val KEY_MIN_PROFIT_KM = "min_profit_km"
+        private const val KEY_ASSUMED_TRIP_KM = "assumed_trip_km"
         private const val KEY_CURRENCY = "currency"
         private const val KEY_FAVORITE_ZONES = "favorite_zones"
         private const val KEY_BLACKLISTED_ZONES = "blacklisted_zones"

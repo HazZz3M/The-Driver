@@ -7,6 +7,8 @@ class DriverSettings {
   final double wearAndTearPerKm;
   final double targetDailyEarnings;
   final double minProfitPerKm;
+  /// Trip length assumed when a request card doesn't show it (list cards show pickup only).
+  final double assumedTripKm;
   final String currency;
   final List<String> favoriteZones;
   final List<String> blacklistedZones;
@@ -27,6 +29,7 @@ class DriverSettings {
     this.wearAndTearPerKm = 1.2,
     this.targetDailyEarnings = 1500.0,
     this.minProfitPerKm = 8.0,
+    this.assumedTripKm = 4.0,
     this.currency = "EGP",
     this.favoriteZones = const ["المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"],
     this.blacklistedZones = const ["شبرا الخيمة", "حلوان", "المرج"],
@@ -50,6 +53,7 @@ class DriverSettings {
     double? wearAndTearPerKm,
     double? targetDailyEarnings,
     double? minProfitPerKm,
+    double? assumedTripKm,
     String? currency,
     List<String>? favoriteZones,
     List<String>? blacklistedZones,
@@ -68,6 +72,7 @@ class DriverSettings {
       wearAndTearPerKm: wearAndTearPerKm ?? this.wearAndTearPerKm,
       targetDailyEarnings: targetDailyEarnings ?? this.targetDailyEarnings,
       minProfitPerKm: minProfitPerKm ?? this.minProfitPerKm,
+      assumedTripKm: assumedTripKm ?? this.assumedTripKm,
       currency: currency ?? this.currency,
       favoriteZones: favoriteZones ?? this.favoriteZones,
       blacklistedZones: blacklistedZones ?? this.blacklistedZones,
@@ -90,6 +95,7 @@ class DriverSettings {
       'wearAndTearPerKm': wearAndTearPerKm,
       'targetDailyEarnings': targetDailyEarnings,
       'minProfitPerKm': minProfitPerKm,
+      'assumedTripKm': assumedTripKm,
       'currency': currency,
       'favoriteZones': favoriteZones,
       'blacklistedZones': blacklistedZones,
