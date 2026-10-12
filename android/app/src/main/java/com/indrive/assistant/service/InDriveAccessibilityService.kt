@@ -335,7 +335,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         private val NON_ADDRESS_LABELS = listOf(
             "accept", "skip", "offer", "fair price", "decline", "cash", "card", "comment", "passenger",
             "just now", "now", "ago", "ride request", "close", "online", "offline", "balance", "top it up",
-            "performance", "ride requests",
+            "performance", "ride requests", "complain", "hide", "choose on map",
             "قبول", "تخطي", "اقترح", "قدم عرض", "تقديم عرض", "سعر مناسب", "رفض", "نقد", "كاش", "بطاقة", "تعليق", "راكب",
             "الآن", "منذ", "طلب رحلة", "إغلاق", "اغلاق", "متصل", "الرصيد"
         )
@@ -409,7 +409,8 @@ class InDriveAccessibilityService : AccessibilityService() {
             root.getBoundsInScreen(rootBounds)
 
             val allScreenTexts = mutableListOf<String>()
-            collectNodeTexts(root, allScreenTexts)
+            val screenIds = mutableMapOf<String, String>()
+            collectNodeTexts(root, allScreenTexts, screenIds)
             val normalizedAll = allScreenTexts.map { normalizeArabicDigits(it.trim()) }
 
             // One-request screens: the full-screen "Ride request" view (has "Accept for EGP22" and
@@ -426,7 +427,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             val parsedCards = mutableListOf<ParsedRideData>()
             try {
                 if (singleRequestScreen) {
-                    val card = parseCard(allScreenTexts, null)
+                    val card = parseCard(allScreenTexts, null, screenIds)
                     if (card != null) {
                         val top = mainFareNodeTop(fareNodes, card.fare) ?: (rootBounds.height() * 0.45).toInt()
                         val bounds = Rect(0, (top - 24).coerceAtLeast(0), rootBounds.width(), rootBounds.bottom)
@@ -441,8 +442,9 @@ class InDriveAccessibilityService : AccessibilityService() {
                         if (!seenItems.add(itemBounds.toShortString())) continue
 
                         val texts = mutableListOf<String>()
-                        collectNodeTexts(item, texts)
-                        parseCard(texts, itemBounds)?.let { parsedCards.add(it) }
+                        val ids = mutableMapOf<String, String>()
+                        collectNodeTexts(item, texts, ids)
+                        parseCard(texts, itemBounds, ids)?.let { parsedCards.add(it) }
                     }
                     // Unknown layout: fall back to one card made of the whole screen.
                     if (parsedCards.isEmpty()) {
@@ -510,7 +512,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
         private fun findFareNodes(node: AccessibilityNodeInfo, out: MutableList<AccessibilityNodeInfo>) {
             val norm = normalizeArabicDigits("${node.text ?: ""} ${node.contentDescription ?: ""}".trim())
-            if (norm.isNotEmpty() && hasFareText(norm)) out.add(node)
+            if (norm.isNotEmpty() && node.isVisibleToUser && hasFareText(norm)) out.add(node)
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 findFareNodes(child, out)
@@ -547,20 +549,55 @@ class InDriveAccessibilityService : AccessibilityService() {
             return null
         }
 
-        private fun collectNodeTexts(node: AccessibilityNodeInfo, texts: MutableList<String>) {
-            val text = node.text?.toString()?.trim()
-            if (!text.isNullOrEmpty()) texts.add(text)
-            val desc = node.contentDescription?.toString()?.trim()
-            if (!desc.isNullOrEmpty() && desc != text) texts.add(desc)
+        /**
+         * Collects visible texts in reading order. Off-screen nodes (e.g. inDrive's hidden swipe
+         * menu "Complain / Hide / Choose on map", laid out with zero width) are skipped.
+         * When [ids] is given, also records `view-id → text` for visible nodes.
+         */
+        private fun collectNodeTexts(
+            node: AccessibilityNodeInfo,
+            texts: MutableList<String>,
+            ids: MutableMap<String, String>? = null
+        ) {
+            val r = Rect()
+            node.getBoundsInScreen(r)
+            val visible = node.isVisibleToUser && r.width() > 0 && r.height() > 0
+            if (visible) {
+                val text = node.text?.toString()?.trim()
+                if (!text.isNullOrEmpty()) texts.add(text)
+                val desc = node.contentDescription?.toString()?.trim()
+                if (!desc.isNullOrEmpty() && desc != text) texts.add(desc)
+                val id = node.viewIdResourceName?.substringAfterLast('/')
+                if (ids != null && id != null && !text.isNullOrEmpty() && id !in ids) ids[id] = text
+            }
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
-                collectNodeTexts(child, texts)
+                collectNodeTexts(child, texts, ids)
                 child.recycle()
             }
         }
 
-        /** Parses one card's texts (in reading order). Returns null when no fare is found. */
-        fun parseCard(rawTexts: List<String>, bounds: Rect?): ParsedRideData? {
+        // inDrive driver app view ids (from a real screen capture, v. 2026-10).
+        private const val ID_PRICE = "info_textview_stage_price_view"
+        private const val ID_PICKUP_DISTANCE = "order_info_stage_textview_distance"
+        private const val ID_FROM_ADDRESS = "order_info_textview_from_address"
+        private const val ID_TO_ADDRESS = "order_info_textview_to_addresses"
+        private const val ID_NAME = "driver_common_textview_name"
+        private const val ID_RATING = "driver_common_textview_rating"
+
+        private fun amountOf(text: String?): Double? {
+            if (text == null) return null
+            val n = normalizeArabicDigits(text)
+            val m = CURRENCY_PREFIX_AMOUNT.find(n) ?: CURRENCY_SUFFIX_AMOUNT.find(n) ?: return null
+            return m.groupValues[1].replace(',', '.').toDoubleOrNull()
+        }
+
+        /**
+         * Parses one card's texts (in reading order). Returns null when no fare is found.
+         * [ids] (view-id → text) takes priority when inDrive's known ids are present; the text
+         * heuristics remain as a fallback for screens/versions without them.
+         */
+        fun parseCard(rawTexts: List<String>, bounds: Rect?, ids: Map<String, String> = emptyMap()): ParsedRideData? {
             // Merged semantics (Compose) can put several lines in one node: split them.
             val texts = rawTexts.flatMap { it.split('\n') }.map { it.trim() }.filter { it.isNotEmpty() }
             if (texts.isEmpty()) return null
@@ -572,6 +609,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val v = ACCEPT_FOR_FARE.find(t)?.groupValues?.get(1)?.replace(',', '.')?.toDoubleOrNull()
                 if (v != null) { fare = v; break }
             }
+            if (fare == null) fare = amountOf(ids[ID_PRICE])
             if (fare == null) {
                 for (t in norm) {
                     val m = CURRENCY_PREFIX_AMOUNT.find(t) ?: CURRENCY_SUFFIX_AMOUNT.find(t) ?: continue
@@ -582,9 +620,9 @@ class InDriveAccessibilityService : AccessibilityService() {
             if (fare == null || fare <= 0.0) return null
 
             // 2. Passenger name & rating
-            var passengerName = ""
-            var passengerRating = ""
-            val ratingIdx = norm.indexOfFirst { RATING.matches(it) }
+            var passengerName = ids[ID_NAME] ?: ""
+            var passengerRating = ids[ID_RATING] ?: ""
+            val ratingIdx = if (passengerName.isNotEmpty()) -1 else norm.indexOfFirst { RATING.matches(it) }
             if (ratingIdx >= 0) {
                 passengerRating = texts[ratingIdx]
                 if (ratingIdx > 0) {
@@ -597,8 +635,15 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // 3. Distances (currency amounts are stripped first so merged texts still count)
-            val distances = resolveDistances(norm)
+            // 3. Distances (currency amounts are stripped first so merged texts still count).
+            //    inDrive's distance field on list cards is the distance to the passenger.
+            val idPickupKm = ids[ID_PICKUP_DISTANCE]?.let { extractDistances(normalizeArabicDigits(it)).firstOrNull() }
+            val resolved = resolveDistances(norm)
+            val distances = if (idPickupKm == null) resolved else Distances(
+                pickupKm = idPickupKm,
+                tripKm = resolved.tripKm?.takeIf { it != idPickupKm }
+                    ?: resolved.pickupKm?.takeIf { it != idPickupKm }
+            )
 
             // 4. Counter bids (chips like "EGP 90" / "90")
             val counterBids = norm.mapNotNull { COUNTER_BID.find(it)?.groupValues?.get(1)?.toIntOrNull() }
@@ -609,10 +654,14 @@ class InDriveAccessibilityService : AccessibilityService() {
             // 5. Addresses
             // inDrive shows the pickup place first and the destination second (with "A" / "B"
             // markers on the request screen); marker-less list cards keep the same order.
-            val candidates = addressCandidates(texts, norm, passengerName)
-            val pickupAddress = textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
-            val dropoffAddress = textAfterMarker(texts, norm, "B", candidates)
-                ?: candidates.firstOrNull { it != pickupAddress } ?: ""
+            val heuristic = addressCandidates(texts, norm, passengerName)
+            val idFrom = ids[ID_FROM_ADDRESS]
+            val idTo = ids[ID_TO_ADDRESS]
+            val candidates = (listOfNotNull(idFrom, idTo) + heuristic).distinct().take(4)
+            val pickupAddress = idFrom
+                ?: textAfterMarker(texts, norm, "A", candidates) ?: candidates.getOrNull(0) ?: ""
+            val dropoffAddress = idTo
+                ?: textAfterMarker(texts, norm, "B", candidates) ?: candidates.firstOrNull { it != pickupAddress } ?: ""
 
             val assumedTripKm = try {
                 InDriveAssistantApp.instance.repository.getDriverSettings().assumedTripKm

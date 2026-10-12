@@ -1,7 +1,5 @@
-### The Driver v1.11.1 - Fixed reading of the "Ride request" screen
+### The Driver v1.11.2 - More accurate card reading
 
-- **The "Ride request" screen is now read correctly.** The price is taken from the "Accept for EGP…" button instead of the bid chips (EGP25/27/29). The pickup distance and both places (A and B) are read too.
-- **Trip length is remembered.** When you open a request, the real trip distance is saved if it appears on the screen. When you go back to the list, that ride's badge uses it instead of "≈".
-- **New setting:** "مسافة المشوار المفترضة" (Settings → التسعير والتكاليف). This trip length is used when the list card doesn't show the trip length, instead of a fixed 4 km.
-- **More accurate places:** labels such as "Just now" and "Fair price" are no longer mistaken for addresses.
-- **The expanded card opens above the request** so it no longer covers the price or the "Accept" button.
+- **Ride cards are now read by inDrive's own internal field names** (price, distance to the passenger, pickup and destination addresses, passenger name and rating), based on a real capture of the requests screen. This is far more reliable than guessing from the text.
+- **Hidden buttons are no longer picked up as places.** The swipe-menu items "Complain / Hide / Choose on map" no longer appear as zone suggestions in the expanded card.
+- Hidden prices and fields that aren't visible on screen are ignored.
