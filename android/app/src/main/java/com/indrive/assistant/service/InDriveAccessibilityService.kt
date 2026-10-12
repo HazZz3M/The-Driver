@@ -1,22 +1,32 @@
 package com.indrive.assistant.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityService.ScreenshotResult
+import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Rect
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import androidx.annotation.RequiresApi
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.data.model.DriverSettings
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.engine.FareCalculatorEngine
 import java.io.File
+import java.util.concurrent.Executor
 
 class InDriveAccessibilityService : AccessibilityService() {
 
@@ -85,11 +95,106 @@ class InDriveAccessibilityService : AccessibilityService() {
             }
             FloatingHudService.onCardsSync(rides)
             maybeScheduleAutoAccept(rides)
+            maybeReadTripFromMap(root, rides)
         } catch (e: Exception) {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
             root.recycle()
         }
+    }
+
+    // =========================================================================
+    // TRIP LENGTH FROM THE MAP (OCR)
+    //
+    // inDrive draws "11 min / 2,7 km" as an image inside a map info-window, exposed to
+    // accessibility only as an opaque id. On the Ride-request screen we take one screenshot
+    // (AccessibilityService.takeScreenshot, Android 11+), crop the info-window nearest to the
+    // destination marker (point B) and read it with on-device ML Kit. The result goes into the
+    // trip memory, so both the request screen and that ride's list card show the real length.
+    // =========================================================================
+
+    private val workerExecutor = Executor { command -> if (::worker.isInitialized) worker.post(command) }
+    private val textRecognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    @Volatile private var ocrInFlight = false
+    private val ocrAttempts = HashMap<String, Int>() // worker thread only
+
+    private fun maybeReadTripFromMap(root: AccessibilityNodeInfo, rides: List<ParsedRideData>) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || ocrInFlight) return
+        if (!InDriveAssistantApp.instance.repository.getHudPrefs().readMapDistance) return
+        val card = rides.singleOrNull() ?: return
+        if (card.tripKnown) return
+        val key = rideKey(card) ?: return
+        val attempts = ocrAttempts[key] ?: 0
+        if (attempts >= MAX_OCR_ATTEMPTS) return
+
+        val markers = findMapMarkers(root)
+        val pointB = markers.pointB ?: return
+        if (markers.infoWindows.isEmpty()) return
+        // The info-window closest to the destination marker carries the trip length.
+        val tripWindow = markers.infoWindows.minByOrNull { distanceSq(it, pointB) } ?: return
+
+        ocrAttempts[key] = attempts + 1
+        if (ocrAttempts.size > 100) ocrAttempts.clear()
+        ocrInFlight = true
+        captureAndRead(key, Rect(tripWindow))
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun captureAndRead(key: String, region: Rect) {
+        try {
+            takeScreenshot(Display.DEFAULT_DISPLAY, workerExecutor, object : TakeScreenshotCallback {
+                override fun onSuccess(result: ScreenshotResult) {
+                    val crop = try {
+                        val hardware = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                        val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
+                        result.hardwareBuffer.close()
+                        software?.let { cropSafely(it, region) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Screenshot decode failed", e)
+                        null
+                    }
+                    if (crop == null) {
+                        ocrInFlight = false
+                        return
+                    }
+                    textRecognizer.process(InputImage.fromBitmap(crop, 0))
+                        .addOnSuccessListener(workerExecutor) { visionText ->
+                            val raw = visionText.text.replace('\n', ' ')
+                            val km = extractTripKm(raw)
+                            lastOcrLog = "region=${region.toShortString()} text='$raw' → trip=${km ?: "?"}"
+                            if (km != null) {
+                                storeTripMemory(key, km)
+                                ocrAttempts.remove(key)
+                                // Re-parse now so the badge switches from "≈" to the real value.
+                                if (!scanScheduled) {
+                                    scanScheduled = true
+                                    worker.post(scanRunnable)
+                                }
+                            }
+                            ocrInFlight = false
+                        }
+                        .addOnFailureListener(workerExecutor) { e ->
+                            lastOcrLog = "region=${region.toShortString()} OCR failed: ${e.message}"
+                            ocrInFlight = false
+                        }
+                }
+
+                override fun onFailure(errorCode: Int) {
+                    // e.g. ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT: the next scan retries.
+                    lastOcrLog = "screenshot failed: code=$errorCode"
+                    ocrInFlight = false
+                }
+            })
+        } catch (e: Exception) {
+            lastOcrLog = "screenshot unavailable: ${e.message}"
+            ocrInFlight = false
+        }
+    }
+
+    private fun cropSafely(bitmap: Bitmap, region: Rect): Bitmap? {
+        val r = Rect(region)
+        if (!r.intersect(0, 0, bitmap.width, bitmap.height) || r.width() < 8 || r.height() < 8) return null
+        return Bitmap.createBitmap(bitmap, r.left, r.top, r.width(), r.height())
     }
 
     // =========================================================================
@@ -114,6 +219,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 .append(" bounds=").append(r.screenBounds?.toShortString())
                 .append('\n')
         }
+        sb.append("== MAP OCR ==\n").append(lastOcrLog).append('\n')
         sb.append("== NODE TREE ==\n")
         val count = intArrayOf(0)
         dumpNode(root, 0, sb, count)
@@ -481,6 +587,56 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
             return null
+        }
+
+        // ---- Map markers on the Ride-request screen (content descriptions are opaque ids) ----
+        private const val MAX_OCR_ATTEMPTS = 3
+
+        /** Last OCR attempt, included in the diagnostic dump. */
+        @Volatile
+        var lastOcrLog: String = "no OCR attempt yet"
+
+        private class MapMarkers(val infoWindows: List<Rect>, val pointA: Rect?, val pointB: Rect?)
+
+        private fun findMapMarkers(root: AccessibilityNodeInfo): MapMarkers {
+            val windows = mutableListOf<Rect>()
+            var a: Rect? = null
+            var b: Rect? = null
+            fun visit(node: AccessibilityNodeInfo) {
+                val desc = node.contentDescription?.toString() ?: ""
+                if (desc.isNotEmpty()) {
+                    val r = Rect()
+                    node.getBoundsInScreen(r)
+                    when {
+                        desc.contains("_info_window_") -> if (r.width() > 0 && r.height() > 0) windows.add(r)
+                        desc.endsWith("_PointA") -> a = r
+                        desc.endsWith("_PointB") -> b = r
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i) ?: continue
+                    visit(child)
+                    child.recycle()
+                }
+            }
+            visit(root)
+            return MapMarkers(windows, a, b)
+        }
+
+        private fun distanceSq(r1: Rect, r2: Rect): Long {
+            val dx = (r1.centerX() - r2.centerX()).toLong()
+            val dy = (r1.centerY() - r2.centerY()).toLong()
+            return dx * dx + dy * dy
+        }
+
+        /** "11 min 2,7 km" → 2.7 ; "966 m" → 1.0 */
+        private fun extractTripKm(ocrText: String): Double? =
+            extractDistances(normalizeArabicDigits(ocrText)).firstOrNull()
+
+        private fun storeTripMemory(key: String, km: Double) {
+            tripMemory.remove(key)
+            tripMemory[key] = km to System.currentTimeMillis()
+            while (tripMemory.size > 60) tripMemory.remove(tripMemory.keys.first())
         }
 
         // ---- Trip-length memory (worker thread only) ----

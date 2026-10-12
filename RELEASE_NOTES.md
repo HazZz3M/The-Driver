@@ -1,6 +1,9 @@
-### The Driver v1.11.2 - More accurate card reading
+### The Driver v1.12.0 - Real trip length from the map
 
-- **Ride cards are now read by inDrive's own internal field names** (price, distance to the passenger, pickup and destination addresses, passenger name and rating), on both the requests list and the "Ride request" screen. This is based on real captures of both screens.
-- **Fixed the places on the "Ride request" screen.** Map items (such as "Google Map" and the car icon) and the hidden "Complain / Hide" buttons no longer appear as places.
-- Hidden prices and fields that aren't visible on screen are ignored.
-- **Important note:** inDrive draws the trip length (e.g. 2.7 km) as an image on the map, not as text, so it can't be read. Set "مسافة المشوار المفترضة" in Settings → التسعير والتكاليف to your average trip length; the profit will then be shown as approximate (≈).
+- **The app now reads the real trip length.** When you open a request ("Ride request" screen), the app takes one screenshot and reads the number inDrive draws on the map next to the destination (for example "11 min 2,7 km").
+  - Profit and the badge are then calculated on the real length, without "≈".
+  - The length is remembered for that ride and appears on its card in the list.
+- **Privacy:** processing happens on the phone (on-device text recognition). No image is saved and nothing is sent outside the phone.
+- **New setting:** "قراءة طول المشوار من الخريطة" (Settings → العلامة العائمة → القراءة) to turn the feature on or off.
+- Requires Android 11 or newer. On older versions the assumed trip length is used.
+- If the feature doesn't work after updating, turn The Driver's accessibility service off and on again from the phone's settings.

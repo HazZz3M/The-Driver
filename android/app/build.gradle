@@ -107,4 +107,8 @@ dependencies {
 
     // Coroutines
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
+
+    // On-device text recognition (bundled Latin model, no Google Play services needed):
+    // reads the trip length inDrive draws on the "Ride request" map.
+    implementation "com.google.mlkit:text-recognition:16.0.1"
 }

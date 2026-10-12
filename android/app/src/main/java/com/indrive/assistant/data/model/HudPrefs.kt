@@ -23,7 +23,9 @@ data class HudPrefs(
     val showCostBreakdown: Boolean = false,
     val showZones: Boolean = true,
     /** 0 = never auto-collapse the expanded card */
-    val autoCollapseSeconds: Int = 0
+    val autoCollapseSeconds: Int = 0,
+    /** Read the trip length drawn on the Ride-request map with on-device OCR (Android 11+). */
+    val readMapDistance: Boolean = true
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("style", style)
@@ -40,6 +42,7 @@ data class HudPrefs(
         put("showCostBreakdown", showCostBreakdown)
         put("showZones", showZones)
         put("autoCollapseSeconds", autoCollapseSeconds)
+        put("readMapDistance", readMapDistance)
     }
 
     companion object {
@@ -59,7 +62,8 @@ data class HudPrefs(
                 showDistance = json.optBoolean("showDistance", fallback.showDistance),
                 showCostBreakdown = json.optBoolean("showCostBreakdown", fallback.showCostBreakdown),
                 showZones = json.optBoolean("showZones", fallback.showZones),
-                autoCollapseSeconds = json.optInt("autoCollapseSeconds", fallback.autoCollapseSeconds).coerceIn(0, 120)
+                autoCollapseSeconds = json.optInt("autoCollapseSeconds", fallback.autoCollapseSeconds).coerceIn(0, 120),
+                readMapDistance = json.optBoolean("readMapDistance", fallback.readMapDistance)
             )
         }
     }

@@ -15,6 +15,7 @@ class HudSettings {
   final bool showCostBreakdown;
   final bool showZones;
   final int autoCollapseSeconds; // 0 = never
+  final bool readMapDistance; // OCR of the trip length drawn on the Ride-request map
 
   const HudSettings({
     this.style = "COMPACT_CIRCLE",
@@ -31,6 +32,7 @@ class HudSettings {
     this.showCostBreakdown = false,
     this.showZones = true,
     this.autoCollapseSeconds = 0,
+    this.readMapDistance = true,
   });
 
   HudSettings copyWith({
@@ -48,6 +50,7 @@ class HudSettings {
     bool? showCostBreakdown,
     bool? showZones,
     int? autoCollapseSeconds,
+    bool? readMapDistance,
   }) {
     return HudSettings(
       style: style ?? this.style,
@@ -64,6 +67,7 @@ class HudSettings {
       showCostBreakdown: showCostBreakdown ?? this.showCostBreakdown,
       showZones: showZones ?? this.showZones,
       autoCollapseSeconds: autoCollapseSeconds ?? this.autoCollapseSeconds,
+      readMapDistance: readMapDistance ?? this.readMapDistance,
     );
   }
 
@@ -82,6 +86,7 @@ class HudSettings {
         'showCostBreakdown': showCostBreakdown,
         'showZones': showZones,
         'autoCollapseSeconds': autoCollapseSeconds,
+        'readMapDistance': readMapDistance,
       };
 
   factory HudSettings.fromJson(Map<String, dynamic> json, {HudSettings fallback = const HudSettings()}) {
@@ -100,6 +105,7 @@ class HudSettings {
       showCostBreakdown: json['showCostBreakdown'] as bool? ?? fallback.showCostBreakdown,
       showZones: json['showZones'] as bool? ?? fallback.showZones,
       autoCollapseSeconds: (json['autoCollapseSeconds'] as num?)?.toInt() ?? fallback.autoCollapseSeconds,
+      readMapDistance: json['readMapDistance'] as bool? ?? fallback.readMapDistance,
     );
   }
 

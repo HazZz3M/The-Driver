@@ -213,6 +213,18 @@ class HudSettingsPage extends StatelessWidget {
           ),
         ]),
 
+        const SectionLabel("القراءة"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.document_scanner_outlined,
+            iconColor: AppColors.accentCyan,
+            title: "قراءة طول المشوار من الخريطة",
+            subtitle: "عند فتح الطلب يقرأ التطبيق الرقم المرسوم على الخريطة (مثل 2,7 km) داخل الهاتف دون حفظ أي صورة. يتطلب أندرويد 11 أو أحدث",
+            value: hud.readMapDistance,
+            onChanged: (v) => change((h) => h.copyWith(readMapDistance: v)),
+          ),
+        ]),
+
         const SectionLabel("التنبيهات"),
         SettingsGroup(children: [
           SwitchTile(
@@ -576,7 +588,7 @@ class PricingPage extends StatelessWidget {
             icon: Icons.route_outlined,
             iconColor: AppColors.accentCyan,
             title: "مسافة المشوار المفترضة",
-            subtitle: "إن درايف لا يعرض طول المشوار كنص، لذا يُستخدم هذا الرقم للحساب (≈). اضبطه على متوسط مشاويرك",
+            subtitle: "يُستخدم في كروت القائمة قبل فتح الطلب (≈). عند فتح الطلب يُقرأ الطول الحقيقي من الخريطة",
             unit: "كم",
             value: s.assumedTripKm,
             step: 0.5,
