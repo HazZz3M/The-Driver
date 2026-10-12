@@ -1,79 +1,145 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+/// Outcome of handing a downloaded update to the Android installer.
+enum InstallApkResult { started, needsPermission, checksumMismatch, fileNotFound, error }
+
+/// Zone lists held by the native HUD, plus how Flutter should merge them
+/// ("replace", "union" or "none"; see PreferencesManager.zonesAsJson in Kotlin).
+class NativeZones {
+  final String mode;
+  final List<String> favoriteZones;
+  final List<String> blacklistedZones;
+
+  const NativeZones(this.mode, this.favoriteZones, this.blacklistedZones);
+}
 
 class NativeBridgeService {
   static const MethodChannel _channel = MethodChannel('com.indrive.assistant/hud');
 
-  /// Checks if SYSTEM_ALERT_WINDOW (display over other apps) permission is granted
   static Future<bool> checkOverlayPermission() async {
     try {
-      final bool? result = await _channel.invokeMethod<bool>('checkOverlayPermission');
-      return result ?? false;
-    } catch (_) {
+      return await _channel.invokeMethod<bool>('checkOverlayPermission') ?? false;
+    } catch (e) {
+      debugPrint("checkOverlayPermission failed: $e");
       return false;
     }
   }
 
-  /// Requests the user to allow overlay permission
   static Future<void> requestOverlayPermission() async {
     try {
       await _channel.invokeMethod('requestOverlayPermission');
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("requestOverlayPermission failed: $e");
+    }
   }
 
-  /// Checks if inDrive Accessibility Service is enabled in Android settings
   static Future<bool> checkAccessibilityPermission() async {
     try {
-      final bool? result = await _channel.invokeMethod<bool>('checkAccessibilityPermission');
-      return result ?? false;
-    } catch (_) {
+      return await _channel.invokeMethod<bool>('checkAccessibilityPermission') ?? false;
+    } catch (e) {
+      debugPrint("checkAccessibilityPermission failed: $e");
       return false;
     }
   }
 
-  /// Opens Accessibility Settings screen on Android
   static Future<void> openAccessibilitySettings() async {
     try {
       await _channel.invokeMethod('openAccessibilitySettings');
-    } catch (_) {}
-  }
-
-  /// Starts the FloatingHudService foreground service
-  static Future<bool> startFloatingService() async {
-    try {
-      final bool? result = await _channel.invokeMethod<bool>('startFloatingService');
-      return result ?? true;
-    } catch (_) {
-      return false;
+    } catch (e) {
+      debugPrint("openAccessibilitySettings failed: $e");
     }
   }
 
-  /// Stops the FloatingHudService
+  /// Returns null on success, or an Arabic error message to show the driver.
+  static Future<String?> startFloatingService() async {
+    try {
+      await _channel.invokeMethod<bool>('startFloatingService');
+      return null;
+    } on PlatformException catch (e) {
+      if (e.code == "NO_OVERLAY_PERMISSION") {
+        return "يجب منح صلاحية العرض فوق التطبيقات أولاً";
+      }
+      return "تعذر تشغيل المساعد العائم: ${e.message ?? e.code}";
+    } catch (e) {
+      return "تعذر تشغيل المساعد العائم";
+    }
+  }
+
   static Future<bool> stopFloatingService() async {
     try {
-      final bool? result = await _channel.invokeMethod<bool>('stopFloatingService');
-      return result ?? true;
-    } catch (_) {
+      return await _channel.invokeMethod<bool>('stopFloatingService') ?? true;
+    } catch (e) {
+      debugPrint("stopFloatingService failed: $e");
       return false;
     }
   }
 
-  /// Checks whether FloatingHudService is currently running in background
   static Future<bool> isFloatingServiceRunning() async {
     try {
-      final bool? result = await _channel.invokeMethod<bool>('isFloatingServiceRunning');
-      return result ?? false;
-    } catch (_) {
+      return await _channel.invokeMethod<bool>('isFloatingServiceRunning') ?? false;
+    } catch (e) {
+      debugPrint("isFloatingServiceRunning failed: $e");
       return false;
     }
   }
 
-  /// Triggers the native Android package installer for a downloaded APK file
-  static Future<bool> installApk(String filePath) async {
+  /// Pushes the full settings snapshot to the native HUD / accessibility layer.
+  static Future<void> syncSettings(Map<String, dynamic> snapshot) async {
     try {
-      final bool? result = await _channel.invokeMethod<bool>('installApk', {'filePath': filePath});
-      return result ?? false;
-    } catch (_) {
-      return false;
+      await _channel.invokeMethod('syncSettings', {'json': jsonEncode(snapshot)});
+    } catch (e) {
+      debugPrint("syncSettings failed: $e");
+    }
+  }
+
+  /// Zones as edited from the HUD. Null when the native side is unavailable.
+  static Future<NativeZones?> getNativeZones() async {
+    try {
+      final raw = await _channel.invokeMethod<String>('getNativeZones');
+      if (raw == null) return null;
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      List<String> list(String k) => ((json[k] as List?) ?? const []).map((e) => e.toString()).toList();
+      return NativeZones(json['mode'] as String? ?? "none", list('favoriteZones'), list('blacklistedZones'));
+    } catch (e) {
+      debugPrint("getNativeZones failed: $e");
+      return null;
+    }
+  }
+
+  /// The installed app's versionName (from the APK, not a hard-coded constant).
+  static Future<String?> getAppVersion() async {
+    try {
+      return await _channel.invokeMethod<String>('getAppVersion');
+    } catch (e) {
+      debugPrint("getAppVersion failed: $e");
+      return null;
+    }
+  }
+
+  /// Verifies [expectedSha256] (when given) and starts the system installer.
+  static Future<InstallApkResult> installApk(String filePath, {String? expectedSha256}) async {
+    try {
+      final status = await _channel.invokeMethod<String>(
+        'installApk',
+        {'filePath': filePath, 'sha256': expectedSha256},
+      );
+      switch (status) {
+        case 'STARTED':
+          return InstallApkResult.started;
+        case 'NEEDS_PERMISSION':
+          return InstallApkResult.needsPermission;
+        case 'CHECKSUM_MISMATCH':
+          return InstallApkResult.checksumMismatch;
+        case 'FILE_NOT_FOUND':
+          return InstallApkResult.fileNotFound;
+        default:
+          return InstallApkResult.error;
+      }
+    } catch (e) {
+      debugPrint("installApk failed: $e");
+      return InstallApkResult.error;
     }
   }
 }

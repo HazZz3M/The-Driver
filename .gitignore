@@ -15,6 +15,18 @@ local.properties
 *.iml
 .DS_Store
 
+# Signing secrets (never commit)
+*.keystore
+*.jks
+key.properties
+signing-secrets/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+
 # Node / Web dependencies
 node_modules/
 dist/

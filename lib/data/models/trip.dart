@@ -31,7 +31,7 @@ class Trip {
     this.pickupLocation = "",
     this.dropoffLocation = "",
     this.notes = "",
-  })  : id = id ?? DateTime.now().millisecondsSinceEpoch,
+  })  : id = id ?? DateTime.now().microsecondsSinceEpoch,
         timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch;
 
   double get totalDistanceKm => pickupDistanceKm + tripDistanceKm;

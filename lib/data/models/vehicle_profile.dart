@@ -1,5 +1,5 @@
-import 'driver_settings.dart';
-
+/// A vehicle's own running costs. The active profile is the single source of truth for
+/// consumption, fuel price and wear rate; DriverSettings mirrors them for the engine.
 class VehicleProfile {
   final String id;
   final String name; // e.g. "هيونداي فيرنا", "بي واي دي F3 (غاز)", "سكوتر بينيلي"
@@ -23,26 +23,7 @@ class VehicleProfile {
     this.inDriveCommissionPercent = 10.0,
     this.minProfitPerKm = 8.0,
     this.notes = "",
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
-
-  DriverSettings toDriverSettings({
-    required String currency,
-    required double targetDailyEarnings,
-    required List<String> favoriteZones,
-    required List<String> blacklistedZones,
-  }) {
-    return DriverSettings(
-      fuelConsumptionLPer100Km: fuelConsumptionLPer100Km,
-      fuelPricePerLiter: fuelPricePerLiter,
-      inDriveCommissionPercent: inDriveCommissionPercent,
-      wearAndTearPerKm: wearAndTearPerKm,
-      targetDailyEarnings: targetDailyEarnings,
-      minProfitPerKm: minProfitPerKm,
-      currency: currency,
-      favoriteZones: favoriteZones,
-      blacklistedZones: blacklistedZones,
-    );
-  }
+  }) : id = id ?? "veh_${DateTime.now().microsecondsSinceEpoch}";
 
   VehicleProfile copyWith({
     String? id,

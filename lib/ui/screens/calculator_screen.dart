@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
 import '../components/cost_item_row.dart';
 import '../components/profit_status_banner.dart';
 import '../components/quick_input_slider.dart';
@@ -16,6 +17,7 @@ class CalculatorScreen extends StatefulWidget {
 
 class _CalculatorScreenState extends State<CalculatorScreen> {
   double? _selectedBidFare;
+  bool _isSaving = false;
   final TextEditingController _zoneController = TextEditingController();
 
   @override
@@ -139,26 +141,31 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                       border: Border.all(color: AppColors.darkCardBorder),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.directions_car, color: AppColors.neonGreen, size: 18),
-                            const SizedBox(width: 8),
-                            Text(
-                              "المركبة النشطة: ${activeVehicle.name}",
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
+                        const Icon(Icons.directions_car, color: AppColors.neonGreen, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "المركبة النشطة: ${activeVehicle.name}",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              "(${activeVehicle.fuelConsumptionLPer100Km}L / ${activeVehicle.fuelPricePerLiter} ج.م)",
-                              style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                            ),
-                          ],
+                              Text(
+                                "${formatNumber(activeVehicle.fuelConsumptionLPer100Km)} لتر/100كم • ${formatNumber(activeVehicle.fuelPricePerLiter)} ج.م/لتر",
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                              ),
+                            ],
+                          ),
                         ),
                         const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
                       ],
@@ -234,7 +241,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 3),
                       child: InkWell(
                         onTap: () {
-                          final next = (provider.offeredFare + delta).clamp(10.0, 600.0);
+                          final next = (provider.offeredFare + delta).clamp(10.0, 500.0);
                           provider.setOfferedFare(next);
                           setState(() => _selectedBidFare = null);
                         },
@@ -339,16 +346,13 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                             ),
                             onPressed: () async {
                               final text = _zoneController.text.trim();
+                              final messenger = ScaffoldMessenger.of(context);
                               if (settings.isFavorite(text)) {
                                 await provider.removeFavoriteZone(text);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("تمت إزالة '$text' من المفضلة")),
-                                );
+                                messenger.showSnackBar(SnackBar(content: Text("تمت إزالة '$text' من المفضلة")));
                               } else {
                                 await provider.addFavoriteZone(text);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("تمت إضافة '$text' للمفضلة")),
-                                );
+                                messenger.showSnackBar(SnackBar(content: Text("تمت إضافة '$text' للمفضلة")));
                               }
                             },
                             child: Text(
@@ -367,16 +371,13 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                             ),
                             onPressed: () async {
                               final text = _zoneController.text.trim();
+                              final messenger = ScaffoldMessenger.of(context);
                               if (settings.isBlacklisted(text)) {
                                 await provider.removeBlacklistZone(text);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("تم إلغاء حظر '$text'")),
-                                );
+                                messenger.showSnackBar(SnackBar(content: Text("تم إلغاء حظر '$text'")));
                               } else {
                                 await provider.addBlacklistZone(text);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text("تمت إضافة '$text' للمحظورة")),
-                                );
+                                messenger.showSnackBar(SnackBar(content: Text("تمت إضافة '$text' للمحظورة")));
                               }
                             },
                             child: Text(
@@ -471,20 +472,34 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check, size: 20),
+                  icon: _isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.darkBackground),
+                        )
+                      : const Icon(Icons.check, size: 20),
                   label: Text(
                     "حفظ الرحلة في السجل (${(_selectedBidFare ?? provider.offeredFare).toInt()} ${settings.currency})",
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   ),
-                  onPressed: () async {
-                    await provider.saveCurrentRide(_selectedBidFare);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("تم حفظ الرحلة بنجاح وإضافتها إلى إحصائيات الوردية!"),
-                        backgroundColor: AppColors.neonGreenDark,
-                      ),
-                    );
-                  },
+                  onPressed: _isSaving
+                      ? null
+                      : () async {
+                          setState(() => _isSaving = true);
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await provider.saveCurrentRide(_selectedBidFare);
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text("تم حفظ الرحلة بنجاح وإضافتها إلى إحصائيات الوردية!"),
+                                backgroundColor: AppColors.neonGreenDark,
+                              ),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isSaving = false);
+                          }
+                        },
                 ),
               ),
             ],

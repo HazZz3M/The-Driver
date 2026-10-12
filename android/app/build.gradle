@@ -14,13 +14,27 @@ if (localPropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
-    flutterVersionCode = '8'
+    flutterVersionCode = '1'
 }
 
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
-    flutterVersionName = '1.6.0'
+    flutterVersionName = '0.0.0'
 }
+
+// Release signing: never committed. CI passes env vars; local builds use android/key.properties.
+//   storeFile=<absolute or app-relative path>  storePassword=...  keyAlias=...  keyPassword=...
+def keyProperties = new Properties()
+def keyPropertiesFile = rootProject.file('key.properties')
+if (keyPropertiesFile.exists()) {
+    keyPropertiesFile.withReader('UTF-8') { reader -> keyProperties.load(reader) }
+}
+def signingValue = { String envName, String propName ->
+    def v = System.getenv(envName)
+    return (v != null && !v.isEmpty()) ? v : keyProperties.getProperty(propName)
+}
+def releaseStoreFile = signingValue('ANDROID_KEYSTORE_PATH', 'storeFile')
+def hasReleaseSigning = releaseStoreFile != null && file(releaseStoreFile).exists()
 
 android {
     namespace "com.indrive.assistant"
@@ -46,11 +60,13 @@ android {
     }
 
     signingConfigs {
-        permanent {
-            storeFile file("keystore/fixed-release.keystore")
-            storePassword "thedriver123"
-            keyAlias "thedriver"
-            keyPassword "thedriver123"
+        if (hasReleaseSigning) {
+            permanent {
+                storeFile file(releaseStoreFile)
+                storePassword signingValue('ANDROID_KEYSTORE_PASSWORD', 'storePassword')
+                keyAlias signingValue('ANDROID_KEY_ALIAS', 'keyAlias')
+                keyPassword signingValue('ANDROID_KEY_PASSWORD', 'keyPassword')
+            }
         }
     }
 
@@ -58,16 +74,16 @@ android {
         debug {
             shrinkResources false
             minifyEnabled false
-            if (file("keystore/fixed-release.keystore").exists()) {
+            if (hasReleaseSigning) {
                 signingConfig signingConfigs.permanent
             }
         }
         release {
             shrinkResources false
             minifyEnabled false
-            if (file("keystore/fixed-release.keystore").exists()) {
-                signingConfig signingConfigs.permanent
-            }
+            // Without the real key, fall back to the debug key so CI branch builds still produce an
+            // installable APK. Such APKs cannot update an installed release build (signature differs).
+            signingConfig hasReleaseSigning ? signingConfigs.permanent : signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

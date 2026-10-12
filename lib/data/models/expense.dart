@@ -21,6 +21,8 @@ class Expense {
   final String? partName;
   final double? partLifespanKm; // العمر الافتراضي لقطعة الغيار بالكيلومتر
   final double? partCostPerKm; // amount / partLifespanKm
+  /// Amount added to the vehicle's wear rate when this part was saved; removed again on delete.
+  final double? appliedWearPerKm;
 
   final double? odometerKm;
   final String description;
@@ -42,9 +44,10 @@ class Expense {
     this.partName,
     this.partLifespanKm,
     this.partCostPerKm,
+    this.appliedWearPerKm,
     this.odometerKm,
     this.description = "",
-  })  : id = id ?? DateTime.now().millisecondsSinceEpoch,
+  })  : id = id ?? DateTime.now().microsecondsSinceEpoch,
         timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch;
 
   Expense copyWith({
@@ -64,6 +67,7 @@ class Expense {
     String? partName,
     double? partLifespanKm,
     double? partCostPerKm,
+    double? appliedWearPerKm,
     double? odometerKm,
     String? description,
   }) {
@@ -84,6 +88,7 @@ class Expense {
       partName: partName ?? this.partName,
       partLifespanKm: partLifespanKm ?? this.partLifespanKm,
       partCostPerKm: partCostPerKm ?? this.partCostPerKm,
+      appliedWearPerKm: appliedWearPerKm ?? this.appliedWearPerKm,
       odometerKm: odometerKm ?? this.odometerKm,
       description: description ?? this.description,
     );
@@ -107,6 +112,7 @@ class Expense {
       'partName': partName,
       'partLifespanKm': partLifespanKm,
       'partCostPerKm': partCostPerKm,
+      'appliedWearPerKm': appliedWearPerKm,
       'odometerKm': odometerKm,
       'description': description,
     };
@@ -130,6 +136,7 @@ class Expense {
       partName: json['partName'] as String?,
       partLifespanKm: (json['partLifespanKm'] as num?)?.toDouble(),
       partCostPerKm: (json['partCostPerKm'] as num?)?.toDouble(),
+      appliedWearPerKm: (json['appliedWearPerKm'] as num?)?.toDouble(),
       odometerKm: (json['odometerKm'] as num?)?.toDouble(),
       description: json['description'] as String? ?? "",
     );

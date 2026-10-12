@@ -93,15 +93,35 @@ class FareAnalysisResult {
 }
 
 class FareCalculatorEngine {
+  /// City driving estimate; must match MINUTES_PER_KM in FareCalculatorEngine.kt.
+  static const double minutesPerKm = 2.5;
+
+  static final RegExp _alefVariants = RegExp(r'[أإآ]');
+  static final RegExp _punctOrSpace = RegExp(r'[\p{P}\s]+', unicode: true);
+
+  static int estimateMinutes(double totalDistanceKm) =>
+      (totalDistanceKm * minutesPerKm).toInt().clamp(5, 300);
+
   /// Normalizes Arabic characters and trims punctuation for robust string matching
   static String normalizeArabicText(String str) {
     return str
         .toLowerCase()
-        .replaceAll(RegExp(r'[أإآ]'), 'ا')
+        .replaceAll(_alefVariants, 'ا')
         .replaceAll('ى', 'ي')
         .replaceAll('ة', 'ه')
-        .replaceAll(RegExp(r'[\p{P}\s]+', unicode: true), ' ')
+        .replaceAll(_punctOrSpace, ' ')
         .trim();
+  }
+
+  /// Returns the first zone whose normalized name appears in [address], or null.
+  static String? matchZone(String? address, List<String> zones) {
+    if (address == null || address.trim().isEmpty) return null;
+    final normAddress = normalizeArabicText(address);
+    for (final z in zones) {
+      final normZ = normalizeArabicText(z);
+      if (normZ.isNotEmpty && normAddress.contains(normZ)) return z;
+    }
+    return null;
   }
 
   /// Evaluates fare, operating expenses, profitability, and generates 3 intelligent counter-bids
@@ -154,31 +174,16 @@ class FareCalculatorEngine {
     final aggressiveFare = max(recommendedFare + 15.0, roundToSmartStep(rawAggressive));
 
     // 6. Geographic Zone Analysis
-    final combinedAddress = normalizeArabicText("$pickupAddress $dropoffAddress");
-    String? matchedFavorite;
-    for (final z in settings.favoriteZones) {
-      final normZ = normalizeArabicText(z);
-      if (normZ.isNotEmpty && combinedAddress.contains(normZ)) {
-        matchedFavorite = z;
-        break;
-      }
-    }
-
-    String? matchedBlacklist;
-    for (final z in settings.blacklistedZones) {
-      final normZ = normalizeArabicText(z);
-      if (normZ.isNotEmpty && combinedAddress.contains(normZ)) {
-        matchedBlacklist = z;
-        break;
-      }
-    }
+    final combinedAddress = "$pickupAddress $dropoffAddress";
+    final matchedFavorite = matchZone(combinedAddress, settings.favoriteZones);
+    final matchedBlacklist = matchZone(combinedAddress, settings.blacklistedZones);
 
     // 7. Evaluate Profitability
-    var evaluation = _evaluateProfitability(
+    final evaluation = _evaluateProfitability(
       netProfit: netProfit,
       profitPerKm: profitPerKm,
       minTargetProfitPerKm: settings.minProfitPerKm,
-      fuelCost: fuelCost,
+      totalOperatingCost: totalOperatingCost,
       offeredFare: offeredFare,
     );
 
@@ -191,11 +196,11 @@ class FareCalculatorEngine {
       if (offeredFare >= aggressiveFare || profitPerKm >= settings.minProfitPerKm * 1.4) {
         level = ProfitabilityLevel.goodProfit;
         statusMessage = "مقبول فقط لارتفاع السعر الاستثنائي";
-        warningNote = "تنبيه: الوجهة تقع ضمن المنطقة غير المرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع.";
+        warningNote = "تنبيه: الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع.";
       } else {
         level = ProfitabilityLevel.lossDanger;
         statusMessage = "مرفوض - منطقة غير مرغوبة ($matchedBlacklist)";
-        warningNote = "الوجهة تقع في منطقة غير مرغوبة ($matchedBlacklist)، والعرض المالي لا يبرر التوجه إليها.";
+        warningNote = "الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist)، والعرض المالي لا يبرر التوجه إليها.";
       }
     } else if (matchedFavorite != null) {
       if (level == ProfitabilityLevel.goodProfit || level == ProfitabilityLevel.excellentProfit) {
@@ -208,7 +213,7 @@ class FareCalculatorEngine {
     // Create Smart Bid Cards
     final smartBids = [
       SmartBidOption(
-        title: "Floor / Break-Even",
+        title: "الحد الأدنى (التعادل)",
         suggestedFare: breakEvenFare,
         netProfit: max(0.0, breakEvenFare - (breakEvenFare * commissionRate) - nonCommissionCosts),
         profitPerKm: max(0.0, (breakEvenFare - (breakEvenFare * commissionRate) - nonCommissionCosts) / totalDistanceKm),
@@ -216,7 +221,7 @@ class FareCalculatorEngine {
         tag: "MINIMUM",
       ),
       SmartBidOption(
-        title: "Recommended Bid",
+        title: "العرض الموصى به",
         suggestedFare: recommendedFare,
         netProfit: recommendedFare - (recommendedFare * commissionRate) - nonCommissionCosts,
         profitPerKm: (recommendedFare - (recommendedFare * commissionRate) - nonCommissionCosts) / totalDistanceKm,
@@ -224,7 +229,7 @@ class FareCalculatorEngine {
         tag: "OPTIMAL",
       ),
       SmartBidOption(
-        title: "Aggressive Bid",
+        title: "عرض الذروة",
         suggestedFare: aggressiveFare,
         netProfit: aggressiveFare - (aggressiveFare * commissionRate) - nonCommissionCosts,
         profitPerKm: (aggressiveFare - (aggressiveFare * commissionRate) - nonCommissionCosts) / totalDistanceKm,
@@ -266,14 +271,14 @@ class FareCalculatorEngine {
     required double netProfit,
     required double profitPerKm,
     required double minTargetProfitPerKm,
-    required double fuelCost,
+    required double totalOperatingCost,
     required double offeredFare,
   }) {
     if (netProfit < 0) {
       return (
         ProfitabilityLevel.lossDanger,
         "رحلة خاسرة - التكلفة التشغيلية تتجاوز العرض",
-        "تكلفة الوقود والاستهلاك والعمولة (${fuelCost.toStringAsFixed(1)} ج.م) تتجاوز عرض الراكب (${offeredFare.toStringAsFixed(1)} ج.م). يوصى بالمزايدة لرفع السعر أو رفض الطلب."
+        "تكلفة الوقود والاستهلاك والعمولة (${totalOperatingCost.toStringAsFixed(1)} ج.م) تتجاوز عرض الراكب (${offeredFare.toStringAsFixed(1)} ج.م). يوصى بالمزايدة لرفع السعر أو رفض الطلب."
       );
     }
     if (profitPerKm < minTargetProfitPerKm) {

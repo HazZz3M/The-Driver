@@ -60,13 +60,34 @@ data class FareAnalysisResult(
 
 object FareCalculatorEngine {
 
+    /** City driving estimate; must match MINUTES_PER_KM in lib/engine/fare_calculator_engine.dart. */
+    const val MINUTES_PER_KM = 2.5
+
+    private val ALEF_VARIANTS = Regex("[أإآ]")
+    // \p{P} is the Unicode punctuation category (covers Arabic "،" "؛"), unlike ASCII-only \p{Punct}.
+    private val PUNCT_OR_SPACE = Regex("[\\p{P}\\s]+")
+
+    fun estimateMinutes(totalDistanceKm: Double): Int =
+        (totalDistanceKm * MINUTES_PER_KM).toInt().coerceIn(5, 300)
+
     fun normalizeArabicText(str: String): String {
         return str.lowercase()
-            .replace(Regex("[أإآ]"), "ا")
+            .replace(ALEF_VARIANTS, "ا")
             .replace("ى", "ي")
             .replace("ة", "ه")
-            .replace(Regex("[\\p{Punct}\\s]+"), " ")
+            .replace(PUNCT_OR_SPACE, " ")
             .trim()
+    }
+
+    /** Returns the first zone whose normalized name appears in [address], or null. */
+    fun matchZone(address: String?, zones: List<String>): String? {
+        if (address.isNullOrBlank()) return null
+        val normAddress = normalizeArabicText(address)
+        for (z in zones) {
+            val normZ = normalizeArabicText(z)
+            if (normZ.isNotEmpty() && normAddress.contains(normZ)) return z
+        }
+        return null
     }
 
     fun analyze(
@@ -118,31 +139,16 @@ object FareCalculatorEngine {
         val aggressiveFare = max(recommendedFare + 15.0, roundToSmartStep(rawAggressive))
 
         // 6. Geographic Zone Analysis
-        val combinedAddress = normalizeArabicText("$pickupAddress $dropoffAddress")
-        var matchedFavorite: String? = null
-        for (z in settings.favoriteZones) {
-            val normZ = normalizeArabicText(z)
-            if (normZ.isNotEmpty() && combinedAddress.contains(normZ)) {
-                matchedFavorite = z
-                break
-            }
-        }
-
-        var matchedBlacklist: String? = null
-        for (z in settings.blacklistedZones) {
-            val normZ = normalizeArabicText(z)
-            if (normZ.isNotEmpty() && combinedAddress.contains(normZ)) {
-                matchedBlacklist = z
-                break
-            }
-        }
+        val combinedAddress = "$pickupAddress $dropoffAddress"
+        val matchedFavorite = matchZone(combinedAddress, settings.favoriteZones)
+        val matchedBlacklist = matchZone(combinedAddress, settings.blacklistedZones)
 
         // 7. Evaluate Profitability
         var (level, statusMessage, warningNote) = evaluateProfitability(
             netProfit = netProfit,
             profitPerKm = profitPerKm,
             minTargetProfitPerKm = settings.minProfitPerKm,
-            fuelCost = fuelCost,
+            totalOperatingCost = totalOperatingCost,
             offeredFare = offeredFare
         )
 
@@ -152,11 +158,11 @@ object FareCalculatorEngine {
             if (offeredFare >= aggressiveFare || profitPerKm >= settings.minProfitPerKm * 1.4) {
                 level = ProfitabilityLevel.GOOD_PROFIT
                 statusMessage = "مقبول فقط لارتفاع السعر الاستثنائي"
-                warningNote = "تنبيه: الوجهة تقع ضمن المنطقة غير المرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع."
+                warningNote = "تنبيه: الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع."
             } else {
                 level = ProfitabilityLevel.LOSS_DANGER
                 statusMessage = "مرفوض - منطقة غير مرغوبة ($matchedBlacklist)"
-                warningNote = "الوجهة تقع في منطقة غير مرغوبة ($matchedBlacklist)، والعرض المالي لا يبرر التوجه إليها."
+                warningNote = "الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist)، والعرض المالي لا يبرر التوجه إليها."
             }
         } else if (matchedFavorite != null) {
             if (level == ProfitabilityLevel.GOOD_PROFIT || level == ProfitabilityLevel.EXCELLENT_PROFIT) {
@@ -169,7 +175,7 @@ object FareCalculatorEngine {
         // Create Smart Bid Cards
         val smartBids = listOf(
             SmartBidOption(
-                title = "Floor / Break-Even",
+                title = "الحد الأدنى (التعادل)",
                 suggestedFare = breakEvenFare,
                 netProfit = max(0.0, breakEvenFare - (breakEvenFare * commissionRate) - nonCommissionCosts),
                 profitPerKm = max(0.0, (breakEvenFare - (breakEvenFare * commissionRate) - nonCommissionCosts) / totalDistanceKm),
@@ -177,7 +183,7 @@ object FareCalculatorEngine {
                 tag = "MINIMUM"
             ),
             SmartBidOption(
-                title = "Recommended Bid",
+                title = "العرض الموصى به",
                 suggestedFare = recommendedFare,
                 netProfit = recommendedFare - (recommendedFare * commissionRate) - nonCommissionCosts,
                 profitPerKm = (recommendedFare - (recommendedFare * commissionRate) - nonCommissionCosts) / totalDistanceKm,
@@ -185,7 +191,7 @@ object FareCalculatorEngine {
                 tag = "OPTIMAL"
             ),
             SmartBidOption(
-                title = "Aggressive Bid",
+                title = "عرض الذروة",
                 suggestedFare = aggressiveFare,
                 netProfit = aggressiveFare - (aggressiveFare * commissionRate) - nonCommissionCosts,
                 profitPerKm = (aggressiveFare - (aggressiveFare * commissionRate) - nonCommissionCosts) / totalDistanceKm,
@@ -227,7 +233,7 @@ object FareCalculatorEngine {
         netProfit: Double,
         profitPerKm: Double,
         minTargetProfitPerKm: Double,
-        fuelCost: Double,
+        totalOperatingCost: Double,
         offeredFare: Double
     ): Triple<ProfitabilityLevel, String, String?> {
         return when {
@@ -235,14 +241,14 @@ object FareCalculatorEngine {
                 Triple(
                     ProfitabilityLevel.LOSS_DANGER,
                     "رحلة خاسرة - التكلفة التشغيلية تتجاوز العرض",
-                    "تكلفة الوقود والاستهلاك والعمولة (${String.format("%.1f", fuelCost)} ج.م) تتجاوز عرض الراكب (${String.format("%.1f", offeredFare)} ج.م). يوصى بالمزايدة لرفع السعر أو رفض الطلب."
+                    "تكلفة الوقود والاستهلاك والعمولة (${String.format(java.util.Locale.US, "%.1f", totalOperatingCost)} ج.م) تتجاوز عرض الراكب (${String.format(java.util.Locale.US, "%.1f", offeredFare)} ج.م). يوصى بالمزايدة لرفع السعر أو رفض الطلب."
                 )
             }
             profitPerKm < minTargetProfitPerKm -> {
                 Triple(
                     ProfitabilityLevel.POOR_MARGIN,
                     "هامش ربح منخفض دون المستهدف",
-                    "صافي العائد أقل من الحد الأدنى المطلوب (${String.format("%.1f", minTargetProfitPerKm)} ج.م/كم). يفضل المزايدة لرفع السعر."
+                    "صافي العائد أقل من الحد الأدنى المطلوب (${String.format(java.util.Locale.US, "%.1f", minTargetProfitPerKm)} ج.م/كم). يفضل المزايدة لرفع السعر."
                 )
             }
             profitPerKm >= minTargetProfitPerKm * 1.5 -> {

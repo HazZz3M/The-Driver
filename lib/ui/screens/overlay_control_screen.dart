@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/native_bridge_service.dart';
 import '../../theme/app_colors.dart';
+import '../components/dialogs.dart';
 
 class OverlayControlScreen extends StatefulWidget {
   const OverlayControlScreen({super.key});
@@ -9,7 +10,7 @@ class OverlayControlScreen extends StatefulWidget {
   State<OverlayControlScreen> createState() => _OverlayControlScreenState();
 }
 
-class _OverlayControlScreenState extends State<OverlayControlScreen> {
+class _OverlayControlScreenState extends State<OverlayControlScreen> with WidgetsBindingObserver {
   bool _hasOverlayPermission = false;
   bool _hasAccessibilityPermission = false;
   bool _isServiceRunning = false;
@@ -17,7 +18,59 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refreshPermissions();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The driver comes back from Android settings after granting a permission.
+    if (state == AppLifecycleState.resumed) _refreshPermissions();
+  }
+
+  /// Google Play's "prominent disclosure" for the Accessibility API, shown before Settings opens.
+  Future<void> _openAccessibilityWithDisclosure() async {
+    final ok = await confirmAction(
+      context,
+      title: "قبل تفعيل خدمة قراءة الشاشة",
+      message: "يستخدم التطبيق خدمة إمكانية الوصول لقراءة نص طلبات الرحلات (السعر، المسافة، العناوين) "
+          "من شاشة إن درايف فقط، لحساب الربح وإظهار العلامة العائمة.\n\n"
+          "• لا يتم إرسال أي بيانات خارج هاتفك.\n"
+          "• لا تُقرأ أي تطبيقات أخرى.\n"
+          "• الضغط التلقائي لا يعمل إلا إذا فعّلت \"القبول التلقائي\" بنفسك من الإعدادات.\n\n"
+          "في الشاشة التالية اختر \"The Driver\" ثم فعّل الخدمة.",
+      confirmLabel: "موافق، متابعة",
+      destructive: false,
+    );
+    if (ok) await NativeBridgeService.openAccessibilitySettings();
+  }
+
+  Future<void> _toggleService() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (_isServiceRunning) {
+      await NativeBridgeService.stopFloatingService();
+    } else {
+      if (!_hasOverlayPermission) {
+        messenger.showSnackBar(const SnackBar(content: Text("امنح صلاحية العرض فوق التطبيقات أولاً")));
+        return;
+      }
+      final error = await NativeBridgeService.startFloatingService();
+      if (error != null) {
+        messenger.showSnackBar(SnackBar(content: Text(error)));
+      } else if (!_hasAccessibilityPermission) {
+        messenger.showSnackBar(const SnackBar(
+          content: Text("المساعد يعمل، لكن لن تظهر العلامات حتى تفعّل خدمة قراءة الشاشة"),
+        ));
+      }
+    }
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _refreshPermissions();
   }
 
   Future<void> _refreshPermissions() async {
@@ -72,10 +125,7 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> {
               isGranted: _hasAccessibilityPermission,
               actionLabel: "الانتقال لإعدادات إمكانية الوصول",
               icon: Icons.accessibility_new,
-              onAction: () async {
-                await NativeBridgeService.openAccessibilitySettings();
-                _refreshPermissions();
-              },
+              onAction: _openAccessibilityWithDisclosure,
             ),
 
             const SizedBox(height: 16),
@@ -90,10 +140,7 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> {
               isGranted: _hasOverlayPermission,
               actionLabel: "منح صلاحية العرض فوق التطبيقات",
               icon: Icons.layers,
-              onAction: () async {
-                await NativeBridgeService.requestOverlayPermission();
-                _refreshPermissions();
-              },
+              onAction: NativeBridgeService.requestOverlayPermission,
             ),
 
             const SizedBox(height: 18),
@@ -160,14 +207,7 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> {
                         _isServiceRunning ? "إيقاف المساعد العائم" : "تشغيل المساعد العائم",
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                       ),
-                      onPressed: () async {
-                        if (_isServiceRunning) {
-                          await NativeBridgeService.stopFloatingService();
-                        } else {
-                          await NativeBridgeService.startFloatingService();
-                        }
-                        _refreshPermissions();
-                      },
+                      onPressed: _toggleService,
                     ),
                   ),
                 ],
@@ -199,9 +239,11 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    "• يمكنك سحب العلامة العائمة في أي مكان على الشاشة لضبط موضعها بحرية.\n"
-                    "• اضغط على العلامة العائمة لتكبير تفاصيل الرحلة وصافي الربح وإدارة المناطق بلمسة واحدة.\n"
-                    "• يمكنك تغيير شكل وحجم العلامة من تبويب 'الإعدادات'.",
+                    "• الرقم على العلامة هو صافي ربحك من العرض بعد البنزين والعمولة والاستهلاك.\n"
+                    "• اللون: أخضر = رابح، أصفر = هامش ضعيف، أحمر = خسارة، رمادي (؟) = المسافة لم تُقرأ بدقة.\n"
+                    "• ★ = منطقة مفضلة، ⛔ = منطقة محظورة.\n"
+                    "• اسحب العلامة لتغيير موضعها، واضغط عليها لعرض التفاصيل وإدارة المناطق.\n"
+                    "• لإيقاف المساعد بسرعة استخدم زر \"إيقاف\" في الإشعار.",
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
                   ),
                 ],

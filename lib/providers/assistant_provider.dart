@@ -5,30 +5,35 @@ import '../data/models/trip.dart';
 import '../data/models/vehicle_profile.dart';
 import '../data/repository/assistant_repository.dart';
 import '../engine/fare_calculator_engine.dart';
+import '../services/native_bridge_service.dart';
 
 class AssistantProvider extends ChangeNotifier {
   final AssistantRepository repository;
 
-  // Settings & Theme
+  // Settings
   late DriverSettings driverSettings;
   late List<VehicleProfile> vehicleProfiles;
   late String activeVehicleId;
-  late String themeMode;
   late String overlayStyle;
   late String overlaySize;
 
   // Calculator inputs
   double pickupDistanceKm = 2.0;
   double tripDistanceKm = 9.5;
-  int estimatedMinutes = 24;
+  int estimatedMinutes = FareCalculatorEngine.estimateMinutes(11.5);
   double offeredFare = 85.0;
 
-  // Shift tracking
+  // Shift tracking (persisted)
   bool isShiftActive = false;
   int shiftStartTime = 0;
 
   // Analysis result
   late FareAnalysisResult fareAnalysis;
+
+  // Memoized "today" statistics (recomputed only when trips change or the day rolls over)
+  int _tripsVersion = 0;
+  String? _statsKey;
+  List<Trip> _todayTrips = const [];
 
   AssistantProvider(this.repository) {
     _loadInitialData();
@@ -38,12 +43,61 @@ class AssistantProvider extends ChangeNotifier {
     driverSettings = repository.getDriverSettings();
     vehicleProfiles = repository.getVehicleProfiles();
     activeVehicleId = repository.getActiveVehicleId();
-    themeMode = repository.getThemeMode();
     overlayStyle = repository.getOverlayStyle();
     overlaySize = repository.getOverlaySize();
+    isShiftActive = repository.isShiftActive;
+    shiftStartTime = repository.shiftStartTime;
+
+    // Pre-1.10 builds updated settings without updating the vehicle; adopt the settings
+    // (what the engine actually used) into the active vehicle so both agree from now on.
+    final active = activeProfile;
+    if (active != null && !_vehicleMatchesSettings(active)) {
+      _replaceProfile(active.copyWith(
+        fuelConsumptionLPer100Km: driverSettings.fuelConsumptionLPer100Km,
+        fuelPricePerLiter: driverSettings.fuelPricePerLiter,
+        wearAndTearPerKm: driverSettings.wearAndTearPerKm,
+      ));
+      repository.saveVehicleProfiles(vehicleProfiles);
+    }
 
     _recalculateAnalysis();
   }
+
+  /// Called once at startup and whenever the app returns to the foreground:
+  /// 1. adopts zone edits the driver made from the floating HUD, then
+  /// 2. pushes the full settings snapshot to the native HUD / accessibility layer.
+  Future<void> syncWithNative() async {
+    final native = await NativeBridgeService.getNativeZones();
+    if (native != null && native.mode != "none") {
+      final fav = native.mode == "replace"
+          ? native.favoriteZones
+          : _union(driverSettings.favoriteZones, native.favoriteZones);
+      final black = native.mode == "replace"
+          ? native.blacklistedZones
+          : _union(driverSettings.blacklistedZones, native.blacklistedZones);
+      if (!listEquals(fav, driverSettings.favoriteZones) || !listEquals(black, driverSettings.blacklistedZones)) {
+        driverSettings = driverSettings.copyWith(favoriteZones: fav, blacklistedZones: black);
+        _recalculateAnalysis();
+        notifyListeners();
+        await repository.updateDriverSettings(driverSettings);
+      }
+    }
+    await _pushToNative();
+  }
+
+  static List<String> _union(List<String> a, List<String> b) {
+    final result = List<String>.from(a);
+    for (final z in b) {
+      if (!result.any((e) => e.toLowerCase() == z.toLowerCase())) result.add(z);
+    }
+    return result;
+  }
+
+  Future<void> _pushToNative() => NativeBridgeService.syncSettings({
+        ...driverSettings.toJson(),
+        'overlayStyle': overlayStyle,
+        'overlaySize': overlaySize,
+      });
 
   void _recalculateAnalysis() {
     fareAnalysis = FareCalculatorEngine.analyze(
@@ -56,29 +110,32 @@ class AssistantProvider extends ChangeNotifier {
   }
 
   VehicleProfile? get activeProfile {
-    try {
-      return vehicleProfiles.firstWhere((p) => p.id == activeVehicleId);
-    } catch (_) {
-      return vehicleProfiles.isNotEmpty ? vehicleProfiles.first : null;
+    for (final p in vehicleProfiles) {
+      if (p.id == activeVehicleId) return p;
     }
+    return vehicleProfiles.isNotEmpty ? vehicleProfiles.first : null;
+  }
+
+  bool _vehicleMatchesSettings(VehicleProfile p) =>
+      p.fuelConsumptionLPer100Km == driverSettings.fuelConsumptionLPer100Km &&
+      p.fuelPricePerLiter == driverSettings.fuelPricePerLiter &&
+      p.wearAndTearPerKm == driverSettings.wearAndTearPerKm;
+
+  void _replaceProfile(VehicleProfile updated) {
+    vehicleProfiles = [for (final p in vehicleProfiles) p.id == updated.id ? updated : p];
   }
 
   // Calculator Input Mutators
   void setPickupDistance(double value) {
     pickupDistanceKm = value;
+    estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
     _recalculateAnalysis();
     notifyListeners();
   }
 
   void setTripDistance(double value) {
     tripDistanceKm = value;
-    estimatedMinutes = ((pickupDistanceKm + value) * 2.5).toInt().clamp(5, 300);
-    _recalculateAnalysis();
-    notifyListeners();
-  }
-
-  void setEstimatedMinutes(int value) {
-    estimatedMinutes = value;
+    estimatedMinutes = FareCalculatorEngine.estimateMinutes(pickupDistanceKm + tripDistanceKm);
     _recalculateAnalysis();
     notifyListeners();
   }
@@ -90,34 +147,42 @@ class AssistantProvider extends ChangeNotifier {
   }
 
   // Shift Management
-  void toggleShift() {
+  Future<void> toggleShift() async {
     isShiftActive = !isShiftActive;
     shiftStartTime = isShiftActive ? DateTime.now().millisecondsSinceEpoch : 0;
     notifyListeners();
+    await repository.saveShift(active: isShiftActive, startTime: shiftStartTime);
   }
+
+  Duration get shiftDuration => isShiftActive && shiftStartTime > 0
+      ? DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(shiftStartTime))
+      : Duration.zero;
 
   int get todayMidnightTimestamp {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
   }
 
-  List<Trip> get todayTrips => repository.getTripsSince(todayMidnightTimestamp);
-  double get todayTotalGross => repository.getTotalFareSince(todayMidnightTimestamp);
-  double get todayTotalNetProfit => repository.getTotalProfitSince(todayMidnightTimestamp);
-  int get todayTripsCount => repository.getCompletedTripsCountSince(todayMidnightTimestamp);
+  List<Trip> get todayTrips {
+    final key = "$todayMidnightTimestamp:$_tripsVersion";
+    if (_statsKey != key) {
+      _todayTrips = repository.getTripsSince(todayMidnightTimestamp);
+      _statsKey = key;
+    }
+    return _todayTrips;
+  }
+
+  double get todayTotalGross => todayTrips.fold(0.0, (sum, t) => sum + t.offeredFare);
+  double get todayTotalNetProfit => todayTrips.fold(0.0, (sum, t) => sum + t.netProfit);
+  int get todayTripsCount => todayTrips.where((t) => t.status == "COMPLETED").length;
 
   double get shiftProgress {
     if (driverSettings.targetDailyEarnings <= 0) return 0.0;
     return (todayTotalGross / driverSettings.targetDailyEarnings).clamp(0.0, 1.0);
   }
 
-  // Expenses & Fuel Analytics
+  // Expenses
   List<Expense> get allExpenses => repository.getAllExpenses();
-  double get totalExpensesAmount => repository.getTotalExpensesSince(todayMidnightTimestamp);
-  List<Expense> get fuelRefills => repository.getFuelRefills();
-  double? get averageFuelConsumption => repository.getAverageFuelConsumption();
-  double? get averageFuelCostPerKm => repository.getAverageFuelCostPerKm();
-  List<Expense> get oilChanges => repository.getOilChanges();
 
   Future<void> saveCurrentRide([double? fareToSave]) async {
     final actualFare = fareToSave ?? offeredFare;
@@ -129,7 +194,7 @@ class AssistantProvider extends ChangeNotifier {
       settings: driverSettings,
     );
 
-    final trip = Trip(
+    await repository.recordTrip(Trip(
       pickupDistanceKm: recalculated.pickupDistanceKm,
       tripDistanceKm: recalculated.tripDistanceKm,
       estimatedMinutes: recalculated.estimatedMinutes,
@@ -139,13 +204,14 @@ class AssistantProvider extends ChangeNotifier {
       wearAndTearCost: recalculated.wearAndTearCost,
       netProfit: recalculated.netProfit,
       profitPerKm: recalculated.profitPerKm,
-    );
-
-    await repository.recordTrip(trip);
+    ));
+    _tripsVersion++;
     notifyListeners();
   }
 
-  Future<void> addFuelRefill({
+  /// Records a refill. Returns the new averaged consumption applied to pricing, or null if the
+  /// refill had no distance (then pricing only takes the new fuel price).
+  Future<double?> addFuelRefill({
     required double liters,
     required double pricePerLiter,
     required double kmSinceLastRefill,
@@ -155,7 +221,7 @@ class AssistantProvider extends ChangeNotifier {
     final consumption = kmSinceLastRefill > 0 ? (liters / kmSinceLastRefill) * 100.0 : 0.0;
     final costPerKm = kmSinceLastRefill > 0 ? totalAmount / kmSinceLastRefill : 0.0;
 
-    final expense = Expense(
+    await repository.recordExpense(Expense(
       category: "FUEL",
       amount: totalAmount,
       liters: liters,
@@ -165,20 +231,16 @@ class AssistantProvider extends ChangeNotifier {
       fuelCostPerKm: costPerKm,
       description: description.isNotEmpty
           ? description
-          : "تفويلة بنزين (${liters.toStringAsFixed(1)} لتر @ ${pricePerLiter.toStringAsFixed(2)})",
-    );
+          : "تفويلة (${liters.toStringAsFixed(1)} لتر × ${pricePerLiter.toStringAsFixed(2)} ج.م)",
+    ));
 
-    await repository.recordExpense(expense);
-
-    // Auto-update driver settings with measured consumption & current fuel price
-    if (consumption > 0) {
-      final updated = driverSettings.copyWith(
-        fuelConsumptionLPer100Km: (consumption * 10).round() / 10.0,
-        fuelPricePerLiter: pricePerLiter,
-      );
-      await updateSettings(updated);
-    }
-    notifyListeners();
+    // Average of the last few refills smooths out partial fills.
+    final averaged = consumption > 0 ? repository.getRecentAverageFuelConsumption() : null;
+    await updateSettings(driverSettings.copyWith(
+      fuelConsumptionLPer100Km: averaged != null ? (averaged * 10).round() / 10.0 : null,
+      fuelPricePerLiter: pricePerLiter,
+    ));
+    return averaged;
   }
 
   Future<void> addOilChange({
@@ -191,7 +253,7 @@ class AssistantProvider extends ChangeNotifier {
     final totalCost = liters * oilPricePerLiter;
     final costPerKm = oilLifespanKm > 0 ? totalCost / oilLifespanKm : 0.0;
 
-    final expense = Expense(
+    await repository.recordExpense(Expense(
       category: "OIL_CHANGE",
       amount: totalCost,
       oilPricePerLiter: oilPricePerLiter,
@@ -200,10 +262,8 @@ class AssistantProvider extends ChangeNotifier {
       oilCostPerKm: costPerKm,
       description: description.isNotEmpty
           ? description
-          : "غيار زيت موتور ($oilVolumeMl ملل، نزل بعد ${oilLifespanKm.toInt()} كم)",
-    );
-
-    await repository.recordExpense(expense);
+          : "غيار زيت موتور ($oilVolumeMl ملل، عمر ${oilLifespanKm.toInt()} كم)",
+    ));
     notifyListeners();
   }
 
@@ -211,124 +271,161 @@ class AssistantProvider extends ChangeNotifier {
     required String partName,
     required double amount,
     double? lifespanKm,
-    required bool updateWearTear,
+    required bool addToWearRate,
     String description = "",
   }) async {
     final costPerKm = (lifespanKm != null && lifespanKm > 0) ? amount / lifespanKm : null;
-    final expense = Expense(
+    final applied = (addToWearRate && costPerKm != null && costPerKm > 0) ? costPerKm : null;
+
+    await repository.recordExpense(Expense(
       category: "SPARE_PART",
       amount: amount,
       partName: partName,
       partLifespanKm: lifespanKm,
       partCostPerKm: costPerKm,
+      appliedWearPerKm: applied,
       description: description.isNotEmpty
           ? description
-          : (lifespanKm != null && lifespanKm > 0
-              ? "قطعة غيار: $partName (عمر افتراضي: ${lifespanKm.toInt()} كم • ${costPerKm!.toStringAsFixed(2)} ج/كم)"
+          : (costPerKm != null
+              ? "قطعة غيار: $partName (عمر ${lifespanKm!.toInt()} كم • ${costPerKm.toStringAsFixed(2)} ج/كم)"
               : "قطعة غيار / صيانة: $partName"),
-    );
+    ));
 
-    await repository.recordExpense(expense);
-
-    if (updateWearTear && costPerKm != null && costPerKm > 0) {
-      final newRate = ((driverSettings.wearAndTearPerKm + costPerKm) * 100).round() / 100.0;
-      await repository.updateWearAndTearRate(newRate);
-      driverSettings = repository.getDriverSettings();
-      _recalculateAnalysis();
+    if (applied != null) {
+      await updateSettings(driverSettings.copyWith(
+        wearAndTearPerKm: ((driverSettings.wearAndTearPerKm + applied) * 100).round() / 100.0,
+      ));
+    } else {
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> deleteTrip(int tripId) async {
     await repository.deleteTrip(tripId);
+    _tripsVersion++;
     notifyListeners();
   }
 
-  Future<void> deleteExpense(int expenseId) async {
-    await repository.deleteExpense(expenseId);
-    notifyListeners();
+  Future<void> deleteExpense(Expense expense) async {
+    await repository.deleteExpense(expense.id);
+    final applied = expense.appliedWearPerKm;
+    if (applied != null && applied > 0) {
+      // Undo this part's contribution to the wear rate.
+      final rate = ((driverSettings.wearAndTearPerKm - applied) * 100).round() / 100.0;
+      await updateSettings(driverSettings.copyWith(wearAndTearPerKm: rate < 0 ? 0.0 : rate));
+    } else {
+      notifyListeners();
+    }
   }
 
-  // Vehicle Profile Switching
+  // Vehicle Profiles (the active vehicle owns consumption, fuel price and wear rate)
   Future<void> switchActiveVehicle(VehicleProfile profile) async {
-    await repository.switchActiveVehicle(profile);
     activeVehicleId = profile.id;
-    driverSettings = repository.getDriverSettings();
-    _recalculateAnalysis();
-    notifyListeners();
+    await repository.setActiveVehicleId(profile.id);
+    await updateSettings(driverSettings.copyWith(
+      fuelConsumptionLPer100Km: profile.fuelConsumptionLPer100Km,
+      fuelPricePerLiter: profile.fuelPricePerLiter,
+      wearAndTearPerKm: profile.wearAndTearPerKm,
+    ));
   }
 
   Future<void> addVehicleProfile(VehicleProfile profile) async {
-    final current = List<VehicleProfile>.from(vehicleProfiles)..add(profile);
-    await repository.saveVehicleProfiles(current);
-    vehicleProfiles = current;
+    vehicleProfiles = List<VehicleProfile>.from(vehicleProfiles)..add(profile);
+    await repository.saveVehicleProfiles(vehicleProfiles);
     await switchActiveVehicle(profile);
   }
 
-  // Settings & Themes
+  Future<void> updateVehicleProfile(VehicleProfile profile) async {
+    _replaceProfile(profile);
+    await repository.saveVehicleProfiles(vehicleProfiles);
+    if (profile.id == activeVehicleId) {
+      await switchActiveVehicle(profile);
+    } else {
+      notifyListeners();
+    }
+  }
+
+  /// Deletes a vehicle. The last remaining vehicle cannot be deleted.
+  Future<bool> deleteVehicleProfile(VehicleProfile profile) async {
+    if (vehicleProfiles.length <= 1) return false;
+    vehicleProfiles = vehicleProfiles.where((p) => p.id != profile.id).toList();
+    await repository.saveVehicleProfiles(vehicleProfiles);
+    if (profile.id == activeVehicleId) {
+      await switchActiveVehicle(vehicleProfiles.first);
+    } else {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  // Settings
+  /// Applies settings immediately (so rapid taps build on the latest value), then persists them,
+  /// mirrors vehicle cost fields into the active vehicle and pushes everything to the native HUD.
   Future<void> updateSettings(DriverSettings newSettings) async {
-    await repository.updateDriverSettings(newSettings);
     driverSettings = newSettings;
     _recalculateAnalysis();
+
+    final active = activeProfile;
+    final vehicleChanged = active != null && !_vehicleMatchesSettings(active);
+    if (vehicleChanged) {
+      _replaceProfile(active!.copyWith(
+        fuelConsumptionLPer100Km: newSettings.fuelConsumptionLPer100Km,
+        fuelPricePerLiter: newSettings.fuelPricePerLiter,
+        wearAndTearPerKm: newSettings.wearAndTearPerKm,
+      ));
+    }
     notifyListeners();
+
+    await repository.updateDriverSettings(newSettings);
+    if (vehicleChanged) await repository.saveVehicleProfiles(vehicleProfiles);
+    await _pushToNative();
   }
 
-  Future<void> setThemeMode(String mode) async {
-    await repository.setThemeMode(mode);
-    themeMode = mode;
-    notifyListeners();
-  }
+  bool get autoAcceptConsentGiven => repository.autoAcceptConsentGiven;
+  Future<void> recordAutoAcceptConsent() => repository.setAutoAcceptConsentGiven();
 
   Future<void> setOverlayStyle(String style) async {
-    await repository.setOverlayStyle(style);
     overlayStyle = style;
     notifyListeners();
+    await repository.setOverlayStyle(style);
+    await _pushToNative();
   }
 
   Future<void> setOverlaySize(String size) async {
-    await repository.setOverlaySize(size);
     overlaySize = size;
     notifyListeners();
+    await repository.setOverlaySize(size);
+    await _pushToNative();
   }
 
   // Zone Actions
   Future<bool> addFavoriteZone(String zone) async {
-    final success = await repository.addFavoriteZone(zone);
-    if (success) {
-      driverSettings = repository.getDriverSettings();
-      _recalculateAnalysis();
-      notifyListeners();
-    }
-    return success;
+    final clean = zone.trim();
+    if (clean.isEmpty || driverSettings.favoriteZones.any((z) => z.toLowerCase() == clean.toLowerCase())) return false;
+    await updateSettings(driverSettings.copyWith(favoriteZones: [...driverSettings.favoriteZones, clean]));
+    return true;
   }
 
   Future<bool> removeFavoriteZone(String zone) async {
-    final success = await repository.removeFavoriteZone(zone);
-    if (success) {
-      driverSettings = repository.getDriverSettings();
-      _recalculateAnalysis();
-      notifyListeners();
-    }
-    return success;
+    final clean = zone.trim().toLowerCase();
+    await updateSettings(driverSettings.copyWith(
+      favoriteZones: driverSettings.favoriteZones.where((z) => z.toLowerCase() != clean).toList(),
+    ));
+    return true;
   }
 
   Future<bool> addBlacklistZone(String zone) async {
-    final success = await repository.addBlacklistZone(zone);
-    if (success) {
-      driverSettings = repository.getDriverSettings();
-      _recalculateAnalysis();
-      notifyListeners();
-    }
-    return success;
+    final clean = zone.trim();
+    if (clean.isEmpty || driverSettings.blacklistedZones.any((z) => z.toLowerCase() == clean.toLowerCase())) return false;
+    await updateSettings(driverSettings.copyWith(blacklistedZones: [...driverSettings.blacklistedZones, clean]));
+    return true;
   }
 
   Future<bool> removeBlacklistZone(String zone) async {
-    final success = await repository.removeBlacklistZone(zone);
-    if (success) {
-      driverSettings = repository.getDriverSettings();
-      _recalculateAnalysis();
-      notifyListeners();
-    }
-    return success;
+    final clean = zone.trim().toLowerCase();
+    await updateSettings(driverSettings.copyWith(
+      blacklistedZones: driverSettings.blacklistedZones.where((z) => z.toLowerCase() != clean).toList(),
+    ));
+    return true;
   }
 }

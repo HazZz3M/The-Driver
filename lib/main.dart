@@ -17,25 +17,50 @@ void main() async {
     database: databaseService,
     preferencesManager: preferencesManager,
   );
+  final provider = AssistantProvider(repository);
 
   runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AssistantProvider(repository)),
-      ],
+    ChangeNotifierProvider.value(
+      value: provider,
       child: const InDriveAssistantApp(),
     ),
   );
+
+  // Adopt HUD zone edits and push settings to the native HUD (does not block first frame).
+  provider.syncWithNative();
 }
 
-class InDriveAssistantApp extends StatelessWidget {
+class InDriveAssistantApp extends StatefulWidget {
   const InDriveAssistantApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final provider = context.watch<AssistantProvider>();
-    final isDark = provider.themeMode != "LIGHT";
+  State<InDriveAssistantApp> createState() => _InDriveAssistantAppState();
+}
 
+class _InDriveAssistantAppState extends State<InDriveAssistantApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // The driver may have edited zones from the floating HUD while in inDrive.
+      context.read<AssistantProvider>().syncWithNative();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // The UI is designed as a dark "cockpit" only; there is no light variant.
     return MaterialApp(
       title: 'The Driver (مساعد إن درايف)',
       debugShowCheckedModeBanner: false,
@@ -49,9 +74,8 @@ class InDriveAssistantApp extends StatelessWidget {
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: isDark ? ThemeMode.dark : ThemeMode.light,
+      theme: AppTheme.darkTheme,
+      themeMode: ThemeMode.dark,
       home: const MainNavigationScreen(),
     );
   }

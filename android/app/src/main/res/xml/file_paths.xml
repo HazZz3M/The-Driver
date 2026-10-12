@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Only the app cache is shared, for handing downloaded update APKs to the system installer. -->
     <cache-path name="internal_cache" path="." />
-    <external-path name="external" path="." />
-    <external-files-path name="external_files" path="." />
-    <external-cache-path name="external_cache" path="." />
 </paths>

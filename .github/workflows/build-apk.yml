@@ -2,7 +2,7 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "fix/**" ]
   workflow_dispatch:
 
 permissions:
@@ -30,11 +30,29 @@ jobs:
         channel: 'stable'
         cache: true
 
-    - name: Ensure Permanent Signing Keystore
+    - name: Read app version from pubspec.yaml
+      id: version
       run: |
-        mkdir -p android/app/keystore
-        if [ ! -f android/app/keystore/fixed-release.keystore ]; then
-          keytool -genkey -v -keystore android/app/keystore/fixed-release.keystore -alias thedriver -keyalg RSA -keysize 2048 -validity 10000 -storepass thedriver123 -keypass thedriver123 -dname "CN=TheDriver, OU=Mobile, O=TheDriver, L=Cairo, ST=Cairo, C=EG"
+        VERSION=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+        echo "App version: $VERSION"
+
+    - name: Restore release signing key from secrets
+      env:
+        KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        IS_RELEASE_BRANCH: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+      run: |
+        if [ -n "$KEYSTORE_BASE64" ]; then
+          mkdir -p "$RUNNER_TEMP/signing"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing/release.keystore"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/signing/release.keystore" >> $GITHUB_ENV
+          echo "Release signing key restored."
+        elif [ "$IS_RELEASE_BRANCH" = "true" ]; then
+          echo "::error::Secret ANDROID_KEYSTORE_BASE64 is missing. Refusing to publish a release signed with a different key (users could not update)."
+          exit 1
+        else
+          echo "::warning::No signing secret: this branch build is signed with the debug key and cannot update installed releases."
         fi
 
     - name: Fix Line Endings and Permissions
@@ -49,47 +67,43 @@ jobs:
         flutter --version
         flutter pub get
 
-    - name: Build Flutter Debug APK
-      run: |
-        flutter --version
-        echo "Building Flutter debug APK..."
-        flutter build apk --debug --android-skip-build-dependency-validation
-        cp build/app/outputs/flutter-apk/app-debug.apk The-Driver.apk
-        cp build/app/outputs/flutter-apk/app-debug.apk inDrive-Assistant.apk
-        ls -lh The-Driver.apk
+    - name: Static analysis
+      run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-    - name: Upload to Litterbox (Direct Mobile Download)
-      id: litterbox
-      run: |
-        DIRECT_URL=$(curl -s -F "reqtype=fileupload" -F "time=72h" -F "fileToUpload=@The-Driver.apk" https://litterbox.catbox.moe/resources/internals/api.php)
-        echo "direct_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-        echo "### Direct APK Mobile Download Link" >> $GITHUB_STEP_SUMMARY
-        echo "[Click Here to Download The Driver APK directly to phone]($DIRECT_URL)" >> $GITHUB_STEP_SUMMARY
-        echo "Direct Link: $DIRECT_URL"
+    - name: Unit tests
+      run: flutter test
 
-    - name: Create GitHub Release with direct APK file
-      uses: softprops/action-gh-release@v2
-      if: startsWith(github.ref, 'refs/heads/main')
-      with:
-        tag_name: v1.9.0
-        name: "The Driver v1.9.0 - Multi-Card Feed Popups, In-App Direct APK Downloader & Full-Screen Distance Fix"
-        body: |
-          ### The Driver v1.8.0 - Full-Screen Map Marker & Ergonomic UX Release
-          - **Full-Screen Ride Details Scanner**: Specifically identifies full-screen "Ride request" screens and extracts Point A marker distance (pickup) and Point B marker distance (trip) directly from the map pins and bottom sheet.
-          - **Dismiss on Outside Tap**: Tapping anywhere outside the expanded details popup instantly collapses it back into a floating badge.
-          - **Strict Single-Expanded Policy**: Only one popup hint can be opened at a time. Opening another popup automatically closes the previous one.
-          - **Vertical Text & Split Elimination**: Converted compact circular badges and speedo gauges to single-line horizontal text (e.g., `75 ج` instead of vertical stacking).
-          - **Side-by-Side Fare Comparison**: Restructured the expanded card with spacious side-by-side metric boxes and dedicated profit and distance rows to prevent word wrapping.
-        files: |
-          The-Driver.apk
-          inDrive-Assistant.apk
-        draft: false
-        prerelease: false
+    - name: Build Flutter Release APK
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      run: |
+        flutter build apk --release
+        cp build/app/outputs/flutter-apk/app-release.apk The-Driver.apk
+        sha256sum The-Driver.apk | awk '{print $1}' > The-Driver.apk.sha256
+        ls -lh The-Driver.apk
+        echo "SHA-256: $(cat The-Driver.apk.sha256)"
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: The-Driver-Debug-APK
-        path: The-Driver.apk
+        name: The-Driver-${{ steps.version.outputs.tag }}-APK
+        path: |
+          The-Driver.apk
+          The-Driver.apk.sha256
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: "The Driver ${{ steps.version.outputs.tag }}"
+        body_path: RELEASE_NOTES.md
+        files: |
+          The-Driver.apk
+          The-Driver.apk.sha256
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

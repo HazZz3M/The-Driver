@@ -1,12 +1,43 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../data/models/trip.dart';
 import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
+import '../components/dialogs.dart';
 
-class ShiftDashboardScreen extends StatelessWidget {
+class ShiftDashboardScreen extends StatefulWidget {
   const ShiftDashboardScreen({super.key});
+
+  @override
+  State<ShiftDashboardScreen> createState() => _ShiftDashboardScreenState();
+}
+
+class _ShiftDashboardScreenState extends State<ShiftDashboardScreen> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    // Refreshes the live shift duration once a minute.
+    _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    return h > 0 ? "$h س $m د" : "$m د";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +212,7 @@ class ShiftDashboardScreen extends StatelessWidget {
                 Expanded(
                   child: _buildStatTile(
                     title: "حالة الوردية",
-                    value: provider.isShiftActive ? "نشطة الآن" : "متوقفة",
+                    value: provider.isShiftActive ? "نشطة منذ ${_formatDuration(provider.shiftDuration)}" : "متوقفة",
                     color: provider.isShiftActive ? AppColors.neonGreen : AppColors.textSecondary,
                     icon: Icons.timer_outlined,
                   ),
@@ -303,48 +334,56 @@ class ShiftDashboardScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppColors.neonGreen.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        "${trip.offeredFare.toInt()} $currency",
-                        style: const TextStyle(
-                          color: AppColors.neonGreen,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.neonGreen.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    "${trip.offeredFare.toInt()} $currency",
+                    style: const TextStyle(
+                      color: AppColors.neonGreen,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      "${trip.totalDistanceKm.toStringAsFixed(1)} كم (${trip.pickupDistanceKm.toStringAsFixed(1)} وصول + ${trip.tripDistanceKm.toStringAsFixed(1)} مشوار)",
-                      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
-                    ),
-                  ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "${trip.totalDistanceKm.toStringAsFixed(1)} كم (${trip.pickupDistanceKm.toStringAsFixed(1)} وصول + ${trip.tripDistanceKm.toStringAsFixed(1)} مشوار)",
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+                  ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.lossRed),
-                  onPressed: () => provider.deleteTrip(trip.id),
+                  tooltip: "حذف الرحلة",
+                  icon: const Icon(Icons.delete_outline, size: 20, color: AppColors.lossRed),
+                  onPressed: () async {
+                    final ok = await confirmAction(
+                      context,
+                      title: "حذف الرحلة؟",
+                      message: "سيتم حذف رحلة ${trip.offeredFare.toInt()} $currency من سجل اليوم نهائياً.",
+                    );
+                    if (ok) await provider.deleteTrip(trip.id);
+                  },
                 ),
               ],
             ),
             const SizedBox(height: 6),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  "صافي الربح: +${trip.netProfit.toStringAsFixed(1)} $currency (${trip.profitPerKm.toStringAsFixed(1)} ج/كم)",
-                  style: TextStyle(
-                    color: trip.netProfit >= 0 ? AppColors.accentCyan : AppColors.lossRed,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
+                Expanded(
+                  child: Text(
+                    "صافي الربح: ${signed(trip.netProfit)} $currency (${trip.profitPerKm.toStringAsFixed(1)} $currency/كم)",
+                    style: TextStyle(
+                      color: trip.netProfit >= 0 ? AppColors.accentCyan : AppColors.lossRed,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
                 Text(

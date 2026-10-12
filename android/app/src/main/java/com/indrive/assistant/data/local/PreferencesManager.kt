@@ -3,21 +3,27 @@ package com.indrive.assistant.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.indrive.assistant.data.model.DriverSettings
-import com.indrive.assistant.data.model.VehicleProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
+/**
+ * Native mirror of the driver's settings.
+ *
+ * The Flutter app owns the settings and pushes them here via [applyFromFlutter] (MethodChannel
+ * "syncSettings") at startup and on every change. Zone edits made from the floating HUD are written
+ * here and pulled back by Flutter on resume ("getNativeZones").
+ */
 class PreferencesManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("driver_prefs", Context.MODE_PRIVATE)
 
-    private val _settingsFlow = MutableStateFlow(loadSettings())
-    val settingsFlow: StateFlow<DriverSettings> = _settingsFlow.asStateFlow()
+    @Volatile
+    private var cachedSettings: DriverSettings = loadSettings()
 
-    private val _themeModeFlow = MutableStateFlow(prefs.getString(KEY_THEME_MODE, "DARK") ?: "DARK")
-    val themeModeFlow: StateFlow<String> = _themeModeFlow.asStateFlow()
+    private val _settingsFlow = MutableStateFlow(cachedSettings)
+    val settingsFlow: StateFlow<DriverSettings> = _settingsFlow.asStateFlow()
 
     private val _overlayStyleFlow = MutableStateFlow(prefs.getString(KEY_OVERLAY_STYLE, "COMPACT_CIRCLE") ?: "COMPACT_CIRCLE")
     val overlayStyleFlow: StateFlow<String> = _overlayStyleFlow.asStateFlow()
@@ -25,35 +31,28 @@ class PreferencesManager(context: Context) {
     private val _overlaySizeFlow = MutableStateFlow(prefs.getString(KEY_OVERLAY_SIZE, "MEDIUM") ?: "MEDIUM")
     val overlaySizeFlow: StateFlow<String> = _overlaySizeFlow.asStateFlow()
 
-    private val _vehicleProfilesFlow = MutableStateFlow(loadVehicleProfiles())
-    val vehicleProfilesFlow: StateFlow<List<VehicleProfile>> = _vehicleProfilesFlow.asStateFlow()
-
-    private val _activeVehicleIdFlow = MutableStateFlow(prefs.getString(KEY_ACTIVE_VEHICLE_ID, "") ?: "")
-    val activeVehicleIdFlow: StateFlow<String> = _activeVehicleIdFlow.asStateFlow()
-
-    fun getSettings(): DriverSettings = loadSettings()
+    /** In-memory copy; safe to call from the accessibility worker thread on every scan. */
+    fun getSettings(): DriverSettings = cachedSettings
 
     private fun loadSettings(): DriverSettings {
+        val d = DriverSettings()
         return DriverSettings(
-            fuelConsumptionLPer100Km = prefs.getFloat(KEY_FUEL_CONSUMPTION, 8.5f).toDouble(),
-            fuelPricePerLiter = prefs.getFloat(KEY_FUEL_PRICE, 15.0f).toDouble(),
-            inDriveCommissionPercent = prefs.getFloat(KEY_COMMISSION, 10.0f).toDouble(),
-            wearAndTearPerKm = prefs.getFloat(KEY_WEAR_PER_KM, 1.2f).toDouble(),
-            targetDailyEarnings = prefs.getFloat(KEY_DAILY_TARGET, 1500.0f).toDouble(),
-            minProfitPerKm = prefs.getFloat(KEY_MIN_PROFIT_KM, 8.0f).toDouble(),
-            currency = prefs.getString(KEY_CURRENCY, "EGP") ?: "EGP",
-            favoriteZones = prefs.getString(KEY_FAVORITE_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-                ?: listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
-            blacklistedZones = prefs.getString(KEY_BLACKLISTED_ZONES, null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-                ?: listOf("شبرا الخيمة", "حلوان", "المرج"),
-            autoAcceptEnabled = prefs.getBoolean(KEY_AUTO_ACCEPT_ENABLED, false),
-            autoAcceptMinProfitPerKm = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_PROFIT_KM, 10.0f).toDouble(),
-            autoAcceptMinNetProfit = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_NET_PROFIT, 25.0f).toDouble(),
-            autoAcceptMaxPickupKm = prefs.getFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, 3.5f).toDouble(),
-            autoAcceptOnlyFavoriteZones = prefs.getBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, false),
-            autoAcceptIgnoreBlacklist = prefs.getBoolean(KEY_AUTO_ACCEPT_IGNORE_BLACK, true),
-            autoBidMode = prefs.getString(KEY_AUTO_BID_MODE, "RECOMMENDED") ?: "RECOMMENDED",
-            autoAcceptDelaySeconds = prefs.getFloat(KEY_AUTO_ACCEPT_DELAY, 1.5f).toDouble()
+            fuelConsumptionLPer100Km = prefs.getFloat(KEY_FUEL_CONSUMPTION, d.fuelConsumptionLPer100Km.toFloat()).toDouble(),
+            fuelPricePerLiter = prefs.getFloat(KEY_FUEL_PRICE, d.fuelPricePerLiter.toFloat()).toDouble(),
+            inDriveCommissionPercent = prefs.getFloat(KEY_COMMISSION, d.inDriveCommissionPercent.toFloat()).toDouble(),
+            wearAndTearPerKm = prefs.getFloat(KEY_WEAR_PER_KM, d.wearAndTearPerKm.toFloat()).toDouble(),
+            targetDailyEarnings = prefs.getFloat(KEY_DAILY_TARGET, d.targetDailyEarnings.toFloat()).toDouble(),
+            minProfitPerKm = prefs.getFloat(KEY_MIN_PROFIT_KM, d.minProfitPerKm.toFloat()).toDouble(),
+            currency = prefs.getString(KEY_CURRENCY, d.currency) ?: d.currency,
+            favoriteZones = decodeList(prefs.getString(KEY_FAVORITE_ZONES, null)) ?: d.favoriteZones,
+            blacklistedZones = decodeList(prefs.getString(KEY_BLACKLISTED_ZONES, null)) ?: d.blacklistedZones,
+            autoAcceptEnabled = prefs.getBoolean(KEY_AUTO_ACCEPT_ENABLED, d.autoAcceptEnabled),
+            autoAcceptMinProfitPerKm = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_PROFIT_KM, d.autoAcceptMinProfitPerKm.toFloat()).toDouble(),
+            autoAcceptMinNetProfit = prefs.getFloat(KEY_AUTO_ACCEPT_MIN_NET_PROFIT, d.autoAcceptMinNetProfit.toFloat()).toDouble(),
+            autoAcceptMaxPickupKm = prefs.getFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, d.autoAcceptMaxPickupKm.toFloat()).toDouble(),
+            autoAcceptOnlyFavoriteZones = prefs.getBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, d.autoAcceptOnlyFavoriteZones),
+            autoAcceptRejectBlacklisted = prefs.getBoolean(KEY_AUTO_ACCEPT_REJECT_BLACK, d.autoAcceptRejectBlacklisted),
+            autoAcceptDelaySeconds = prefs.getFloat(KEY_AUTO_ACCEPT_DELAY, d.autoAcceptDelaySeconds.toFloat()).toDouble()
         )
     }
 
@@ -66,28 +65,86 @@ class PreferencesManager(context: Context) {
             putFloat(KEY_DAILY_TARGET, settings.targetDailyEarnings.toFloat())
             putFloat(KEY_MIN_PROFIT_KM, settings.minProfitPerKm.toFloat())
             putString(KEY_CURRENCY, settings.currency)
-            putString(KEY_FAVORITE_ZONES, settings.favoriteZones.joinToString(","))
-            putString(KEY_BLACKLISTED_ZONES, settings.blacklistedZones.joinToString(","))
-
+            putString(KEY_FAVORITE_ZONES, JSONArray(settings.favoriteZones).toString())
+            putString(KEY_BLACKLISTED_ZONES, JSONArray(settings.blacklistedZones).toString())
             putBoolean(KEY_AUTO_ACCEPT_ENABLED, settings.autoAcceptEnabled)
             putFloat(KEY_AUTO_ACCEPT_MIN_PROFIT_KM, settings.autoAcceptMinProfitPerKm.toFloat())
             putFloat(KEY_AUTO_ACCEPT_MIN_NET_PROFIT, settings.autoAcceptMinNetProfit.toFloat())
             putFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, settings.autoAcceptMaxPickupKm.toFloat())
             putBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, settings.autoAcceptOnlyFavoriteZones)
-            putBoolean(KEY_AUTO_ACCEPT_IGNORE_BLACK, settings.autoAcceptIgnoreBlacklist)
-            putString(KEY_AUTO_BID_MODE, settings.autoBidMode)
+            putBoolean(KEY_AUTO_ACCEPT_REJECT_BLACK, settings.autoAcceptRejectBlacklisted)
             putFloat(KEY_AUTO_ACCEPT_DELAY, settings.autoAcceptDelaySeconds.toFloat())
             apply()
         }
+        cachedSettings = settings
         _settingsFlow.value = settings
     }
 
     // =========================================================================
-    // THEME & DISPLAY PREFERENCES
+    // FLUTTER SYNC
     // =========================================================================
-    fun setThemeMode(mode: String) {
-        prefs.edit().putString(KEY_THEME_MODE, mode).apply()
-        _themeModeFlow.value = mode
+
+    /** Applies the full settings snapshot sent by Flutter (see NativeBridgeService.syncSettings). */
+    fun applyFromFlutter(json: JSONObject) {
+        val d = cachedSettings
+        fun dbl(key: String, fallback: Double) = if (json.has(key)) json.optDouble(key, fallback) else fallback
+        fun bool(key: String, fallback: Boolean) = if (json.has(key)) json.optBoolean(key, fallback) else fallback
+        fun list(key: String, fallback: List<String>): List<String> {
+            val arr = json.optJSONArray(key) ?: return fallback
+            return (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }
+        }
+
+        saveSettings(
+            DriverSettings(
+                fuelConsumptionLPer100Km = dbl("fuelConsumptionLPer100Km", d.fuelConsumptionLPer100Km),
+                fuelPricePerLiter = dbl("fuelPricePerLiter", d.fuelPricePerLiter),
+                inDriveCommissionPercent = dbl("inDriveCommissionPercent", d.inDriveCommissionPercent),
+                wearAndTearPerKm = dbl("wearAndTearPerKm", d.wearAndTearPerKm),
+                targetDailyEarnings = dbl("targetDailyEarnings", d.targetDailyEarnings),
+                minProfitPerKm = dbl("minProfitPerKm", d.minProfitPerKm),
+                currency = json.optString("currency", d.currency),
+                favoriteZones = list("favoriteZones", d.favoriteZones),
+                blacklistedZones = list("blacklistedZones", d.blacklistedZones),
+                autoAcceptEnabled = bool("autoAcceptEnabled", d.autoAcceptEnabled),
+                autoAcceptMinProfitPerKm = dbl("autoAcceptMinProfitPerKm", d.autoAcceptMinProfitPerKm),
+                autoAcceptMinNetProfit = dbl("autoAcceptMinNetProfit", d.autoAcceptMinNetProfit),
+                autoAcceptMaxPickupKm = dbl("autoAcceptMaxPickupKm", d.autoAcceptMaxPickupKm),
+                autoAcceptOnlyFavoriteZones = bool("autoAcceptOnlyFavoriteZones", d.autoAcceptOnlyFavoriteZones),
+                autoAcceptRejectBlacklisted = bool("autoAcceptRejectBlacklisted", d.autoAcceptRejectBlacklisted),
+                autoAcceptDelaySeconds = dbl("autoAcceptDelaySeconds", d.autoAcceptDelaySeconds)
+            )
+        )
+
+        // Flutter has now seen (and merged) any HUD zone edits.
+        prefs.edit().putBoolean(KEY_ZONES_DIRTY, false).apply()
+
+        json.optString("overlayStyle", "").takeIf { it.isNotEmpty() }?.let { setOverlayStyle(it) }
+        json.optString("overlaySize", "").takeIf { it.isNotEmpty() }?.let { setOverlaySize(it) }
+    }
+
+    /**
+     * Zone lists as currently known natively, with how Flutter should treat them:
+     *  - "replace": the driver edited zones from the HUD since the last sync; native is newest.
+     *  - "union":   zones were saved by a pre-1.10 build (separate store); merge, never drop.
+     *  - "none":    nothing new; Flutter's copy is authoritative.
+     */
+    fun zonesAsJson(): JSONObject {
+        val s = cachedSettings
+        val mode = when {
+            prefs.getBoolean(KEY_ZONES_DIRTY, false) -> "replace"
+            isLegacyList(prefs.getString(KEY_FAVORITE_ZONES, null)) ||
+                isLegacyList(prefs.getString(KEY_BLACKLISTED_ZONES, null)) -> "union"
+            else -> "none"
+        }
+        return JSONObject().apply {
+            put("mode", mode)
+            put("favoriteZones", JSONArray(s.favoriteZones))
+            put("blacklistedZones", JSONArray(s.blacklistedZones))
+        }
+    }
+
+    private fun markZonesDirty() {
+        prefs.edit().putBoolean(KEY_ZONES_DIRTY, true).apply()
     }
 
     fun setOverlayStyle(style: String) {
@@ -101,152 +158,47 @@ class PreferencesManager(context: Context) {
     }
 
     // =========================================================================
-    // QUICK ZONE OPERATIONS (1-Tap from any order)
+    // QUICK ZONE OPERATIONS (1-Tap from the HUD)
     // =========================================================================
     fun addFavoriteZone(zone: String): Boolean {
         val clean = zone.trim()
         if (clean.isEmpty()) return false
-        val current = loadSettings()
+        val current = cachedSettings
         if (current.favoriteZones.any { it.equals(clean, ignoreCase = true) }) return false
-        val updated = current.favoriteZones.toMutableList().apply { add(clean) }
-        saveSettings(current.copy(favoriteZones = updated))
+        saveSettings(current.copy(favoriteZones = current.favoriteZones + clean))
+        markZonesDirty()
         return true
     }
 
     fun removeFavoriteZone(zone: String): Boolean {
         val clean = zone.trim()
-        val current = loadSettings()
-        val updated = current.favoriteZones.filterNot { it.equals(clean, ignoreCase = true) }
-        saveSettings(current.copy(favoriteZones = updated))
+        val current = cachedSettings
+        saveSettings(current.copy(favoriteZones = current.favoriteZones.filterNot { it.equals(clean, ignoreCase = true) }))
+        markZonesDirty()
         return true
     }
 
     fun addBlacklistZone(zone: String): Boolean {
         val clean = zone.trim()
         if (clean.isEmpty()) return false
-        val current = loadSettings()
+        val current = cachedSettings
         if (current.blacklistedZones.any { it.equals(clean, ignoreCase = true) }) return false
-        val updated = current.blacklistedZones.toMutableList().apply { add(clean) }
-        saveSettings(current.copy(blacklistedZones = updated))
+        saveSettings(current.copy(blacklistedZones = current.blacklistedZones + clean))
+        markZonesDirty()
         return true
     }
 
     fun removeBlacklistZone(zone: String): Boolean {
         val clean = zone.trim()
-        val current = loadSettings()
-        val updated = current.blacklistedZones.filterNot { it.equals(clean, ignoreCase = true) }
-        saveSettings(current.copy(blacklistedZones = updated))
+        val current = cachedSettings
+        saveSettings(current.copy(blacklistedZones = current.blacklistedZones.filterNot { it.equals(clean, ignoreCase = true) }))
+        markZonesDirty()
         return true
     }
 
-    fun isFavoriteZone(zone: String): Boolean {
-        return loadSettings().isFavorite(zone)
-    }
+    fun isFavoriteZone(zone: String): Boolean = cachedSettings.isFavorite(zone)
 
-    fun isBlacklistedZone(zone: String): Boolean {
-        return loadSettings().isBlacklisted(zone)
-    }
-
-    // =========================================================================
-    // MULTI-VEHICLE PROFILES
-    // =========================================================================
-    private fun loadVehicleProfiles(): List<VehicleProfile> {
-        val raw = prefs.getString(KEY_VEHICLE_PROFILES, null)
-        if (raw.isNullOrEmpty()) {
-            val defaultProfiles = listOf(
-                VehicleProfile(
-                    name = "سيارة اقتصادية (بنزين 92)",
-                    modelYear = "2021",
-                    fuelType = "بنزين 92",
-                    fuelConsumptionLPer100Km = 8.5,
-                    fuelPricePerLiter = 15.25,
-                    wearAndTearPerKm = 1.2
-                ),
-                VehicleProfile(
-                    name = "سيارة موفرة (غاز طبيعي / سولار)",
-                    modelYear = "2019",
-                    fuelType = "غاز طبيعي / CNG",
-                    fuelConsumptionLPer100Km = 7.0,
-                    fuelPricePerLiter = 11.50,
-                    wearAndTearPerKm = 1.1
-                )
-            )
-            saveVehicleProfiles(defaultProfiles)
-            if (prefs.getString(KEY_ACTIVE_VEHICLE_ID, "").isNullOrEmpty()) {
-                prefs.edit().putString(KEY_ACTIVE_VEHICLE_ID, defaultProfiles.first().id).apply()
-                _activeVehicleIdFlow.value = defaultProfiles.first().id
-            }
-            return defaultProfiles
-        }
-
-        val list = mutableListOf<VehicleProfile>()
-        try {
-            val jsonArray = JSONArray(raw)
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                list.add(
-                    VehicleProfile(
-                        id = obj.optString("id"),
-                        name = obj.optString("name", "مركبة"),
-                        modelYear = obj.optString("modelYear", ""),
-                        fuelType = obj.optString("fuelType", "بنزين 92"),
-                        fuelConsumptionLPer100Km = obj.optDouble("fuelConsumptionLPer100Km", 8.5),
-                        fuelPricePerLiter = obj.optDouble("fuelPricePerLiter", 15.25),
-                        wearAndTearPerKm = obj.optDouble("wearAndTearPerKm", 1.2),
-                        inDriveCommissionPercent = obj.optDouble("inDriveCommissionPercent", 10.0),
-                        minProfitPerKm = obj.optDouble("minProfitPerKm", 8.0),
-                        notes = obj.optString("notes", "")
-                    )
-                )
-            }
-        } catch (_: Exception) {}
-
-        if (list.isEmpty()) {
-            return listOf(VehicleProfile(name = "مركبة افتراضية"))
-        }
-        return list
-    }
-
-    fun saveVehicleProfiles(profiles: List<VehicleProfile>) {
-        val jsonArray = JSONArray()
-        for (p in profiles) {
-            val obj = JSONObject().apply {
-                put("id", p.id)
-                put("name", p.name)
-                put("modelYear", p.modelYear)
-                put("fuelType", p.fuelType)
-                put("fuelConsumptionLPer100Km", p.fuelConsumptionLPer100Km)
-                put("fuelPricePerLiter", p.fuelPricePerLiter)
-                put("wearAndTearPerKm", p.wearAndTearPerKm)
-                put("inDriveCommissionPercent", p.inDriveCommissionPercent)
-                put("minProfitPerKm", p.minProfitPerKm)
-                put("notes", p.notes)
-            }
-            jsonArray.put(obj)
-        }
-        prefs.edit().putString(KEY_VEHICLE_PROFILES, jsonArray.toString()).apply()
-        _vehicleProfilesFlow.value = profiles
-    }
-
-    fun switchActiveVehicle(profile: VehicleProfile) {
-        prefs.edit().putString(KEY_ACTIVE_VEHICLE_ID, profile.id).apply()
-        _activeVehicleIdFlow.value = profile.id
-
-        val current = loadSettings()
-        val updatedSettings = current.copy(
-            fuelConsumptionLPer100Km = profile.fuelConsumptionLPer100Km,
-            fuelPricePerLiter = profile.fuelPricePerLiter,
-            inDriveCommissionPercent = profile.inDriveCommissionPercent,
-            wearAndTearPerKm = profile.wearAndTearPerKm,
-            minProfitPerKm = profile.minProfitPerKm
-        )
-        saveSettings(updatedSettings)
-    }
-
-    fun updateWearAndTearRate(newRate: Double) {
-        val current = loadSettings()
-        saveSettings(current.copy(wearAndTearPerKm = newRate))
-    }
+    fun isBlacklistedZone(zone: String): Boolean = cachedSettings.isBlacklisted(zone)
 
     companion object {
         private const val KEY_FUEL_CONSUMPTION = "fuel_consumption"
@@ -259,19 +211,34 @@ class PreferencesManager(context: Context) {
         private const val KEY_FAVORITE_ZONES = "favorite_zones"
         private const val KEY_BLACKLISTED_ZONES = "blacklisted_zones"
 
-        private const val KEY_THEME_MODE = "app_theme_mode"
         private const val KEY_OVERLAY_STYLE = "overlay_style"
         private const val KEY_OVERLAY_SIZE = "overlay_size"
-        private const val KEY_VEHICLE_PROFILES = "vehicle_profiles"
-        private const val KEY_ACTIVE_VEHICLE_ID = "active_vehicle_id"
 
         private const val KEY_AUTO_ACCEPT_ENABLED = "auto_accept_enabled"
         private const val KEY_AUTO_ACCEPT_MIN_PROFIT_KM = "auto_accept_min_profit_km"
         private const val KEY_AUTO_ACCEPT_MIN_NET_PROFIT = "auto_accept_min_net_profit"
         private const val KEY_AUTO_ACCEPT_MAX_PICKUP_KM = "auto_accept_max_pickup_km"
         private const val KEY_AUTO_ACCEPT_ONLY_FAV = "auto_accept_only_fav"
-        private const val KEY_AUTO_ACCEPT_IGNORE_BLACK = "auto_accept_ignore_black"
-        private const val KEY_AUTO_BID_MODE = "auto_bid_mode"
+        private const val KEY_AUTO_ACCEPT_REJECT_BLACK = "auto_accept_reject_black"
         private const val KEY_AUTO_ACCEPT_DELAY = "auto_accept_delay"
+        private const val KEY_ZONES_DIRTY = "zones_dirty_since_flutter_sync"
+
+        private fun isLegacyList(raw: String?): Boolean =
+            raw != null && raw.isNotBlank() && !raw.trim().startsWith("[")
+
+        /** Reads a JSON-array list, falling back to the legacy comma-joined format. */
+        private fun decodeList(raw: String?): List<String>? {
+            if (raw == null) return null
+            val trimmed = raw.trim()
+            if (trimmed.startsWith("[")) {
+                return try {
+                    val arr = JSONArray(trimmed)
+                    (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            return trimmed.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        }
     }
 }

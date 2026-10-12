@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/driver_settings.dart';
 import '../../providers/assistant_provider.dart';
-import '../../theme/app_colors.dart';
 import '../../services/native_bridge_service.dart';
+import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
 import '../../utils/update_manager.dart';
+import '../components/dialogs.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -20,11 +22,15 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   bool _isDownloadingApk = false;
   double _downloadProgress = 0.0;
   UpdateInfo? _updateInfo;
+  String _installedVersion = "";
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    UpdateManager.currentVersion().then((v) {
+      if (mounted) setState(() => _installedVersion = v);
+    });
   }
 
   @override
@@ -33,41 +39,48 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     super.dispose();
   }
 
+  /// Applies [change] to the provider's *current* settings at the moment of the tap, so quick
+  /// repeated taps build on each other instead of on a stale snapshot.
+  void _update(DriverSettings Function(DriverSettings s) change) {
+    final provider = context.read<AssistantProvider>();
+    provider.updateSettings(change(provider.driverSettings));
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
                 children: [
-                  const Icon(Icons.tune, color: AppColors.neonGreen, size: 24),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        "الإعدادات التشغيلية والتخصيص",
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
+                  Icon(Icons.tune, color: AppColors.neonGreen, size: 24),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "الإعدادات التشغيلية والتخصيص",
+                          style: TextStyle(color: AppColors.textPrimary, fontSize: 17, fontWeight: FontWeight.bold),
                         ),
-                      ),
-                      Text(
-                        "القبول والمزايدة التلقائية، ستايل الـ HUD، والمناطق",
-                        style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
-                      ),
-                    ],
+                        Text(
+                          "القبول التلقائي، شكل العلامة، المناطق، والتسعير",
+                          style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-
-            // Tab Bar
             Container(
               color: AppColors.darkSurface,
               child: TabBar(
@@ -76,7 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 indicatorColor: AppColors.neonGreen,
                 labelColor: AppColors.neonGreen,
                 unselectedLabelColor: AppColors.textSecondary,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                 tabs: const [
                   Tab(icon: Icon(Icons.bolt, size: 18), text: "القبول التلقائي"),
                   Tab(icon: Icon(Icons.palette, size: 18), text: "شكل العلامة"),
@@ -86,8 +99,6 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 ],
               ),
             ),
-
-            // Tab Bar View
             Expanded(
               child: TabBarView(
                 controller: _tabController,
@@ -107,84 +118,101 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   }
 
   // ==========================================
-  // TAB 1: AUTO-ACCEPT & AUTOMATION
+  // TAB 1: AUTO-ACCEPT
   // ==========================================
+  Future<void> _setAutoAccept(bool enable) async {
+    final provider = context.read<AssistantProvider>();
+    if (enable && !provider.autoAcceptConsentGiven) {
+      final ok = await confirmAction(
+        context,
+        title: "تحذير قبل تفعيل القبول التلقائي",
+        message: "سيضغط التطبيق زر \"قبول\" في إن درايف نيابة عنك عندما يطابق العرض شروطك.\n\n"
+            "• الأتمتة قد تخالف شروط استخدام إن درايف وقد تعرّض حسابك للإيقاف. أنت المسؤول عن استخدامها.\n"
+            "• لا يتم القبول إذا لم تُقرأ المسافة بدقة.\n"
+            "• يعيد التطبيق فحص الطلب قبل الضغط مباشرة، ويلغي العملية إذا تغيّر.\n"
+            "• يمكنك الإيقاف في أي وقت من هنا أو بإيقاف المساعد العائم من الإشعار.",
+        confirmLabel: "أفهم المخاطر، فعّل",
+        destructive: false,
+      );
+      if (!ok) return;
+      await provider.recordAutoAcceptConsent();
+    }
+    _update((s) => s.copyWith(autoAcceptEnabled: enable));
+  }
+
   Widget _buildAutoAcceptTab() {
-    final provider = context.watch<AssistantProvider>();
-    final settings = provider.driverSettings;
+    final settings = context.watch<AssistantProvider>().driverSettings;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         SwitchListTile(
-          title: const Text("تفعيل القبول التلقائي للطلبات (Auto-Accept)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-          subtitle: const Text("قبول العروض المتوافقة مع معايير الربحية الخاصة بك فوراً", style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          title: const Text("تفعيل القبول التلقائي للطلبات", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          subtitle: const Text(
+            "يقبل العروض المطابقة لشروطك فقط، بعد إعادة التحقق منها",
+            style: TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+          ),
           value: settings.autoAcceptEnabled,
           activeColor: AppColors.neonGreen,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) {
-            provider.updateSettings(settings.copyWith(autoAcceptEnabled: v));
-          },
+          onChanged: _setAutoAccept,
         ),
-
         const Divider(color: AppColors.darkCardBorder),
-
         const SizedBox(height: 10),
-
         _buildNumberSettingTile(
-          title: "الحد الأدنى لصافي ربح الرحلة (EGP)",
+          title: "الحد الأدنى لصافي ربح الرحلة",
+          unit: settings.currency,
           value: settings.autoAcceptMinNetProfit,
           step: 5.0,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(autoAcceptMinNetProfit: v)),
+          min: 0,
+          max: 1000,
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptMinNetProfit: v)),
         ),
-
         const SizedBox(height: 10),
-
         _buildNumberSettingTile(
-          title: "الحد الأدنى لصافي الربح لكل كيلومتر (ج/كم)",
+          title: "الحد الأدنى لصافي الربح لكل كيلومتر",
+          unit: "${settings.currency}/كم",
           value: settings.autoAcceptMinProfitPerKm,
-          step: 1.0,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(autoAcceptMinProfitPerKm: v)),
+          step: 0.5,
+          min: 0,
+          max: 100,
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptMinProfitPerKm: v)),
         ),
-
         const SizedBox(height: 10),
-
         _buildNumberSettingTile(
-          title: "أقصى مسافة وصول للراكب (كم)",
+          title: "أقصى مسافة وصول للراكب",
+          unit: "كم",
           value: settings.autoAcceptMaxPickupKm,
           step: 0.5,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(autoAcceptMaxPickupKm: v)),
+          min: 0.5,
+          max: 30,
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptMaxPickupKm: v)),
         ),
-
         const SizedBox(height: 10),
-
         _buildNumberSettingTile(
-          title: "مهلة التأخير قبل الضغط التلقائي (بالثواني)",
+          title: "مهلة الانتظار قبل القبول",
+          unit: "ثانية",
           value: settings.autoAcceptDelaySeconds,
           step: 0.5,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(autoAcceptDelaySeconds: v)),
+          min: 0.5,
+          max: 8,
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptDelaySeconds: v)),
         ),
-
         const SizedBox(height: 14),
-
         SwitchListTile(
-          title: const Text("قبول الطلبات المتجهة للمناطق المفضلة فقط", style: TextStyle(fontSize: 13)),
+          title: const Text("قبول الطلبات المرتبطة بالمناطق المفضلة فقط", style: TextStyle(fontSize: 13.5)),
           value: settings.autoAcceptOnlyFavoriteZones,
           activeColor: AppColors.accentAmber,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) {
-            provider.updateSettings(settings.copyWith(autoAcceptOnlyFavoriteZones: v));
-          },
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptOnlyFavoriteZones: v)),
         ),
-
         SwitchListTile(
-          title: const Text("تجاهل ورفض طلبات المناطق المحظورة تماماً", style: TextStyle(fontSize: 13)),
-          value: !settings.autoAcceptIgnoreBlacklist,
+          title: const Text("عدم قبول طلبات المناطق المحظورة أبداً", style: TextStyle(fontSize: 13.5)),
+          subtitle: const Text("موصى به", style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+          value: settings.autoAcceptRejectBlacklisted,
           activeColor: AppColors.lossRed,
           contentPadding: EdgeInsets.zero,
-          onChanged: (v) {
-            provider.updateSettings(settings.copyWith(autoAcceptIgnoreBlacklist: !v));
-          },
+          onChanged: (v) => _update((s) => s.copyWith(autoAcceptRejectBlacklisted: v)),
         ),
       ],
     );
@@ -198,30 +226,29 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     final currentStyle = provider.overlayStyle;
     final currentSize = provider.overlaySize;
 
-    final styles = [
-      {"id": "COMPACT_CIRCLE", "title": "قرص دائري مصغر", "desc": "أيقونة دائرية أنيقة تعرض السعر العادل"},
-      {"id": "SLIM_PILL", "title": "كبسولة أفقية رفيعة", "desc": "شريط أفقي كبسولي مدمج ومريح للعين"},
-      {"id": "SPEEDO_GAUGE", "title": "عداد سرعة رقمي", "desc": "تصميم عداد سيارة رقمي أنيق"},
-      {"id": "MINI_TAG", "title": "شارة تسعير مدمجة", "desc": "تاج مدمج يركز على قيمة السعر"},
-      {"id": "CORNER_RIBBON", "title": "شريط زاوية أنيق", "desc": "شريط جانبي لا يشغل مساحة"},
-      {"id": "GLOW_DOT", "title": "نقطة إشعاع ذكية", "desc": "نقطة توهج نيون عالية التباين"},
+    const styles = [
+      {"id": "COMPACT_CIRCLE", "title": "قرص دائري", "desc": "دائرة تعرض صافي الربح"},
+      {"id": "SLIM_PILL", "title": "كبسولة أفقية", "desc": "شريط أفقي مدمج ومريح للعين"},
+      {"id": "SPEEDO_GAUGE", "title": "عداد رقمي", "desc": "تصميم عداد سيارة"},
+      {"id": "MINI_TAG", "title": "شارة مدمجة", "desc": "شارة ملونة بالكامل حسب الربحية"},
+      {"id": "CORNER_RIBBON", "title": "شريط جانبي", "desc": "شريط صغير لا يشغل مساحة"},
+      {"id": "GLOW_DOT", "title": "نقطة مضيئة", "desc": "نقطة عالية التباين"},
     ];
 
-    final sizes = [
-      {"id": "SMALL", "label": "صغير (85%)"},
-      {"id": "MEDIUM", "label": "متوسط (100%)"},
-      {"id": "LARGE", "label": "كبير (120%)"},
+    const sizes = [
+      {"id": "SMALL", "label": "صغير"},
+      {"id": "MEDIUM", "label": "متوسط"},
+      {"id": "LARGE", "label": "كبير"},
     ];
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         const Text(
-          "اختر نمط وشكل العلامة العائمة فوق إن درايف:",
+          "شكل العلامة العائمة فوق إن درايف:",
           style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
         ),
         const SizedBox(height: 12),
-
         ...styles.map((s) {
           final isSelected = currentStyle == s["id"];
           return Padding(
@@ -255,11 +282,11 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                             style: TextStyle(
                               color: isSelected ? AppColors.neonGreen : AppColors.textPrimary,
                               fontWeight: FontWeight.bold,
-                              fontSize: 13,
+                              fontSize: 13.5,
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(s["desc"]!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
+                          Text(s["desc"]!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5)),
                         ],
                       ),
                     ),
@@ -269,16 +296,12 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
             ),
           );
         }),
-
         const SizedBox(height: 16),
-
         const Text(
           "حجم العلامة على الشاشة:",
           style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
         ),
-
         const SizedBox(height: 8),
-
         Row(
           children: sizes.map((sz) {
             final isSelected = currentSize == sz["id"];
@@ -286,13 +309,13 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: ChoiceChip(
-                  label: Text(sz["label"]!),
+                  label: Center(child: Text(sz["label"]!)),
                   selected: isSelected,
                   selectedColor: AppColors.neonGreen,
                   backgroundColor: AppColors.darkSurface,
                   labelStyle: TextStyle(
                     color: isSelected ? AppColors.darkBackground : AppColors.textPrimary,
-                    fontSize: 11,
+                    fontSize: 12,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                   onSelected: (_) => provider.setOverlaySize(sz["id"]!),
@@ -306,219 +329,269 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   }
 
   // ==========================================
-  // TAB 3: ZONES MANAGEMENT
+  // TAB 3: ZONES
   // ==========================================
   Widget _buildZonesTab() {
     final provider = context.watch<AssistantProvider>();
     final settings = provider.driverSettings;
-    final favCtrl = TextEditingController();
-    final blackCtrl = TextEditingController();
+
+    Widget section({
+      required IconData icon,
+      required Color color,
+      required String title,
+      required List<String> zones,
+      required Future<bool> Function(String) onAdd,
+      required Future<bool> Function(String) onRemove,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(title, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
+              ),
+              IconButton(
+                tooltip: "إضافة",
+                icon: Icon(Icons.add_circle, color: color),
+                onPressed: () => _showAddZoneDialog(title, onAdd),
+              ),
+            ],
+          ),
+          if (zones.isEmpty)
+            const Text("لا توجد مناطق", style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: zones.map((z) {
+              return Chip(
+                label: Text(z, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                backgroundColor: color.withOpacity(0.18),
+                labelStyle: TextStyle(color: color),
+                deleteIcon: Icon(Icons.close, size: 16, color: color),
+                onDeleted: () async {
+                  final ok = await confirmAction(context, title: "إزالة '$z'؟", message: "سيتم حذف المنطقة من هذه القائمة.");
+                  if (ok) await onRemove(z);
+                },
+              );
+            }).toList(),
+          ),
+        ],
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Favorite Zones Section
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.star, color: AppColors.accentAmber, size: 20),
-                SizedBox(width: 6),
-                Text(
-                  "المناطق المفضلة (عالية الربحية)",
-                  style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-              ],
-            ),
-            IconButton(
-              icon: const Icon(Icons.add_circle, color: AppColors.accentAmber),
-              onPressed: () {
-                _showAddZoneDialog("إضافة منطقة مفضلة", (val) => provider.addFavoriteZone(val));
-              },
-            ),
-          ],
+        section(
+          icon: Icons.star,
+          color: AppColors.accentAmber,
+          title: "المناطق المفضلة",
+          zones: settings.favoriteZones,
+          onAdd: provider.addFavoriteZone,
+          onRemove: provider.removeFavoriteZone,
         ),
-
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: settings.favoriteZones.map((z) {
-            return Chip(
-              label: Text(z, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              backgroundColor: AppColors.accentAmber.withOpacity(0.18),
-              labelStyle: const TextStyle(color: AppColors.accentAmber),
-              deleteIcon: const Icon(Icons.close, size: 16, color: AppColors.accentAmber),
-              onDeleted: () => provider.removeFavoriteZone(z),
-            );
-          }).toList(),
-        ),
-
         const SizedBox(height: 20),
         const Divider(color: AppColors.darkCardBorder),
         const SizedBox(height: 10),
-
-        // Blacklisted Zones Section
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.block, color: AppColors.lossRed, size: 20),
-                SizedBox(width: 6),
-                Text(
-                  "المناطق المحظورة / غير المرغوبة",
-                  style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-              ],
-            ),
-            IconButton(
-              icon: const Icon(Icons.add_circle, color: AppColors.lossRed),
-              onPressed: () {
-                _showAddZoneDialog("إضافة منطقة محظورة", (val) => provider.addBlacklistZone(val));
-              },
-            ),
-          ],
+        section(
+          icon: Icons.block,
+          color: AppColors.lossRed,
+          title: "المناطق المحظورة / غير المرغوبة",
+          zones: settings.blacklistedZones,
+          onAdd: provider.addBlacklistZone,
+          onRemove: provider.removeBlacklistZone,
         ),
-
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: settings.blacklistedZones.map((z) {
-            return Chip(
-              label: Text(z, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              backgroundColor: AppColors.lossRed.withOpacity(0.18),
-              labelStyle: const TextStyle(color: AppColors.lossRed),
-              deleteIcon: const Icon(Icons.close, size: 16, color: AppColors.lossRed),
-              onDeleted: () => provider.removeBlacklistZone(z),
-            );
-          }).toList(),
+        const SizedBox(height: 16),
+        const Text(
+          "تُطابَق المنطقة إذا ظهر اسمها داخل عنوان التحرك أو الوصول (بتجاهل الهمزات والتاء المربوطة).",
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5, height: 1.4),
         ),
       ],
     );
   }
 
-  void _showAddZoneDialog(String title, Function(String) onAdd) {
+  void _showAddZoneDialog(String title, Future<bool> Function(String) onAdd) {
     final ctrl = TextEditingController();
+    String? error;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(hintText: "اكتب اسم المنطقة هنا..."),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("إلغاء")),
-          ElevatedButton(
-            onPressed: () {
-              final text = ctrl.text.trim();
-              if (text.isNotEmpty) {
-                onAdd(text);
-                Navigator.pop(ctx);
-              }
-            },
-            child: const Text("إضافة"),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text("إضافة إلى: $title", style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: InputDecoration(hintText: "اكتب اسم المنطقة هنا...", errorText: error),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("إلغاء")),
+            ElevatedButton(
+              onPressed: () async {
+                final text = ctrl.text.trim();
+                if (text.isEmpty) {
+                  setDlg(() => error = "اكتب اسم المنطقة");
+                  return;
+                }
+                final added = await onAdd(text);
+                if (!added) {
+                  setDlg(() => error = "المنطقة موجودة بالفعل");
+                  return;
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text("إضافة"),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   // ==========================================
-  // TAB 4: PRICING & OPERATIONAL CONSTANTS
+  // TAB 4: PRICING
   // ==========================================
   Widget _buildPricingTab() {
-    final provider = context.watch<AssistantProvider>();
-    final settings = provider.driverSettings;
+    final settings = context.watch<AssistantProvider>().driverSettings;
+    final c = settings.currency;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        const Text(
+          "قيم البنزين والاستهلاك تُحفظ على المركبة النشطة تلقائياً.",
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
+        ),
+        const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "معدل استهلاك البنزين (لتر/100 كم)",
+          title: "استهلاك الوقود",
+          unit: "لتر/100كم",
           value: settings.fuelConsumptionLPer100Km,
           step: 0.5,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(fuelConsumptionLPer100Km: v)),
+          min: 1,
+          max: 40,
+          onChanged: (v) => _update((s) => s.copyWith(fuelConsumptionLPer100Km: v)),
         ),
         const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "سعر لتر الوقود الحالي (ج.م)",
+          title: "سعر لتر الوقود",
+          unit: c,
           value: settings.fuelPricePerLiter,
           step: 0.25,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(fuelPricePerLiter: v)),
+          min: 0.25,
+          max: 500,
+          onChanged: (v) => _update((s) => s.copyWith(fuelPricePerLiter: v)),
         ),
         const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "نسبة عمولة إن درايف (%)",
+          title: "عمولة إن درايف",
+          unit: "%",
           value: settings.inDriveCommissionPercent,
           step: 0.5,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(inDriveCommissionPercent: v)),
+          min: 0,
+          max: 50,
+          onChanged: (v) => _update((s) => s.copyWith(inDriveCommissionPercent: v)),
         ),
         const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "معدل استهلاك وصيانة السيارة (ج/كم)",
+          title: "الاستهلاك والصيانة",
+          unit: "$c/كم",
           value: settings.wearAndTearPerKm,
           step: 0.1,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(wearAndTearPerKm: v)),
+          min: 0,
+          max: 50,
+          onChanged: (v) => _update((s) => s.copyWith(wearAndTearPerKm: v)),
         ),
         const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "الحد الأدنى للربح المطلوب (ج/كم)",
+          title: "الحد الأدنى للربح المطلوب",
+          unit: "$c/كم",
           value: settings.minProfitPerKm,
           step: 0.5,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(minProfitPerKm: v)),
+          min: 0,
+          max: 100,
+          onChanged: (v) => _update((s) => s.copyWith(minProfitPerKm: v)),
         ),
         const SizedBox(height: 10),
         _buildNumberSettingTile(
-          title: "الهدف المالي اليومي المستهدف (EGP)",
+          title: "الهدف اليومي",
+          unit: c,
           value: settings.targetDailyEarnings,
           step: 100.0,
-          onChanged: (v) => provider.updateSettings(settings.copyWith(targetDailyEarnings: v)),
+          min: 0,
+          max: 100000,
+          onChanged: (v) => _update((s) => s.copyWith(targetDailyEarnings: v)),
         ),
       ],
     );
   }
 
   // ==========================================
-  // TAB 5: APP SETTINGS & IN-APP UPDATES
+  // TAB 5: APP & UPDATES
   // ==========================================
-  Widget _buildAppSettingsTab() {
-    final provider = context.watch<AssistantProvider>();
+  Future<void> _checkForUpdate() async {
+    setState(() => _isCheckingUpdate = true);
+    final result = await UpdateManager.checkForUpdate();
+    if (!mounted) return;
+    setState(() {
+      _isCheckingUpdate = false;
+      _updateInfo = result.info;
+    });
 
+    if (result.error != null) {
+      _snack(result.error!);
+    } else if (result.info!.isAvailable) {
+      _snack("يتوفر تحديث جديد: ${result.info!.versionName}");
+    } else {
+      _snack("أنت تستخدم أحدث إصدار (${result.info!.currentVersion})");
+    }
+  }
+
+  Future<void> _downloadAndInstall() async {
+    final info = _updateInfo!;
+    setState(() {
+      _isDownloadingApk = true;
+      _downloadProgress = 0.0;
+    });
+
+    final expectedSha = await UpdateManager.fetchExpectedSha256(info.sha256Url);
+    final file = await UpdateManager.downloadApk(
+      info.downloadUrl,
+      onProgress: (p) {
+        if (mounted) setState(() => _downloadProgress = p);
+      },
+    );
+
+    if (!mounted) return;
+    setState(() => _isDownloadingApk = false);
+
+    if (file == null) {
+      _snack("فشل تحميل التحديث. جرّب فتحه من المتصفح");
+      return;
+    }
+
+    switch (await NativeBridgeService.installApk(file.path, expectedSha256: expectedSha)) {
+      case InstallApkResult.started:
+        break;
+      case InstallApkResult.needsPermission:
+        _snack("اسمح بتثبيت التطبيقات من هذا المصدر، ثم اضغط \"تثبيت\" مرة أخرى");
+        break;
+      case InstallApkResult.checksumMismatch:
+        _snack("ملف التحديث تالف أو غير موثوق (البصمة غير مطابقة)، تم حذفه");
+        break;
+      case InstallApkResult.fileNotFound:
+      case InstallApkResult.error:
+        _snack("تعذر بدء التثبيت. جرّب فتح الرابط من المتصفح");
+        break;
+    }
+  }
+
+  Widget _buildAppSettingsTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Theme switch
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppColors.darkSurface,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.darkCardBorder),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.dark_mode, color: AppColors.neonGreen, size: 20),
-                  SizedBox(width: 8),
-                  Text("المظهر الداكن (Dark Cockpit)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                ],
-              ),
-              Switch(
-                value: provider.themeMode == "DARK",
-                activeColor: AppColors.neonGreen,
-                onChanged: (isDark) => provider.setThemeMode(isDark ? "DARK" : "LIGHT"),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // In-App Updates Card
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -533,23 +606,21 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                 children: [
                   Icon(Icons.system_update, color: AppColors.neonGreen, size: 20),
                   SizedBox(width: 8),
-                  Text(
-                    "تحديثات التطبيق (The Driver Updater)",
-                    style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                  Expanded(
+                    child: Text(
+                      "تحديثات التطبيق",
+                      style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 6),
-              const Text(
-                "الإصدار الحالي: ${UpdateManager.currentAppVersion} • كود أصلي Flutter",
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              Text(
+                "الإصدار المثبت: ${_installedVersion.isEmpty ? '...' : _installedVersion}",
+                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5),
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.neonGreen,
-                  foregroundColor: AppColors.darkBackground,
-                ),
                 icon: _isCheckingUpdate
                     ? const SizedBox(
                         width: 16,
@@ -557,31 +628,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                         child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.darkBackground),
                       )
                     : const Icon(Icons.cloud_download, size: 18),
-                label: const Text("فحص وجود تحديث جديد", style: TextStyle(fontWeight: FontWeight.bold)),
-                onPressed: (_isCheckingUpdate || _isDownloadingApk)
-                    ? null
-                    : () async {
-                        setState(() => _isCheckingUpdate = true);
-                        final info = await UpdateManager.checkForUpdate();
-                        setState(() {
-                          _isCheckingUpdate = false;
-                          _updateInfo = info;
-                        });
-
-                        if (!mounted) return;
-                        if (info != null && info.isAvailable) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text("يتوفر تحديث جديد: ${info.versionName}"),
-                              backgroundColor: AppColors.neonGreenDark,
-                            ),
-                          );
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("أنت تستخدم أحدث إصدار بالفعل!")),
-                          );
-                        }
-                      },
+                label: const Text("فحص وجود تحديث", style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed: (_isCheckingUpdate || _isDownloadingApk) ? null : _checkForUpdate,
               ),
               if (_updateInfo != null && _updateInfo!.isAvailable) ...[
                 const SizedBox(height: 12),
@@ -595,31 +643,28 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.new_releases, color: AppColors.neonGreen, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            "إصدار جديد متوفر: ${_updateInfo!.versionName}",
-                            style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
                       Text(
-                        _updateInfo!.releaseNotes,
-                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
+                        "إصدار جديد متوفر: ${_updateInfo!.versionName}",
+                        style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 13.5),
                       ),
+                      if (_updateInfo!.releaseNotes.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(_updateInfo!.releaseNotes, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                      ],
                       const SizedBox(height: 12),
-                      if (_isDownloadingApk) ...[
+                      if (_isDownloadingApk)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text("جاري تحميل ملف التحديث...", style: TextStyle(color: AppColors.textPrimary, fontSize: 12)),
-                                Text("${(_downloadProgress * 100).toInt()}%", style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 12)),
+                                const Expanded(
+                                  child: Text("جاري تحميل التحديث...", style: TextStyle(color: AppColors.textPrimary, fontSize: 12.5)),
+                                ),
+                                Text(
+                                  "${(_downloadProgress * 100).toInt()}%",
+                                  style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 12.5),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 6),
@@ -633,78 +678,30 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
                               ),
                             ),
                           ],
-                        ),
-                      ] else ...[
+                        )
+                      else
                         Row(
                           children: [
                             Expanded(
                               child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.neonGreen,
-                                  foregroundColor: AppColors.darkBackground,
-                                  padding: const EdgeInsets.symmetric(vertical: 10),
-                                ),
+                                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                                 icon: const Icon(Icons.install_mobile, size: 18),
-                                label: const Text("تثبيت التحديث مباشرة (APK)", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                onPressed: () async {
-                                  setState(() {
-                                    _isDownloadingApk = true;
-                                    _downloadProgress = 0.0;
-                                  });
-
-                                  final file = await UpdateManager.downloadApk(
-                                    _updateInfo!.downloadUrl,
-                                    onProgress: (p, rec, tot) {
-                                      if (mounted) setState(() => _downloadProgress = p);
-                                    },
-                                  );
-
-                                  setState(() => _isDownloadingApk = false);
-
-                                  if (!mounted) return;
-                                  if (file != null && await file.exists()) {
-                                    final success = await NativeBridgeService.installApk(file.path);
-                                    if (!success && mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text("يرجى السماح بتثبيت التطبيقات من مصادر غير معروفة لتثبيت التحديث")),
-                                      );
-                                    }
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text("فشل تحميل التحديث، يمكنك فتحه عبر المتصفح")),
-                                    );
-                                  }
-                                },
+                                label: const Text("تحميل وتثبيت", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                                onPressed: _downloadAndInstall,
                               ),
                             ),
                             const SizedBox(width: 8),
                             IconButton(
                               tooltip: "فتح رابط التحميل في المتصفح",
-                              style: IconButton.styleFrom(
-                                backgroundColor: AppColors.darkSurface,
-                                foregroundColor: AppColors.textPrimary,
-                              ),
-                              icon: const Icon(Icons.open_in_browser),
+                              icon: const Icon(Icons.open_in_browser, color: AppColors.textPrimary),
                               onPressed: () async {
                                 final uri = Uri.parse(_updateInfo!.downloadUrl);
-                                try {
-                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                } catch (_) {
-                                  try {
-                                    await launchUrl(uri, mode: LaunchMode.platformDefault);
-                                  } catch (e) {
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text("تعذر فتح الرابط: $e")),
-                                      );
-                                    }
-                                  }
-                                }
+                                final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                if (!ok) _snack("تعذر فتح الرابط");
                               },
                             ),
                           ],
                         ),
-                      ],
                     ],
                   ),
                 ),
@@ -718,53 +715,64 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
 
   Widget _buildNumberSettingTile({
     required String title,
+    required String unit,
     required double value,
     required double step,
-    required Function(double) onChanged,
+    required double min,
+    required double max,
+    required void Function(double) onChanged,
   }) {
+    double clampRound(double v) => (v.clamp(min, max) * 100).round() / 100.0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.darkSurface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.darkCardBorder),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 12.5),
+            child: Text(title, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+          ),
+          IconButton(
+            tooltip: "إنقاص",
+            icon: const Icon(Icons.remove, size: 18),
+            color: AppColors.textSecondary,
+            onPressed: value <= min ? null : () => onChanged(clampRound(value - step)),
+          ),
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () async {
+              final v = await promptNumber(context, title: title, initial: value, min: min, max: max, unit: unit);
+              if (v != null) onChanged(clampRound(v));
+            },
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 64, minHeight: 40),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.neonGreen.withOpacity(0.4)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    formatNumber(value),
+                    style: const TextStyle(color: AppColors.neonGreen, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  Text(unit, style: const TextStyle(color: AppColors.textSecondary, fontSize: 9.5)),
+                ],
+              ),
             ),
           ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.remove, size: 18),
-                color: AppColors.textSecondary,
-                onPressed: () {
-                  final next = (value - step).clamp(0.0, 50000.0);
-                  onChanged(next);
-                },
-              ),
-              Text(
-                value % 1 == 0 ? value.toInt().toString() : value.toStringAsFixed(1),
-                style: const TextStyle(
-                  color: AppColors.neonGreen,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.add, size: 18),
-                color: AppColors.neonGreen,
-                onPressed: () {
-                  final next = value + step;
-                  onChanged(next);
-                },
-              ),
-            ],
+          IconButton(
+            tooltip: "زيادة",
+            icon: const Icon(Icons.add, size: 18),
+            color: AppColors.neonGreen,
+            onPressed: value >= max ? null : () => onChanged(clampRound(value + step)),
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../engine/fare_calculator_engine.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
 
 class SmartBidCard extends StatelessWidget {
   final SmartBidOption bid;
@@ -50,9 +51,9 @@ class SmartBidCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
+                Expanded(
+                  child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -62,7 +63,7 @@ class SmartBidCard extends StatelessWidget {
                         border: Border.all(color: tagColor.withOpacity(0.4)),
                       ),
                       child: Text(
-                        bid.tag,
+                        const {"MINIMUM": "أدنى", "OPTIMAL": "مثالي", "HIGH MARGIN": "ربح عالٍ"}[bid.tag] ?? bid.tag,
                         style: TextStyle(
                           color: tagColor,
                           fontSize: 10,
@@ -71,16 +72,22 @@ class SmartBidCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      bid.title,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        bid.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 Text(
                   "${bid.suggestedFare.toInt()} $currency",
                   style: TextStyle(
@@ -93,7 +100,7 @@ class SmartBidCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              "صافي الربح المتوقع: +${bid.netProfit.toStringAsFixed(1)} $currency (${bid.profitPerKm.toStringAsFixed(1)} ج/كم)",
+              "صافي الربح المتوقع: ${signed(bid.netProfit)} $currency (${bid.profitPerKm.toStringAsFixed(1)} $currency/كم)",
               style: TextStyle(
                 color: bid.netProfit >= 0 ? AppColors.accentCyan : AppColors.lossRed,
                 fontSize: 12,

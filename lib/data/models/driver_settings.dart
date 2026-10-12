@@ -1,3 +1,5 @@
+import '../../engine/fare_calculator_engine.dart';
+
 class DriverSettings {
   final double fuelConsumptionLPer100Km;
   final double fuelPricePerLiter;
@@ -9,19 +11,18 @@ class DriverSettings {
   final List<String> favoriteZones;
   final List<String> blacklistedZones;
 
-  // Auto-Accept & Auto-Bidding Automation
+  // Auto-Accept Automation
   final bool autoAcceptEnabled;
   final double autoAcceptMinProfitPerKm;
   final double autoAcceptMinNetProfit;
   final double autoAcceptMaxPickupKm;
   final bool autoAcceptOnlyFavoriteZones;
-  final bool autoAcceptIgnoreBlacklist;
-  final String autoBidMode; // "RECOMMENDED" or "PASSENGER_FARE"
+  final bool autoAcceptRejectBlacklisted;
   final double autoAcceptDelaySeconds;
 
   const DriverSettings({
     this.fuelConsumptionLPer100Km = 8.5,
-    this.fuelPricePerLiter = 15.0,
+    this.fuelPricePerLiter = 15.25,
     this.inDriveCommissionPercent = 10.0,
     this.wearAndTearPerKm = 1.2,
     this.targetDailyEarnings = 1500.0,
@@ -34,22 +35,13 @@ class DriverSettings {
     this.autoAcceptMinNetProfit = 25.0,
     this.autoAcceptMaxPickupKm = 3.5,
     this.autoAcceptOnlyFavoriteZones = false,
-    this.autoAcceptIgnoreBlacklist = true,
-    this.autoBidMode = "RECOMMENDED",
+    this.autoAcceptRejectBlacklisted = true,
     this.autoAcceptDelaySeconds = 1.5,
   });
 
-  bool isFavorite(String? zone) {
-    if (zone == null || zone.trim().isEmpty) return false;
-    final clean = zone.trim().toLowerCase();
-    return favoriteZones.any((fav) => fav.trim().isNotEmpty && clean.contains(fav.trim().toLowerCase()));
-  }
+  bool isFavorite(String? zone) => FareCalculatorEngine.matchZone(zone, favoriteZones) != null;
 
-  bool isBlacklisted(String? zone) {
-    if (zone == null || zone.trim().isEmpty) return false;
-    final clean = zone.trim().toLowerCase();
-    return blacklistedZones.any((b) => b.trim().isNotEmpty && clean.contains(b.trim().toLowerCase()));
-  }
+  bool isBlacklisted(String? zone) => FareCalculatorEngine.matchZone(zone, blacklistedZones) != null;
 
   DriverSettings copyWith({
     double? fuelConsumptionLPer100Km,
@@ -66,8 +58,7 @@ class DriverSettings {
     double? autoAcceptMinNetProfit,
     double? autoAcceptMaxPickupKm,
     bool? autoAcceptOnlyFavoriteZones,
-    bool? autoAcceptIgnoreBlacklist,
-    String? autoBidMode,
+    bool? autoAcceptRejectBlacklisted,
     double? autoAcceptDelaySeconds,
   }) {
     return DriverSettings(
@@ -85,12 +76,12 @@ class DriverSettings {
       autoAcceptMinNetProfit: autoAcceptMinNetProfit ?? this.autoAcceptMinNetProfit,
       autoAcceptMaxPickupKm: autoAcceptMaxPickupKm ?? this.autoAcceptMaxPickupKm,
       autoAcceptOnlyFavoriteZones: autoAcceptOnlyFavoriteZones ?? this.autoAcceptOnlyFavoriteZones,
-      autoAcceptIgnoreBlacklist: autoAcceptIgnoreBlacklist ?? this.autoAcceptIgnoreBlacklist,
-      autoBidMode: autoBidMode ?? this.autoBidMode,
+      autoAcceptRejectBlacklisted: autoAcceptRejectBlacklisted ?? this.autoAcceptRejectBlacklisted,
       autoAcceptDelaySeconds: autoAcceptDelaySeconds ?? this.autoAcceptDelaySeconds,
     );
   }
 
+  /// Snapshot sent to the native HUD / accessibility layer (see PreferencesManager.applyFromFlutter).
   Map<String, dynamic> toJson() {
     return {
       'fuelConsumptionLPer100Km': fuelConsumptionLPer100Km,
@@ -107,33 +98,8 @@ class DriverSettings {
       'autoAcceptMinNetProfit': autoAcceptMinNetProfit,
       'autoAcceptMaxPickupKm': autoAcceptMaxPickupKm,
       'autoAcceptOnlyFavoriteZones': autoAcceptOnlyFavoriteZones,
-      'autoAcceptIgnoreBlacklist': autoAcceptIgnoreBlacklist,
-      'autoBidMode': autoBidMode,
+      'autoAcceptRejectBlacklisted': autoAcceptRejectBlacklisted,
       'autoAcceptDelaySeconds': autoAcceptDelaySeconds,
     };
-  }
-
-  factory DriverSettings.fromJson(Map<String, dynamic> json) {
-    return DriverSettings(
-      fuelConsumptionLPer100Km: (json['fuelConsumptionLPer100Km'] as num?)?.toDouble() ?? 8.5,
-      fuelPricePerLiter: (json['fuelPricePerLiter'] as num?)?.toDouble() ?? 15.0,
-      inDriveCommissionPercent: (json['inDriveCommissionPercent'] as num?)?.toDouble() ?? 10.0,
-      wearAndTearPerKm: (json['wearAndTearPerKm'] as num?)?.toDouble() ?? 1.2,
-      targetDailyEarnings: (json['targetDailyEarnings'] as num?)?.toDouble() ?? 1500.0,
-      minProfitPerKm: (json['minProfitPerKm'] as num?)?.toDouble() ?? 8.0,
-      currency: json['currency'] as String? ?? "EGP",
-      favoriteZones: (json['favoriteZones'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
-          const ["المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"],
-      blacklistedZones: (json['blacklistedZones'] as List<dynamic>?)?.map((e) => e.toString()).toList() ??
-          const ["شبرا الخيمة", "حلوان", "المرج"],
-      autoAcceptEnabled: json['autoAcceptEnabled'] as bool? ?? false,
-      autoAcceptMinProfitPerKm: (json['autoAcceptMinProfitPerKm'] as num?)?.toDouble() ?? 10.0,
-      autoAcceptMinNetProfit: (json['autoAcceptMinNetProfit'] as num?)?.toDouble() ?? 25.0,
-      autoAcceptMaxPickupKm: (json['autoAcceptMaxPickupKm'] as num?)?.toDouble() ?? 3.5,
-      autoAcceptOnlyFavoriteZones: json['autoAcceptOnlyFavoriteZones'] as bool? ?? false,
-      autoAcceptIgnoreBlacklist: json['autoAcceptIgnoreBlacklist'] as bool? ?? true,
-      autoBidMode: json['autoBidMode'] as String? ?? "RECOMMENDED",
-      autoAcceptDelaySeconds: (json['autoAcceptDelaySeconds'] as num?)?.toDouble() ?? 1.5,
-    );
   }
 }

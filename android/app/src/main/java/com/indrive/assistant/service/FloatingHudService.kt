@@ -15,6 +15,8 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -32,64 +34,92 @@ import com.indrive.assistant.engine.FareCalculatorEngine
 import com.indrive.assistant.engine.ProfitabilityLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 class FloatingHudService : Service() {
 
     private var windowManager: WindowManager? = null
-    private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    // Active Card Popups mapped by ride fingerprint
+    // Active Card Popups mapped by ride fingerprint (main thread only)
     private val activePopups = mutableMapOf<String, CardPopupViewHolder>()
 
     // Anti-Vibration Spam tracking
-    private var isVibrationMuted = false
     private var lastVibratedFingerprint = ""
     private var lastVibrateTimestamp = 0L
 
-    private data class CardPopupViewHolder(
-        val ride: ParsedRideData,
+    private class CardPopupViewHolder(
+        var ride: ParsedRideData,
         var analysis: FareAnalysisResult,
         val container: FrameLayout,
         val params: WindowManager.LayoutParams,
         var isExpanded: Boolean = false,
-        var pulseAnimator: ValueAnimator? = null
+        var pulseAnimator: ValueAnimator? = null,
+        /** Driver's manual drag, kept across re-scans so the badge doesn't snap back. */
+        var dragOffsetX: Int = 0,
+        var dragOffsetY: Int = 0,
+        /** Content signature of the last render; views are only rebuilt when it changes. */
+        var renderKey: String = ""
     )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        activeInstance = this
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         startForeground(NOTIFICATION_ID, createNotification())
+        activeInstance = this
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "Overlay permission missing; stopping HUD service")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        return START_STICKY
     }
 
     private fun createNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+        val openIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE
         )
+        val stopIntent = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, FloatingHudService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE
+        )
 
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
             .setContentTitle("The Driver")
-            .setContentText("المحلل التلقائي للتسعير العادل والمناطق المفضلة يعمل بنشاط")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentIntent(pendingIntent)
+            .setContentText("المساعد العائم يعمل ويحلل عروض إن درايف")
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentIntent(openIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent)
             .setOngoing(true)
             .build()
     }
 
     // =========================================================================
-    // MULTI-POPUP HINTS SYNC LOGIC
+    // MULTI-POPUP SYNC
     // =========================================================================
     private fun handleCardsSync(cards: List<ParsedRideData>) {
-        serviceScope.launch(Dispatchers.Main) {
+        serviceScope.launch {
             val wm = windowManager ?: return@launch
 
-            // If 0 cards visible on screen, remove all popups immediately
             if (cards.isEmpty()) {
                 clearAllCardPopups()
                 return@launch
@@ -98,42 +128,27 @@ class FloatingHudService : Service() {
             val currentFingerprints = cards.map { it.fingerprint }.toSet()
 
             // 1. Remove popups for cards that disappeared from screen
-            val toRemove = activePopups.keys.filter { it !in currentFingerprints }
-            for (fp in toRemove) {
-                activePopups[fp]?.let { holder ->
-                    holder.pulseAnimator?.cancel()
-                    try {
-                        wm.removeView(holder.container)
-                    } catch (_: Exception) {}
-                }
-                activePopups.remove(fp)
+            activePopups.keys.filter { it !in currentFingerprints }.forEach { fp ->
+                activePopups.remove(fp)?.let { removePopupWindow(wm, it) }
             }
-
-            val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
 
             // 2. Add or update popups for each currently visible card
             for (card in cards) {
-                val analysis = FareCalculatorEngine.analyze(
-                    pickupDistanceKm = card.pickupDistanceKm,
-                    tripDistanceKm = card.tripDistanceKm,
-                    estimatedMinutes = ((card.totalDistanceKm) * 2.3).toInt(),
-                    offeredFare = card.fare,
-                    settings = settings,
-                    pickupAddress = card.pickupAddress,
-                    dropoffAddress = card.dropoffAddress
-                )
-
+                val analysis = analyze(card)
                 val existing = activePopups[card.fingerprint]
                 if (existing != null) {
+                    existing.ride = card
                     existing.analysis = analysis
-                    val targetY = calculatePopupY(card)
-                    if (existing.params.y != targetY && !existing.isExpanded) {
-                        existing.params.y = targetY
-                        try {
-                            wm.updateViewLayout(existing.container, existing.params)
-                        } catch (_: Exception) {}
+                    if (!existing.isExpanded) {
+                        val targetX = BADGE_MARGIN_X + existing.dragOffsetX
+                        val targetY = calculatePopupY(card) + existing.dragOffsetY
+                        if (existing.params.x != targetX || existing.params.y != targetY) {
+                            existing.params.x = targetX
+                            existing.params.y = targetY
+                            safeUpdateLayout(existing)
+                        }
                     }
-                    renderPopup(existing)
+                    renderPopupIfChanged(existing)
                 } else {
                     createAndAttachPopup(card, analysis)
                     vibrateSingleShotOnce(card)
@@ -142,207 +157,244 @@ class FloatingHudService : Service() {
         }
     }
 
+    private fun analyze(card: ParsedRideData): FareAnalysisResult {
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        return FareCalculatorEngine.analyze(
+            pickupDistanceKm = card.pickupDistanceKm,
+            tripDistanceKm = card.tripDistanceKm,
+            estimatedMinutes = FareCalculatorEngine.estimateMinutes(card.totalDistanceKm),
+            offeredFare = card.fare,
+            settings = settings,
+            pickupAddress = card.pickupAddress,
+            dropoffAddress = card.dropoffAddress
+        )
+    }
+
+    /** Screen-space Y of the card's top edge (windows use FLAG_LAYOUT_IN_SCREEN). */
     private fun calculatePopupY(card: ParsedRideData): Int {
-        val screenBounds = card.screenBounds
-        return if (screenBounds != null) {
-            (screenBounds.top + 6).coerceAtLeast(30)
+        return (card.screenBounds?.top?.plus(6) ?: 320).coerceAtLeast(30)
+    }
+
+    private fun baseLayoutParams(): WindowManager.LayoutParams {
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
-            320
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        return WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
         }
     }
 
     private fun createAndAttachPopup(card: ParsedRideData, analysis: FareAnalysisResult) {
         val wm = windowManager ?: return
 
-        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
-
-        val targetY = calculatePopupY(card)
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            layoutFlag,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 20
-            y = targetY
+        val params = baseLayoutParams().apply {
+            x = BADGE_MARGIN_X
+            y = calculatePopupY(card)
         }
 
         val container = FrameLayout(this)
-        val holder = CardPopupViewHolder(
-            ride = card,
-            analysis = analysis,
-            container = container,
-            params = params,
-            isExpanded = false
-        )
+        val holder = CardPopupViewHolder(ride = card, analysis = analysis, container = container, params = params)
 
-        renderPopup(holder)
+        // Touches outside an expanded card collapse it, while still reaching inDrive underneath.
+        container.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_OUTSIDE && holder.isExpanded) {
+                collapsePopup(holder)
+            }
+            false
+        }
+
+        renderPopupIfChanged(holder)
 
         try {
             wm.addView(container, params)
             activePopups[card.fingerprint] = holder
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not attach HUD popup (overlay permission?)", e)
+        }
     }
 
-    fun collapseAllPopups() {
-        val wm = windowManager ?: return
-        for (holder in activePopups.values) {
-            if (holder.isExpanded) {
-                holder.isExpanded = false
-                holder.params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                holder.params.height = WindowManager.LayoutParams.WRAP_CONTENT
-                holder.params.x = 20
-                holder.params.y = calculatePopupY(holder.ride)
-                holder.params.gravity = Gravity.TOP or Gravity.START
-                renderPopup(holder)
-                try {
-                    wm.updateViewLayout(holder.container, holder.params)
-                } catch (_: Exception) {}
-            }
+    private fun removePopupWindow(wm: WindowManager, holder: CardPopupViewHolder) {
+        holder.pulseAnimator?.cancel()
+        try {
+            wm.removeView(holder.container)
+        } catch (_: IllegalArgumentException) {
+            // Already detached.
         }
+    }
+
+    private fun safeUpdateLayout(holder: CardPopupViewHolder) {
+        try {
+            windowManager?.updateViewLayout(holder.container, holder.params)
+        } catch (_: IllegalArgumentException) {
+            // The popup was removed (card vanished) between the tap and this update.
+        }
+    }
+
+    private fun collapsePopup(holder: CardPopupViewHolder) {
+        if (!holder.isExpanded) return
+        holder.isExpanded = false
+        holder.params.width = WindowManager.LayoutParams.WRAP_CONTENT
+        holder.params.x = BADGE_MARGIN_X + holder.dragOffsetX
+        holder.params.y = calculatePopupY(holder.ride) + holder.dragOffsetY
+        renderPopupIfChanged(holder)
+        safeUpdateLayout(holder)
+    }
+
+    private fun collapseAllPopups() {
+        activePopups.values.forEach { collapsePopup(it) }
     }
 
     private fun togglePopupExpanded(holder: CardPopupViewHolder) {
-        val wm = windowManager ?: return
         if (holder.isExpanded) {
-            collapseAllPopups()
-        } else {
-            // Collapse any other open popups first so only ONE is open!
-            collapseAllPopups()
-
-            // Expand this one and cover screen to intercept outside clicks
-            holder.isExpanded = true
-            holder.params.width = WindowManager.LayoutParams.MATCH_PARENT
-            holder.params.height = WindowManager.LayoutParams.MATCH_PARENT
-            holder.params.x = 0
-            holder.params.y = 0
-            holder.params.gravity = Gravity.TOP or Gravity.START
-            renderPopup(holder)
-            try {
-                wm.updateViewLayout(holder.container, holder.params)
-            } catch (_: Exception) {}
+            collapsePopup(holder)
+            return
         }
+        // Only one card is expanded at a time.
+        collapseAllPopups()
+
+        val density = resources.displayMetrics.density
+        val screenWidth = resources.displayMetrics.widthPixels
+        val screenHeight = resources.displayMetrics.heightPixels
+        val cardWidth = (screenWidth * 0.92f).toInt()
+            .coerceAtMost((380 * density).toInt())
+            .coerceAtMost(screenWidth - (16 * density).toInt())
+
+        holder.isExpanded = true
+        holder.params.width = cardWidth
+        holder.params.x = (screenWidth - cardWidth) / 2
+        holder.params.y = calculatePopupY(holder.ride)
+            .coerceIn((50 * density).toInt(), (screenHeight - (430 * density).toInt()).coerceAtLeast((50 * density).toInt()))
+        renderPopupIfChanged(holder)
+        safeUpdateLayout(holder)
     }
 
     // =========================================================================
-    // DYNAMIC POPUP RENDERING (COMPACT VS EXPANDED)
+    // RENDERING
     // =========================================================================
+
+    private data class BadgeTheme(val colorHex: String, val label: String)
+
+    /** Profitability decides the colour; zones only add a marker and a label. */
+    private fun themeFor(ride: ParsedRideData, analysis: FareAnalysisResult): BadgeTheme {
+        if (ride.distanceEstimated) return BadgeTheme(COLOR_UNKNOWN, "المسافة غير مؤكدة - راجع الطلب")
+        val zoneSuffix = when {
+            analysis.matchedBlacklistZone != null -> " • منطقة محظورة (${analysis.matchedBlacklistZone})"
+            analysis.matchedFavoriteZone != null -> " • ★ منطقة مفضلة (${analysis.matchedFavoriteZone})"
+            else -> ""
+        }
+        return when (analysis.profitabilityLevel) {
+            ProfitabilityLevel.EXCELLENT_PROFIT -> BadgeTheme(COLOR_EXCELLENT, "ربح ممتاز$zoneSuffix")
+            ProfitabilityLevel.GOOD_PROFIT -> BadgeTheme(COLOR_GOOD, "عرض رابح$zoneSuffix")
+            ProfitabilityLevel.POOR_MARGIN -> BadgeTheme(COLOR_POOR, "هامش ضعيف - اقترح زيادة$zoneSuffix")
+            ProfitabilityLevel.LOSS_DANGER -> BadgeTheme(COLOR_LOSS, "${analysis.statusMessage}$zoneSuffix")
+        }
+    }
+
+    private fun renderPopupIfChanged(holder: CardPopupViewHolder) {
+        val prefs = InDriveAssistantApp.instance.repository.getPreferencesManager()
+        val a = holder.analysis
+        val r = holder.ride
+        val key = listOf(
+            holder.isExpanded, r.distanceEstimated, r.fare.toInt(), a.netProfit.roundToInt(),
+            a.recommendedFare.toInt(), a.profitabilityLevel, a.matchedFavoriteZone, a.matchedBlacklistZone,
+            r.pickupAddress, r.dropoffAddress, String.format(Locale.US, "%.1f/%.1f", r.pickupDistanceKm, r.tripDistanceKm),
+            prefs.overlayStyleFlow.value, prefs.overlaySizeFlow.value,
+            prefs.isFavoriteZone(r.pickupAddress), prefs.isBlacklistedZone(r.pickupAddress),
+            prefs.isFavoriteZone(r.dropoffAddress), prefs.isBlacklistedZone(r.dropoffAddress)
+        ).joinToString("|")
+        if (key == holder.renderKey) return
+        holder.renderKey = key
+        renderPopup(holder)
+    }
+
     private fun renderPopup(holder: CardPopupViewHolder) {
-        val container = holder.container
-        container.removeAllViews()
+        holder.container.removeAllViews()
         holder.pulseAnimator?.cancel()
         holder.pulseAnimator = null
 
-        val analysis = holder.analysis
-        val card = holder.ride
-
-        // Determine Theme Color and Label based on Profitability & Zones
-        val (themeColorHex, tagLabel) = when {
-            analysis.isBlacklistedZone && analysis.profitabilityLevel != ProfitabilityLevel.GOOD_PROFIT -> {
-                Pair("#DC2626", "منطقة سوداء (${analysis.matchedBlacklistZone ?: ""})")
-            }
-            analysis.isBlacklistedZone && analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT -> {
-                Pair("#D97706", "مقبول فقط لارتفاع السعر (${analysis.matchedBlacklistZone ?: ""})")
-            }
-            analysis.isFavoriteZone -> {
-                Pair("#F59E0B", "منطقة مفضلة (${analysis.matchedFavoriteZone ?: ""})")
-            }
-            analysis.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT -> {
-                Pair("#10B981", "قبول فوري ومجزٍ")
-            }
-            analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT -> {
-                Pair("#00EA80", "عرض رابح ومجدٍ")
-            }
-            analysis.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> {
-                Pair("#EAB308", "هامش ضعيف - اقترح زيادة")
-            }
-            else -> {
-                Pair("#EF4444", "غير مقبول - مخاطرة خسارة")
-            }
-        }
-
+        val theme = themeFor(holder.ride, holder.analysis)
         if (holder.isExpanded) {
-            renderExpandedDetailsCard(holder, themeColorHex, tagLabel)
+            renderExpandedDetailsCard(holder, theme)
         } else {
-            renderCompactBadge(holder, themeColorHex)
+            renderCompactBadge(holder, theme)
         }
     }
 
-    // =========================================================================
-    // 1. ULTRA-COMPACT BADGE BUILDER (6 Distinct OEM Styles)
-    // =========================================================================
-    private fun renderCompactBadge(holder: CardPopupViewHolder, themeColorHex: String) {
+    /** Compact badge text: the ride's net profit, or "?" when the distance is a guess. */
+    private fun badgeValue(holder: CardPopupViewHolder): String {
+        if (holder.ride.distanceEstimated) return "؟"
+        val p = holder.analysis.netProfit.roundToInt()
+        return if (p >= 0) "+$p" else "−${abs(p)}"
+    }
+
+    private fun renderCompactBadge(holder: CardPopupViewHolder, theme: BadgeTheme) {
         val density = resources.displayMetrics.density
         val prefs = InDriveAssistantApp.instance.repository.getPreferencesManager()
         val style = prefs.overlayStyleFlow.value.uppercase()
-        val sizePref = prefs.overlaySizeFlow.value.uppercase()
-
-        val sizeScale = when (sizePref) {
+        val sizeScale = when (prefs.overlaySizeFlow.value.uppercase()) {
             "SMALL" -> 0.85f
             "LARGE" -> 1.22f
             else -> 1.0f
         }
 
-        val fairPrice = holder.analysis.recommendedFare.toInt()
-        val isFav = holder.analysis.isFavoriteZone
+        val value = badgeValue(holder)
+        val isFav = holder.analysis.isFavoriteZone && !holder.ride.distanceEstimated
 
         val badgeView = when (style) {
-            "SLIM_PILL" -> buildSlimPill(fairPrice, themeColorHex, sizeScale, density)
-            "SPEEDO_GAUGE" -> buildSpeedoGauge(fairPrice, themeColorHex, sizeScale, density)
-            "MINI_TAG" -> buildMiniTag(fairPrice, themeColorHex, sizeScale, density)
-            "CORNER_RIBBON" -> buildCornerRibbon(fairPrice, themeColorHex, sizeScale, density)
-            "GLOW_DOT" -> buildGlowDot(fairPrice, themeColorHex, sizeScale, density)
-            else -> buildCompactCircle(fairPrice, themeColorHex, sizeScale, density)
+            "SLIM_PILL" -> buildSlimPill(value, theme.colorHex, sizeScale, density)
+            "SPEEDO_GAUGE" -> buildSpeedoGauge(value, theme.colorHex, sizeScale, density)
+            "MINI_TAG" -> buildMiniTag(value, theme.colorHex, sizeScale, density)
+            "CORNER_RIBBON" -> buildCornerRibbon(value, theme.colorHex, sizeScale, density)
+            "GLOW_DOT" -> buildGlowDot(value, theme.colorHex, sizeScale, density)
+            else -> buildCompactCircle(value, theme.colorHex, sizeScale, density)
         }
+        badgeView.contentDescription = "${theme.label}: صافي الربح $value جنيه"
 
-        // Tap to toggle expanded details popover
-        badgeView.setOnClickListener {
-            togglePopupExpanded(holder)
-        }
-
-        // Dragging gesture support for fine-tuning position
+        badgeView.setOnClickListener { togglePopupExpanded(holder) }
         setupDragTouchListener(badgeView, holder)
 
-        // Pulsating Glow Animation for Favorite Zones (Solves gold vs yellow confusion)
-        if (isFav) {
-            startPulsatingGlowAnimation(badgeView, holder, themeColorHex)
-        }
+        if (isFav) startPulsatingGlowAnimation(badgeView, holder, COLOR_FAVORITE)
 
         holder.container.addView(badgeView)
 
-        // Subtle (!) micro-badge to alert driver that zone management is available on tap
-        if (holder.ride.pickupAddress.isNotBlank() || holder.ride.dropoffAddress.isNotBlank()) {
-            val alertBadge = TextView(this).apply {
-                text = "!"
+        // Zone marker: gold star for favourites, red bar for blacklisted zones.
+        val marker = when {
+            holder.analysis.isBlacklistedZone -> "⛔" to "#FF3355"
+            isFav -> "★" to COLOR_FAVORITE
+            else -> null
+        }
+        if (marker != null) {
+            holder.container.addView(TextView(this).apply {
+                text = marker.first
                 setTextColor(Color.parseColor("#070B14"))
-                textSize = 8.5f
+                textSize = 9f
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
-                val badgeDiameter = (14 * density).toInt()
-                layoutParams = FrameLayout.LayoutParams(badgeDiameter, badgeDiameter).apply {
-                    gravity = Gravity.TOP or Gravity.START
-                    setMargins(0, 0, 0, 0)
-                }
+                val d = (16 * density).toInt()
+                layoutParams = FrameLayout.LayoutParams(d, d).apply { gravity = Gravity.TOP or Gravity.START }
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL
-                    setColor(if (isFav) Color.parseColor("#FFB800") else Color.parseColor("#10B981"))
+                    setColor(Color.parseColor(marker.second))
                     setStroke((1 * density).toInt(), Color.parseColor("#070B14"))
                 }
-            }
-            holder.container.addView(alertBadge)
+            })
         }
     }
 
-    // Style 1: COMPACT_CIRCLE (قرص دائري مصغر)
-    private fun buildCompactCircle(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val diameter = (50 * scale * density).toInt()
+    // Style 1: COMPACT_CIRCLE
+    private fun buildCompactCircle(value: String, colorHex: String, scale: Float, density: Float): View {
+        val diameter = (52 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -354,24 +406,21 @@ class FloatingHudService : Service() {
             }
             elevation = 6 * density
         }
-
-        val priceTv = TextView(this).apply {
-            text = "$price ج"
+        layout.addView(TextView(this).apply {
+            text = value
             setTextColor(Color.WHITE)
-            textSize = 12f * scale
+            textSize = 13f * scale
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setSingleLine(true)
             includeFontPadding = false
-        }
-
-        layout.addView(priceTv)
+        })
         return layout
     }
 
-    // Style 2: SLIM_PILL (كبسولة أفقية رفيعة)
-    private fun buildSlimPill(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val h = (28 * scale * density).toInt()
+    // Style 2: SLIM_PILL
+    private fun buildSlimPill(value: String, colorHex: String, scale: Float, density: Float): View {
+        val h = (30 * scale * density).toInt()
         val padH = (10 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -386,35 +435,28 @@ class FloatingHudService : Service() {
             }
             elevation = 6 * density
         }
-
-        val dot = View(this).apply {
+        layout.addView(View(this).apply {
             val dotSize = (8 * density).toInt()
-            layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply {
-                setMargins(0, 0, (6 * density).toInt(), 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply { marginEnd = (6 * density).toInt() }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor(colorHex))
             }
-        }
-
-        val textTv = TextView(this).apply {
-            text = "$price ج.م"
+        })
+        layout.addView(TextView(this).apply {
+            text = "$value ج"
             setTextColor(Color.WHITE)
-            textSize = 11.5f * scale
+            textSize = 12.5f * scale
             typeface = Typeface.DEFAULT_BOLD
             setSingleLine(true)
-        }
-
-        layout.addView(dot)
-        layout.addView(textTv)
+        })
         return layout
     }
 
-    // Style 3: SPEEDO_GAUGE (عداد سرعة رقمي)
-    private fun buildSpeedoGauge(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val w = (54 * scale * density).toInt()
-        val h = (44 * scale * density).toInt()
+    // Style 3: SPEEDO_GAUGE
+    private fun buildSpeedoGauge(value: String, colorHex: String, scale: Float, density: Float): View {
+        val w = (58 * scale * density).toInt()
+        val h = (46 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -427,42 +469,33 @@ class FloatingHudService : Service() {
             }
             elevation = 6 * density
         }
-
-        val topBar = View(this).apply {
+        layout.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt())
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor(colorHex))
-            }
-        }
-
-        val priceTv = TextView(this).apply {
-            text = "$price ج"
+            background = GradientDrawable().apply { setColor(Color.parseColor(colorHex)) }
+        })
+        layout.addView(TextView(this).apply {
+            text = value
             setTextColor(Color.WHITE)
-            textSize = 12f * scale
+            textSize = 13f * scale
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setSingleLine(true)
             setPadding(0, (2 * density).toInt(), 0, 0)
-        }
-
-        val subTv = TextView(this).apply {
-            text = "عادل"
+        })
+        layout.addView(TextView(this).apply {
+            text = "صافي"
             setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 8.5f * scale
+            textSize = 9f * scale
             gravity = Gravity.CENTER
             setSingleLine(true)
-        }
-
-        layout.addView(topBar)
-        layout.addView(priceTv)
-        layout.addView(subTv)
+        })
         return layout
     }
 
-    // Style 4: MINI_TAG (شارة تسعير مدمجة)
-    private fun buildMiniTag(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val h = (28 * scale * density).toInt()
-        val padH = (8 * density).toInt()
+    // Style 4: MINI_TAG
+    private fun buildMiniTag(value: String, colorHex: String, scale: Float, density: Float): View {
+        val h = (30 * scale * density).toInt()
+        val padH = (9 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -475,22 +508,19 @@ class FloatingHudService : Service() {
             }
             elevation = 6 * density
         }
-
-        val textTv = TextView(this).apply {
-            text = "$price ج"
+        layout.addView(TextView(this).apply {
+            text = "$value ج"
             setTextColor(Color.parseColor("#0F172A"))
-            textSize = 12f * scale
+            textSize = 13f * scale
             typeface = Typeface.DEFAULT_BOLD
-        }
-
-        layout.addView(textTv)
+        })
         return layout
     }
 
-    // Style 5: CORNER_RIBBON (شريط زاوية أنيق)
-    private fun buildCornerRibbon(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val h = (26 * scale * density).toInt()
-        val padH = (9 * density).toInt()
+    // Style 5: CORNER_RIBBON
+    private fun buildCornerRibbon(value: String, colorHex: String, scale: Float, density: Float): View {
+        val h = (28 * scale * density).toInt()
+        val padH = (10 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -504,21 +534,18 @@ class FloatingHudService : Service() {
             }
             elevation = 6 * density
         }
-
-        val textTv = TextView(this).apply {
-            text = "تسعير $price"
+        layout.addView(TextView(this).apply {
+            text = "صافي $value"
             setTextColor(Color.parseColor(colorHex))
-            textSize = 11f * scale
+            textSize = 12f * scale
             typeface = Typeface.DEFAULT_BOLD
-        }
-
-        layout.addView(textTv)
+        })
         return layout
     }
 
-    // Style 6: GLOW_DOT (نقطة إشعاع ذكية)
-    private fun buildGlowDot(price: Int, colorHex: String, scale: Float, density: Float): View {
-        val diameter = (46 * scale * density).toInt()
+    // Style 6: GLOW_DOT
+    private fun buildGlowDot(value: String, colorHex: String, scale: Float, density: Float): View {
+        val diameter = (48 * scale * density).toInt()
         val layout = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(diameter, diameter)
             background = GradientDrawable().apply {
@@ -528,263 +555,167 @@ class FloatingHudService : Service() {
             }
             elevation = 8 * density
         }
-
-        val priceTv = TextView(this).apply {
+        layout.addView(TextView(this).apply {
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-            text = "$price"
+            text = value
             setTextColor(Color.WHITE)
-            textSize = 14f * scale
+            textSize = 13.5f * scale
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }
-
-        layout.addView(priceTv)
+        })
         return layout
     }
 
     // =========================================================================
-    // 2. EXPANDED DETAILS POPOVER WITH 1-CLICK ZONE MANAGEMENT
+    // EXPANDED DETAILS CARD WITH 1-CLICK ZONE MANAGEMENT
     // =========================================================================
-    private fun renderExpandedDetailsCard(
-        holder: CardPopupViewHolder,
-        themeColorHex: String,
-        tagLabel: String
-    ) {
+    private fun renderExpandedDetailsCard(holder: CardPopupViewHolder, theme: BadgeTheme) {
         val density = resources.displayMetrics.density
-        val displayMetrics = resources.displayMetrics
-        val screenWidth = displayMetrics.widthPixels
-        val screenHeight = displayMetrics.heightPixels
         val card = holder.ride
         val analysis = holder.analysis
-
-        // 1. Full-screen transparent backdrop that captures clicks outside the card to dismiss!
-        val backdrop = FrameLayout(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.parseColor("#33000000")) // Gentle dark scrim
-            setOnClickListener {
-                collapseAllPopups()
-            }
-        }
-
-        // 2. The Card itself
-        val cardWidth = (screenWidth * 0.92f).toInt().coerceAtMost((380 * density).toInt()).coerceAtLeast((310 * density).toInt())
-        val targetY = (calculatePopupY(card)).coerceIn((50 * density).toInt(), screenHeight - (430 * density).toInt())
+        fun dp(v: Float) = (v * density).toInt()
 
         val cardRoot = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-            layoutParams = FrameLayout.LayoutParams(cardWidth, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = targetY
-            }
+            setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 18 * density
-                setColor(Color.parseColor("#0B0F19")) // Deep Obsidian
-                setStroke((2f * density).toInt(), Color.parseColor(themeColorHex))
+                setColor(Color.parseColor("#0B0F19"))
+                setStroke(dp(2f), Color.parseColor(theme.colorHex))
             }
             elevation = 16 * density
-            // Prevent clicks inside card from bubbling up to backdrop
-            setOnClickListener { /* Consume click */ }
         }
 
-        // ROW 1: Status Badge & Close Button
+        // ROW 1: Status label & close button
         val topRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
         }
-
-        val tagTv = TextView(this).apply {
-            text = tagLabel
-            setTextColor(Color.WHITE)
-            textSize = 11f
+        topRow.addView(TextView(this).apply {
+            text = theme.label
+            setTextColor(if (theme.colorHex == COLOR_POOR || theme.colorHex == COLOR_GOOD) Color.parseColor("#070B14") else Color.WHITE)
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
+            setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 8 * density
-                setColor(Color.parseColor(themeColorHex))
+                setColor(Color.parseColor(theme.colorHex))
             }
-            setSingleLine(true)
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val closeBtn = TextView(this).apply {
+        })
+        topRow.addView(TextView(this).apply {
             text = "✕ تصغير"
-            setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 12f
+            setTextColor(Color.parseColor("#CBD5E1"))
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding((10 * density).toInt(), (4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
-            setOnClickListener {
-                collapseAllPopups()
-            }
-        }
+            gravity = Gravity.CENTER
+            minHeight = dp(44f)
+            minWidth = dp(64f)
+            setPadding(dp(12f), dp(8f), dp(4f), dp(8f))
+            setOnClickListener { collapsePopup(holder) }
+        })
 
-        topRow.addView(tagTv)
-        topRow.addView(closeBtn)
-
-        // ROW 2: Side-by-side Fare Comparison Grid
+        // ROW 2: Side-by-side fare comparison
         val fareRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, (10 * density).toInt(), 0, 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(10f) }
         }
+        fareRow.addView(metricBox("عرض الراكب", "${card.fare.toInt()} ج.م", "#FFFFFF", density, 0))
+        fareRow.addView(metricBox("المزايدة المقترحة", "${analysis.recommendedFare.toInt()} ج.م", "#10B981", density, dp(8f)))
 
-        val fairPriceVal = analysis.recommendedFare.toInt()
-        val offeredVal = card.fare.toInt()
+        // ROW 3: Net profit
+        val netProfitVal = String.format(Locale.US, "%.1f", analysis.netProfit)
+        val profitPerKmVal = String.format(Locale.US, "%.1f", analysis.profitPerKm)
+        val profitRow = infoRow(
+            "صافي الربح: $netProfitVal ج.م  ($profitPerKmVal ج/كم)",
+            if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444",
+            density,
+            bold = true
+        )
 
-        // Box 1: السعر العادل
-        val fairBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 10 * density
-                setColor(Color.parseColor("#131B2E"))
-                setStroke((1 * density).toInt(), Color.parseColor("#23324E"))
-            }
+        // ROW 4: Distances
+        val distText = if (card.distanceEstimated) {
+            "المسافة: لم تُقرأ بدقة (الأرقام تقديرية) - راجع الطلب في إن درايف"
+        } else {
+            String.format(
+                Locale.US, "المسافة: %.1f كم  (%.1f وصول + %.1f مشوار)",
+                card.totalDistanceKm, card.pickupDistanceKm, card.tripDistanceKm
+            )
         }
-        val fairLabel = TextView(this).apply {
-            text = "السعر العادل"
-            setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setSingleLine(true)
-        }
-        val fairValue = TextView(this).apply {
-            text = "$fairPriceVal ج.م"
-            setTextColor(Color.parseColor("#10B981"))
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setSingleLine(true)
-        }
-        fairBox.addView(fairLabel)
-        fairBox.addView(fairValue)
-
-        // Box 2: عرض الراكب
-        val offerBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = (8 * density).toInt()
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 10 * density
-                setColor(Color.parseColor("#131B2E"))
-                setStroke((1 * density).toInt(), Color.parseColor("#23324E"))
-            }
-        }
-        val offerLabel = TextView(this).apply {
-            text = "عرض الراكب"
-            setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setSingleLine(true)
-        }
-        val offerValue = TextView(this).apply {
-            text = "$offeredVal ج.م"
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setSingleLine(true)
-        }
-        offerBox.addView(offerLabel)
-        offerBox.addView(offerValue)
-
-        fareRow.addView(fairBox)
-        fareRow.addView(offerBox)
-
-        // ROW 3: Net Profit Metric Box
-        val netProfitVal = String.format(java.util.Locale.US, "%.1f", analysis.netProfit)
-        val profitPerKmVal = String.format(java.util.Locale.US, "%.1f", analysis.profitPerKm)
-        val profitContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, (6 * density).toInt(), 0, 0)
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8 * density
-                setColor(Color.parseColor("#131B2E"))
-            }
-        }
-        val profitTv = TextView(this).apply {
-            text = "صافي الربح: $netProfitVal ج.م  ($profitPerKmVal ج/كم)"
-            setTextColor(Color.parseColor(if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444"))
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setSingleLine(true)
-        }
-        profitContainer.addView(profitTv)
-
-        // ROW 4: Distance Breakdown Metric Box
-        val pickupFmt = String.format(java.util.Locale.US, "%.1f", card.pickupDistanceKm)
-        val tripFmt = String.format(java.util.Locale.US, "%.1f", card.tripDistanceKm)
-        val totalFmt = String.format(java.util.Locale.US, "%.1f", card.totalDistanceKm)
-        val distContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, (6 * density).toInt(), 0, 0)
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8 * density
-                setColor(Color.parseColor("#131B2E"))
-            }
-        }
-        val distTv = TextView(this).apply {
-            text = "المسافة: $totalFmt كم  ($pickupFmt وصول + $tripFmt مشوار)"
-            setTextColor(Color.parseColor("#F8FAFC"))
-            textSize = 11.5f
-            typeface = Typeface.DEFAULT
-            setSingleLine(true)
-        }
-        distContainer.addView(distTv)
+        val distRow = infoRow(distText, if (card.distanceEstimated) "#FBBF24" else "#F8FAFC", density, bold = false)
 
         cardRoot.addView(topRow)
         cardRoot.addView(fareRow)
-        cardRoot.addView(profitContainer)
-        cardRoot.addView(distContainer)
+        cardRoot.addView(profitRow)
+        cardRoot.addView(distRow)
 
-        // ROW 5 & 6: 1-CLICK ZONE MANAGEMENT (Pick-up & Drop-off addresses)
         if (card.pickupAddress.isNotBlank()) {
             cardRoot.addView(buildZoneAddressActionRow(card.pickupAddress, "التحرك", holder, density))
         }
-
         if (card.dropoffAddress.isNotBlank()) {
             cardRoot.addView(buildZoneAddressActionRow(card.dropoffAddress, "الوصول", holder, density))
         }
 
-        backdrop.addView(cardRoot)
-        holder.container.addView(backdrop)
+        holder.container.addView(cardRoot)
+    }
+
+    private fun metricBox(label: String, value: String, valueColor: String, density: Float, marginStart: Int): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (6 * density).toInt(), (8 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { this.marginStart = marginStart }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#131B2E"))
+                setStroke((1 * density).toInt(), Color.parseColor("#23324E"))
+            }
+        }
+        box.addView(TextView(this).apply {
+            text = label
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        })
+        box.addView(TextView(this).apply {
+            text = value
+            setTextColor(Color.parseColor(valueColor))
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setSingleLine(true)
+        })
+        return box
+    }
+
+    private fun infoRow(text: String, colorHex: String, density: Float, bold: Boolean): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = (6 * density).toInt() }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8 * density
+                setColor(Color.parseColor("#131B2E"))
+            }
+        }
+        row.addView(TextView(this).apply {
+            this.text = text
+            setTextColor(Color.parseColor(colorHex))
+            textSize = 12.5f
+            typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        })
+        return row
     }
 
     private fun buildZoneAddressActionRow(
@@ -796,205 +727,130 @@ class FloatingHudService : Service() {
         val repo = InDriveAssistantApp.instance.repository
         val isFav = repo.isFavoriteZone(address)
         val isBlack = repo.isBlacklistedZone(address)
+        fun dp(v: Float) = (v * density).toInt()
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, (4 * density).toInt(), 0, (4 * density).toInt())
-            }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { setMargins(0, dp(4f), 0, dp(4f)) }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 10 * density
                 setColor(Color.parseColor("#0F1728"))
-                setStroke((1.5f * density).toInt(), when {
-                    isFav -> Color.parseColor("#FFB800")
-                    isBlack -> Color.parseColor("#FF3355")
-                    else -> Color.parseColor("#223554")
-                })
+                setStroke(dp(1.5f), Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) "#FF3355" else "#223554"))
             }
-            setPadding((10 * density).toInt(), (8 * density).toInt(), (10 * density).toInt(), (8 * density).toInt())
-        }
-
-        // Row 1: Alert badge (!) + Clickable Address Title
-        val addrRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-        }
-
-        val alertBadge = TextView(this).apply {
-            text = "!"
-            setTextColor(Color.parseColor("#070B14"))
-            textSize = 10f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            val badgeDiameter = (18 * density).toInt()
-            layoutParams = LinearLayout.LayoutParams(badgeDiameter, badgeDiameter).apply {
-                setMargins(0, 0, (8 * density).toInt(), 0)
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(when {
-                    isFav -> Color.parseColor("#FFB800")
-                    isBlack -> Color.parseColor("#FF3355")
-                    else -> Color.parseColor("#00F59B")
-                })
-            }
+            setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
         }
 
         val statusTag = when {
-            isFav -> " (مفضلة)"
+            isFav -> " (مفضلة ★)"
             isBlack -> " (محظورة)"
             else -> ""
         }
-
-        val addrTv = TextView(this).apply {
+        container.addView(TextView(this).apply {
             text = "$prefix: $address$statusTag"
-            setTextColor(Color.parseColor(if (isFav) "#FFB800" else if (isBlack) "#FF3355" else "#F8FAFC"))
-            textSize = 11f
+            setTextColor(Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) "#FF3355" else "#F8FAFC"))
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
+            maxLines = 2
             ellipsize = android.text.TextUtils.TruncateAt.END
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
+        })
 
-        addrRow.addView(alertBadge)
-        addrRow.addView(addrTv)
-
-        // Row 2: 1-Tap Action Chips
         val btnRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(0, (6 * density).toInt(), 0, 0)
-            }
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(6f) }
         }
 
-        val favBtn = TextView(this).apply {
-            text = if (isFav) "إلغاء المفضلة" else "+ مفضلة"
-            setTextColor(if (isFav) Color.WHITE else Color.parseColor("#070B14"))
-            textSize = 10.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8 * density
-                setColor(if (isFav) Color.parseColor("#475569") else Color.parseColor("#FFB800"))
-            }
-            setOnClickListener {
-                if (isFav) {
-                    repo.removeFavoriteZone(address)
-                    Toast.makeText(this@FloatingHudService, "تمت إزالة '$address' من المفضلة", Toast.LENGTH_SHORT).show()
-                } else {
-                    repo.addFavoriteZone(address)
-                    Toast.makeText(this@FloatingHudService, "تمت إضافة '$address' للمناطق المفضلة", Toast.LENGTH_SHORT).show()
-                }
-                refreshAnalysis(holder)
-            }
-        }
-
-        val blackBtn = TextView(this).apply {
-            text = if (isBlack) "إلغاء الحظر" else "+ محظورة"
-            setTextColor(Color.WHITE)
-            textSize = 10.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding((10 * density).toInt(), (4 * density).toInt(), (10 * density).toInt(), (4 * density).toInt())
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins((8 * density).toInt(), 0, 0, 0)
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8 * density
-                setColor(if (isBlack) Color.parseColor("#475569") else Color.parseColor("#FF3355"))
-            }
-            setOnClickListener {
-                if (isBlack) {
-                    repo.removeBlacklistZone(address)
-                    Toast.makeText(this@FloatingHudService, "تم إلغاء حظر '$address'", Toast.LENGTH_SHORT).show()
-                } else {
-                    repo.addBlacklistZone(address)
-                    Toast.makeText(this@FloatingHudService, "تمت إضافة '$address' للمناطق المحظورة", Toast.LENGTH_SHORT).show()
-                }
-                refreshAnalysis(holder)
-            }
-        }
-
-        btnRow.addView(favBtn)
-        btnRow.addView(blackBtn)
-
-        container.addView(addrRow)
-        container.addView(btnRow)
-
-        // Make the address row and (!) badge directly clickable to cycle status with 1 tap!
-        val rowTapListener = View.OnClickListener {
-            if (!isFav && !isBlack) {
-                repo.addFavoriteZone(address)
-                Toast.makeText(this@FloatingHudService, "تم حفظ '$address' كمفضلة بنجاح", Toast.LENGTH_SHORT).show()
-            } else if (isFav) {
+        btnRow.addView(actionChip(
+            label = if (isFav) "إلغاء المفضلة" else "+ مفضلة",
+            textColor = if (isFav) Color.WHITE else Color.parseColor("#070B14"),
+            bgColor = if (isFav) "#475569" else COLOR_FAVORITE,
+            density = density,
+            marginStart = 0
+        ) {
+            if (isFav) {
                 repo.removeFavoriteZone(address)
-                repo.addBlacklistZone(address)
-                Toast.makeText(this@FloatingHudService, "تم نقل '$address' إلى المناطق المحظورة", Toast.LENGTH_SHORT).show()
+                toast("تمت إزالة '$address' من المفضلة")
             } else {
-                repo.removeBlacklistZone(address)
-                Toast.makeText(this@FloatingHudService, "تمت إزالة تصنيف '$address'", Toast.LENGTH_SHORT).show()
+                repo.addFavoriteZone(address)
+                toast("تمت إضافة '$address' للمناطق المفضلة")
             }
             refreshAnalysis(holder)
-        }
+        })
 
-        addrRow.setOnClickListener(rowTapListener)
-        alertBadge.setOnClickListener(rowTapListener)
-        addrTv.setOnClickListener(rowTapListener)
+        btnRow.addView(actionChip(
+            label = if (isBlack) "إلغاء الحظر" else "+ محظورة",
+            textColor = Color.WHITE,
+            bgColor = if (isBlack) "#475569" else "#FF3355",
+            density = density,
+            marginStart = dp(8f)
+        ) {
+            if (isBlack) {
+                repo.removeBlacklistZone(address)
+                toast("تم إلغاء حظر '$address'")
+            } else {
+                repo.addBlacklistZone(address)
+                toast("تمت إضافة '$address' للمناطق المحظورة")
+            }
+            refreshAnalysis(holder)
+        })
 
+        container.addView(btnRow)
         return container
     }
 
+    private fun actionChip(
+        label: String,
+        textColor: Int,
+        bgColor: String,
+        density: Float,
+        marginStart: Int,
+        onClick: () -> Unit
+    ): View = TextView(this).apply {
+        text = label
+        setTextColor(textColor)
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        minHeight = (40 * density).toInt()
+        setPadding((12 * density).toInt(), (6 * density).toInt(), (12 * density).toInt(), (6 * density).toInt())
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { this.marginStart = marginStart }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 8 * density
+            setColor(Color.parseColor(bgColor))
+        }
+        setOnClickListener { onClick() }
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
     private fun refreshAnalysis(holder: CardPopupViewHolder) {
-        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-        holder.analysis = FareCalculatorEngine.analyze(
-            pickupDistanceKm = holder.ride.pickupDistanceKm,
-            tripDistanceKm = holder.ride.tripDistanceKm,
-            estimatedMinutes = ((holder.ride.totalDistanceKm) * 2.3).toInt(),
-            offeredFare = holder.ride.fare,
-            settings = settings,
-            pickupAddress = holder.ride.pickupAddress,
-            dropoffAddress = holder.ride.dropoffAddress
-        )
-        renderPopup(holder)
-        windowManager?.updateViewLayout(holder.container, holder.params)
+        holder.analysis = analyze(holder.ride)
+        renderPopupIfChanged(holder)
+        safeUpdateLayout(holder)
     }
 
     // =========================================================================
-    // PULSATING GLOW ANIMATION (Brings Favorite Zones to life)
+    // PULSATING GLOW (favourite zones)
     // =========================================================================
-    private fun startPulsatingGlowAnimation(
-        view: View,
-        holder: CardPopupViewHolder,
-        themeColorHex: String
-    ) {
+    private fun startPulsatingGlowAnimation(view: View, holder: CardPopupViewHolder, colorHex: String) {
+        val baseColor = Color.parseColor(colorHex)
+        val strokeWidth = (3.5f * resources.displayMetrics.density).toInt()
         val animator = ValueAnimator.ofFloat(0.35f, 1.0f).apply {
             duration = 850L
             repeatMode = ValueAnimator.REVERSE
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener { va ->
-                val fraction = va.animatedValue as Float
-                val baseColor = Color.parseColor(themeColorHex)
-                val alpha = (fraction * 255).toInt()
-                val animatedColor = Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
+                val alpha = ((va.animatedValue as Float) * 255).toInt()
                 (view.background as? GradientDrawable)?.setStroke(
-                    (3.5f * resources.displayMetrics.density).toInt(),
-                    animatedColor
+                    strokeWidth,
+                    Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
                 )
             }
         }
@@ -1002,7 +858,7 @@ class FloatingHudService : Service() {
         holder.pulseAnimator = animator
     }
 
-    // Drag touch listener
+    // Drag touch listener: the offset is remembered per card.
     private fun setupDragTouchListener(view: View, holder: CardPopupViewHolder) {
         var initialX = 0
         var initialY = 0
@@ -1018,25 +874,23 @@ class FloatingHudService : Service() {
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
-                    false
+                    true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
-                    if (Math.hypot(dx.toDouble(), dy.toDouble()) > 10) {
+                    if (isDragging || Math.hypot(dx.toDouble(), dy.toDouble()) > 10) {
                         isDragging = true
                         holder.params.x = initialX + dx.toInt()
                         holder.params.y = initialY + dy.toInt()
-                        windowManager?.updateViewLayout(holder.container, holder.params)
-                        true
-                    } else {
-                        false
+                        holder.dragOffsetX = holder.params.x - BADGE_MARGIN_X
+                        holder.dragOffsetY = holder.params.y - calculatePopupY(holder.ride)
+                        safeUpdateLayout(holder)
                     }
+                    true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
-                        view.performClick()
-                    }
+                    if (!isDragging) view.performClick()
                     true
                 }
                 else -> false
@@ -1046,12 +900,7 @@ class FloatingHudService : Service() {
 
     private fun clearAllCardPopups() {
         val wm = windowManager ?: return
-        for ((_, holder) in activePopups) {
-            holder.pulseAnimator?.cancel()
-            try {
-                wm.removeView(holder.container)
-            } catch (_: Exception) {}
-        }
+        activePopups.values.forEach { removePopupWindow(wm, it) }
         activePopups.clear()
     }
 
@@ -1059,15 +908,9 @@ class FloatingHudService : Service() {
     // SINGLE-SHOT HAPTIC ALERT
     // =========================================================================
     private fun vibrateSingleShotOnce(card: ParsedRideData) {
-        if (isVibrationMuted) return
-
         val now = System.currentTimeMillis()
-        if (card.fingerprint == lastVibratedFingerprint && (now - lastVibrateTimestamp) < 15000L) {
-            return
-        }
-        if (now - lastVibrateTimestamp < 3500L) {
-            return
-        }
+        if (card.fingerprint == lastVibratedFingerprint && (now - lastVibrateTimestamp) < 15000L) return
+        if (now - lastVibrateTimestamp < 3500L) return
 
         lastVibratedFingerprint = card.fingerprint
         lastVibrateTimestamp = now
@@ -1084,27 +927,37 @@ class FloatingHudService : Service() {
                 @Suppress("DEPRECATION")
                 vibrator?.vibrate(70)
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.w(TAG, "Vibration failed", e)
+        }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        if (activeInstance == this) activeInstance = null
         clearAllCardPopups()
-        if (activeInstance == this) {
-            activeInstance = null
-        }
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     companion object {
+        private const val TAG = "FloatingHud"
         private const val NOTIFICATION_ID = 1001
+        private const val BADGE_MARGIN_X = 20
+        const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
+
+        private const val COLOR_EXCELLENT = "#10B981"
+        private const val COLOR_GOOD = "#00EA80"
+        private const val COLOR_POOR = "#FACC15"
+        private const val COLOR_LOSS = "#EF4444"
+        private const val COLOR_UNKNOWN = "#64748B"
+        private const val COLOR_FAVORITE = "#FFB800"
+
+        @Volatile
         private var activeInstance: FloatingHudService? = null
 
+        /** May be called from any thread; work is posted to the main thread. */
         fun onCardsSync(cards: List<ParsedRideData>) {
             activeInstance?.handleCardsSync(cards)
-        }
-
-        fun onNewRideParsed(ride: ParsedRideData) {
-            activeInstance?.handleCardsSync(listOf(ride))
         }
 
         fun isRunning(): Boolean = activeInstance != null
