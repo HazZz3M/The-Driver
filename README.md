@@ -42,8 +42,7 @@ An intelligent Android application built with **Kotlin**, **Jetpack Compose (Mat
      - Detailed expense log with analytical badges (Km, Consumption, Cost/Km).
 
 6. **📱 Live Web Simulator & Native Android Source**:
-   - Full Flutter application with reactive state management, Material 3 Dark/Light themes, Arabic RTL localization.
-   - Native Android background overlay service and Accessibility integration via MethodChannel.
+   - Includes full native Android Gradle project ready for **Android Studio**.
    - Includes interactive browser-based Android phone simulator for instant testing and demonstration.
 
 ---
