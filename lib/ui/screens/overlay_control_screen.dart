@@ -73,6 +73,21 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
     if (ok) await NativeBridgeService.openAccessibilitySettings();
   }
 
+  /// Turns the accessibility service off so apps that refuse to run next to one (banking apps
+  /// such as InstaPay) can be opened. Android lets only the driver turn it back on.
+  Future<void> _pauseScreenReading() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final paused = await NativeBridgeService.pauseScreenReading();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _refreshPermissions();
+    messenger.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 6),
+      content: Text(paused
+          ? "تم إيقاف قراءة الشاشة. افتح تطبيق البنك الآن، وشغّلها بعدها من الإشعار أو من الإعدادات السريعة"
+          : "قراءة الشاشة متوقفة بالفعل"),
+    ));
+  }
+
   Future<void> _toggleService() async {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
@@ -219,6 +234,46 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
                   onAction: ready ? _toggleService : null,
                 ),
               ]),
+
+              // Banking apps (e.g. InstaPay) refuse to open while an accessibility service is on.
+              const SectionLabel("تطبيقات البنوك"),
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "بعض تطبيقات البنوك (زي إنستاباي) مش بتفتح طول ما قراءة الشاشة شغالة. "
+                      "أوقفها قبل ما تفتح البنك، وشغّلها تاني لما ترجع لإن درايف.",
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.5),
+                    ),
+                    const SizedBox(height: Insets.md),
+                    SizedBox(
+                      width: double.infinity,
+                      child: _hasAccessibilityPermission
+                          ? OutlinedButton.icon(
+                              icon: const Icon(Icons.pause_circle_outline),
+                              label: const Text("إيقاف قراءة الشاشة الآن"),
+                              onPressed: _pauseScreenReading,
+                            )
+                          : FilledButton.tonalIcon(
+                              icon: const Icon(Icons.play_circle_outline),
+                              label: const Text("تشغيل قراءة الشاشة"),
+                              onPressed: _openAccessibilityWithDisclosure,
+                            ),
+                    ),
+                    const SizedBox(height: Insets.md),
+                    const Text("أسرع طريقة للتشغيل والإيقاف:", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    const Text(
+                      "• زر \"قراءة الشاشة\" في الإعدادات السريعة: اسحب شريط الإشعارات لتحت، اضغط على القلم (تعديل)، واسحب الزر للقائمة.\n"
+                      "• زر \"إيقاف / تشغيل قراءة الشاشة\" في إشعار المساعد.\n"
+                      "• اختصار أزرار الصوت: من إعدادات الهاتف ← إمكانية الوصول ← The Driver ← الاختصار، "
+                      "وبعدها اضغط على زرّي الصوت معاً 3 ثوانٍ.",
+                      style: TextStyle(color: AppColors.textSecondary, fontSize: 12.5, height: 1.6),
+                    ),
+                  ],
+                ),
+              ),
 
               // Quick customisation
               const SectionLabel("التخصيص"),

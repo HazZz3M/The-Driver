@@ -4,5 +4,6 @@
     <string name="hud_service_desc">محلل التسعير التلقائي والهود العائم يعمل في الخلفية</string>
     <string name="accessibility_service_desc">يقرأ عروض الرحلات تلقائياً من شاشة تطبيق إن درايف لحساب الأرباح واقتراح أفضل سعر للمزايدة. عند فتح طلب يلتقط الشاشة مرة لقراءة طول المشوار المرسوم على الخريطة؛ تتم المعالجة داخل الهاتف ولا تُحفظ أي صورة.</string>
     <string name="currency_symbol">EGP</string>
+    <string name="screen_reading_tile_label">قراءة الشاشة</string>
     <string name="overlay_permission_required">يرجى منح إذن الظهور فوق التطبيقات لتفعيل الهود العائم فوق إن درايف</string>
 </resources>

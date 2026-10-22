@@ -2,6 +2,7 @@ package com.indrive.assistant.service
 
 import android.animation.ValueAnimator
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -86,6 +87,12 @@ class FloatingHudService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PAUSE_READING) {
+            if (InDriveAccessibilityService.pause()) {
+                toast("تم إيقاف قراءة الشاشة. يمكنك فتح تطبيقات البنوك الآن، وشغّلها من نفس الإشعار عند العودة لإن درايف")
+            }
+            return START_STICKY
+        }
         if (intent?.action == ACTION_CAPTURE) {
             InDriveAccessibilityService.captureRequested = true
             toast("أغلق الإشعارات وافتح شاشة الطلبات في إن درايف: سيتم الالتقاط تلقائياً")
@@ -113,12 +120,37 @@ class FloatingHudService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Screen reading on: pause it here. Off: only the driver can switch it on, in Settings.
+        val reading = InDriveAccessibilityService.isRunning()
+        val readingAction = if (reading) {
+            NotificationCompat.Action(
+                android.R.drawable.ic_media_pause,
+                "إيقاف قراءة الشاشة",
+                PendingIntent.getService(
+                    this,
+                    3,
+                    Intent(this, FloatingHudService::class.java).setAction(ACTION_PAUSE_READING),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+        } else {
+            NotificationCompat.Action(
+                android.R.drawable.ic_media_play,
+                "تشغيل قراءة الشاشة",
+                ScreenReadingTileService.settingsPendingIntent(this, 4)
+            )
+        }
+
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
             .setContentTitle("The Driver")
-            .setContentText("المساعد العائم يعمل ويحلل عروض إن درايف")
+            .setContentText(
+                if (reading) "المساعد العائم يعمل ويحلل عروض إن درايف"
+                else "قراءة الشاشة متوقفة: لن تظهر العلامات حتى تشغّلها"
+            )
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(openIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent)
+            .addAction(readingAction)
             .addAction(
                 android.R.drawable.ic_menu_camera,
                 "التقاط للتشخيص",
@@ -1074,6 +1106,7 @@ class FloatingHudService : Service() {
         private const val EXPANDED_HEIGHT_ESTIMATE_DP = 300
         const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
         const val ACTION_CAPTURE = "com.indrive.assistant.action.CAPTURE_SCREEN"
+        const val ACTION_PAUSE_READING = "com.indrive.assistant.action.PAUSE_SCREEN_READING"
 
         private const val COLOR_EXCELLENT = "#10B981"
         private const val COLOR_GOOD = "#00EA80"
@@ -1091,5 +1124,18 @@ class FloatingHudService : Service() {
         }
 
         fun isRunning(): Boolean = activeInstance != null
+
+        /** Rebuilds the notification so its screen-reading action matches the service state. */
+        fun onScreenReadingChanged() {
+            val service = activeInstance ?: return
+            service.serviceScope.launch {
+                try {
+                    val nm = service.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, service.createNotification())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notification refresh failed", e)
+                }
+            }
+        }
     }
 }

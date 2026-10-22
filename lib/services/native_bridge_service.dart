@@ -44,6 +44,17 @@ class NativeBridgeService {
     }
   }
 
+  /// Switches the screen-reading service off. Only the driver can switch it back on (Settings).
+  /// Returns false if it was not running or the call failed.
+  static Future<bool> pauseScreenReading() async {
+    try {
+      return await _channel.invokeMethod<bool>('pauseScreenReading') ?? false;
+    } catch (e) {
+      debugPrint("pauseScreenReading failed: $e");
+      return false;
+    }
+  }
+
   static Future<void> openAccessibilitySettings() async {
     try {
       await _channel.invokeMethod('openAccessibilitySettings');

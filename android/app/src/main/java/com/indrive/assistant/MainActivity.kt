@@ -32,6 +32,10 @@ class MainActivity : FlutterActivity() {
                 "checkAccessibilityPermission" -> {
                     result.success(InDriveAccessibilityService.isAccessibilityEnabled(this))
                 }
+                "pauseScreenReading" -> {
+                    // Switches the accessibility service off (e.g. before opening a banking app).
+                    result.success(InDriveAccessibilityService.pause())
+                }
                 "openAccessibilitySettings" -> {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     result.success(true)
