@@ -157,7 +157,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                 if (!isTransientPackage(pkg, packageName)) hidePopups()
                 return
             }
-            val rides = findRideCards(root)
+            val rides = resolveTrips(findRideCards(root))
+            val onRequestScreen = lastScanWasRequestScreen
             if (captureRequested) {
                 captureRequested = false
                 saveDiagnosticDump(root, pkg, rides)
@@ -165,10 +166,129 @@ class InDriveAccessibilityService : AccessibilityService() {
             showPopups(rides)
             maybeScheduleAutoAccept(rides)
             maybeReadTripFromMap(root, rides)
+            maybeAutoOpen(root, rides, onRequestScreen)
         } catch (e: Exception) {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
             root.recycle()
+        }
+    }
+
+    /** Fills unknown trip lengths from history (B) and/or the addresses (A), per the driver's settings. */
+    private fun resolveTrips(rides: List<ParsedRideData>): List<ParsedRideData> {
+        val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
+        if (!hud.tripFromHistory && !hud.tripFromAddresses) return rides
+        return rides.map {
+            TripDistanceResolver.resolve(applicationContext, it, hud.tripFromHistory, hud.tripFromAddresses) { requestRescan() }
+        }
+    }
+
+    /** Re-parses the screen soon (e.g. when a geocoding lookup or OCR finished). Any thread. */
+    private fun requestRescan() {
+        if (!::worker.isInitialized) return
+        worker.post {
+            if (!scanScheduled) {
+                scanScheduled = true
+                worker.post(scanRunnable)
+            }
+        }
+    }
+
+    // =========================================================================
+    // C: OPEN UNREAD REQUESTS AUTOMATICALLY (opt-in)
+    //
+    // For a list card whose trip length is still unknown, tap the card body (never a button),
+    // let the map OCR read the trip length on the Ride-request screen, then press Back. One card
+    // at a time, with a cooldown; stops managing the screen as soon as the driver navigates.
+    // =========================================================================
+
+    // Worker thread only.
+    private var autoOpenKey: String? = null
+    private var autoOpenStartedAt = 0L
+    private var autoOpenSawRequest = false
+    private var lastAutoOpenAt = 0L
+    private val autoOpenTried = LinkedHashSet<String>()
+    private val autoOpenTimeout = Runnable { if (autoOpenKey != null) requestRescan() }
+
+    private fun maybeAutoOpen(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        val now = System.currentTimeMillis()
+        val active = autoOpenKey
+        if (active != null) {
+            val elapsed = now - autoOpenStartedAt
+            if (onRequestScreen) {
+                autoOpenSawRequest = true
+                val card = rides.singleOrNull()
+                if (card == null || rideKey(card) != active) {
+                    finishAutoOpen(goBack = false) // the driver opened something else: hands off
+                } else if (card.tripKnown || elapsed > AUTO_OPEN_TIMEOUT_MS) {
+                    finishAutoOpen(goBack = true)
+                }
+            } else if (autoOpenSawRequest || elapsed > AUTO_OPEN_TAP_TIMEOUT_MS) {
+                finishAutoOpen(goBack = false) // back on the list (driver pressed Back, or the tap did nothing)
+            }
+            return
+        }
+
+        val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
+        if (!hud.tripAutoOpen || !hud.readMapDistance || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (onRequestScreen || pendingAutoAcceptFingerprint != null) return
+        if (now - lastAutoOpenAt < AUTO_OPEN_COOLDOWN_MS) return
+
+        val candidate = rides.firstOrNull { card ->
+            !card.tripKnown && card.screenBounds != null && rideKey(card)?.let { it !in autoOpenTried } == true
+        } ?: return
+        val key = rideKey(candidate) ?: return
+        autoOpenTried.add(key)
+        while (autoOpenTried.size > 100) autoOpenTried.remove(autoOpenTried.first())
+
+        if (clickCardBody(root, candidate.screenBounds!!)) {
+            autoOpenKey = key
+            autoOpenStartedAt = now
+            autoOpenSawRequest = false
+            lastAutoOpenAt = now
+            worker.postDelayed(autoOpenTimeout, AUTO_OPEN_TIMEOUT_MS + 200)
+            Log.i(TAG, "Auto-open: opened request to read its trip length")
+        }
+    }
+
+    private fun finishAutoOpen(goBack: Boolean) {
+        autoOpenKey = null
+        worker.removeCallbacks(autoOpenTimeout)
+        if (goBack) performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
+    /**
+     * Clicks the card itself (the largest clickable node inside [cardBounds] that is not an
+     * Accept / Offer / Skip button). Returns false when no such node exists.
+     */
+    private fun clickCardBody(root: AccessibilityNodeInfo, cardBounds: Rect): Boolean {
+        val minArea = cardBounds.width().toLong() * cardBounds.height() * 4 / 10
+        val seen = mutableListOf<AccessibilityNodeInfo>() // recycled once, at the end
+        var best: AccessibilityNodeInfo? = null
+        var bestArea = 0L
+        fun visit(node: AccessibilityNodeInfo) {
+            val r = Rect()
+            node.getBoundsInScreen(r)
+            if (!Rect.intersects(r, cardBounds)) return
+            val area = r.width().toLong() * r.height()
+            val label = normalizeArabicDigits("${node.text ?: ""} ${node.contentDescription ?: ""}".trim())
+            val isButton = ACCEPT_BUTTON_REGEX.containsMatchIn(label) || isSkipLabel(label) ||
+                NON_CARD_BUTTONS.any { label.contains(it, ignoreCase = true) }
+            if (node.isClickable && node.isEnabled && !isButton && cardBounds.contains(r) && area >= minArea && area > bestArea) {
+                best = node
+                bestArea = area
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                seen.add(child)
+                visit(child)
+            }
+        }
+        return try {
+            visit(root)
+            best?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+        } finally {
+            seen.forEach { it.recycle() }
         }
     }
 
@@ -234,6 +354,10 @@ class InDriveAccessibilityService : AccessibilityService() {
                             if (km != null) {
                                 storeTripMemory(key, km)
                                 ocrAttempts.remove(key)
+                                // B: remember this pickup → destination for later list cards.
+                                if (InDriveAssistantApp.instance.repository.getHudPrefs().tripFromHistory) {
+                                    TripDistanceResolver.learn(applicationContext, key, km)
+                                }
                                 // Re-parse now so the badge switches from "≈" to the real value.
                                 if (!scanScheduled) {
                                     scanScheduled = true
@@ -359,7 +483,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         try {
             if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
-            val card = findRideCards(root).firstOrNull { it.fingerprint == fingerprint }
+            val card = resolveTrips(findRideCards(root)).firstOrNull { it.fingerprint == fingerprint }
             if (card == null) {
                 Log.i(TAG, "Auto-accept aborted: card is no longer on screen")
                 return
@@ -479,6 +603,16 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val MAX_DUMP_NODES = 900
         const val DUMP_FILE = "inDrive_screen_dump.txt"
         private const val LEAVE_CHECK_MS = 1000L
+        // C (auto-open): give the map time to load, then press Back; at most one card per cooldown.
+        private const val AUTO_OPEN_TIMEOUT_MS = 7000L
+        private const val AUTO_OPEN_TAP_TIMEOUT_MS = 3000L
+        private const val AUTO_OPEN_COOLDOWN_MS = 8000L
+        /** Labels of buttons on a list card that the auto-open must never press. */
+        private val NON_CARD_BUTTONS = listOf("offer", "اقترح", "قدم عرض", "تقديم عرض", "decline", "رفض", "complain", "hide")
+
+        /** Whether the last findRideCards call saw the full-screen "Ride request" view (worker thread). */
+        @Volatile
+        var lastScanWasRequestScreen = false
         /** Used as the event filter when no inDrive app can be found on the phone. */
         private const val DEFAULT_INDRIVE_PACKAGE = "sinet.startup.inDriver"
 
@@ -623,6 +757,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 isSkipLabel(it) || ACCEPT_FOR_FARE.containsMatchIn(it) ||
                     it.equals("Ride request", ignoreCase = true) || it.contains("طلب رحلة")
             }
+            lastScanWasRequestScreen = singleRequestScreen
 
             val fareNodes = mutableListOf<AccessibilityNodeInfo>()
             findFareNodes(root, fareNodes)

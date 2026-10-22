@@ -223,6 +223,66 @@ class HudSettingsPage extends StatelessWidget {
             value: hud.readMapDistance,
             onChanged: (v) => change((h) => h.copyWith(readMapDistance: v)),
           ),
+          SwitchTile(
+            icon: Icons.history,
+            iconColor: AppColors.accentCyan,
+            title: "تذكّر المسافات من رحلات سابقة",
+            subtitle: "لما تفتح طلب ويتقري طوله، بيتحفظ لنفس مكان التحرك والوصول. "
+                "ولما نفس المشوار يظهر تاني في القائمة يتعرض طوله على طول. كله محفوظ على الموبايل بس",
+            value: hud.tripFromHistory,
+            onChanged: (v) => change((h) => h.copyWith(tripFromHistory: v)),
+          ),
+          SwitchTile(
+            icon: Icons.place_outlined,
+            iconColor: AppColors.accentCyan,
+            title: "تقدير المسافة من العناوين",
+            subtitle: "بيدوّر على العنوانين في خرائط جوجل ويحسب مسافة تقريبية (≈). "
+                "نص العنوان بيتبعت لجوجل، ومحتاج إنترنت",
+            value: hud.tripFromAddresses,
+            onChanged: (v) async {
+              if (v &&
+                  !await confirmAction(
+                    context,
+                    title: "تقدير المسافة من العناوين",
+                    message: "عشان يحسب المسافة، التطبيق هيبعت نص عنوان التحرك والوصول لخدمة العناوين بتاعة جوجل "
+                        "(مش اسم الراكب ولا أي بيانات تانية).\n\n"
+                        "• المسافة تقريبية (خط مستقيم × 1.3) وممكن تفرق 10–25% عن الطريق الحقيقي.\n"
+                        "• بتظهر بعلامة ≈، والقبول التلقائي مش هيقبل طلب بمسافة تقريبية.",
+                    confirmLabel: "موافق، فعّل",
+                    destructive: false,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
+              change((h) => h.copyWith(tripFromAddresses: v));
+            },
+          ),
+          SwitchTile(
+            icon: Icons.touch_app_outlined,
+            iconColor: AppColors.warningYellow,
+            title: "فتح الطلبات تلقائياً لقراءة المسافة",
+            subtitle: "لو طول المشوار مش معروف، التطبيق يفتح الطلب بنفسه ويقرا الخريطة ويرجع للقائمة. "
+                "يحتاج \"قراءة طول المشوار من الخريطة\"",
+            value: hud.tripAutoOpen,
+            onChanged: (v) async {
+              if (v &&
+                  !await confirmAction(
+                    context,
+                    title: "تحذير: فتح الطلبات تلقائياً",
+                    message: "التطبيق هيضغط على كارت الطلب في إن درايف عشان يفتحه، يستنى الخريطة، وبعدين يضغط رجوع.\n\n"
+                        "• مش بيضغط أبداً على \"قبول\" أو \"اقترح\" أو \"تخطي\".\n"
+                        "• طلب واحد كل 8 ثواني على الأكتر، وبيبطّل لو انت فتحت حاجة تانية.\n"
+                        "• الشاشة هتتنقل قدامك، وممكن ده يلخبطك وانت بتختار.\n"
+                        "• الأتمتة ممكن تخالف شروط إن درايف وتعرّض حسابك للإيقاف. انت المسؤول عن استخدامها.",
+                    confirmLabel: "أفهم المخاطر، فعّل",
+                    destructive: false,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
+              change((h) => h.copyWith(tripAutoOpen: v, readMapDistance: v ? true : null));
+            },
+          ),
         ]),
 
         const SectionLabel("التنبيهات"),
@@ -648,19 +708,67 @@ class UpdatesPage extends StatefulWidget {
   State<UpdatesPage> createState() => _UpdatesPageState();
 }
 
-class _UpdatesPageState extends State<UpdatesPage> {
+class _UpdatesPageState extends State<UpdatesPage> with WidgetsBindingObserver {
   bool _checking = false;
   bool _downloading = false;
   double _progress = 0;
   UpdateInfo? _info;
   String _installed = "";
 
+  /// A verified download waiting for "install unknown apps" permission. Kept so the driver
+  /// doesn't download again: installing resumes when they come back from Android settings.
+  String? _pendingApkPath;
+  String? _pendingSha;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     UpdateManager.currentVersion().then((v) {
       if (mounted) setState(() => _installed = v);
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _pendingApkPath != null) _installDownloaded();
+  }
+
+  /// Hands the already-downloaded APK to the installer again (after the permission was granted).
+  Future<void> _installDownloaded() async {
+    final path = _pendingApkPath;
+    if (path == null) return;
+    if (!await NativeBridgeService.canInstallPackages()) {
+      // Still not allowed (came back without enabling it): keep the file; don't reopen Settings.
+      _snack("لسه إذن التثبيت مش مفعّل. اضغط \"تثبيت\" لما تفعّله");
+      return;
+    }
+    final result = await NativeBridgeService.installApk(path, expectedSha256: _pendingSha);
+    if (!mounted) return;
+    setState(() {
+      _pendingApkPath = null;
+      _pendingSha = null;
+    });
+    _reportInstall(result);
+  }
+
+  void _reportInstall(InstallApkResult result) {
+    switch (result) {
+      case InstallApkResult.started:
+      case InstallApkResult.needsPermission:
+        break;
+      case InstallApkResult.checksumMismatch:
+        _snack("ملف التحديث غير موثوق (البصمة غير مطابقة) وتم حذفه");
+      case InstallApkResult.fileNotFound:
+      case InstallApkResult.error:
+        _snack("تعذر بدء التثبيت. جرّب فتح الرابط من المتصفح");
+    }
   }
 
   void _snack(String msg) {
@@ -683,6 +791,16 @@ class _UpdatesPageState extends State<UpdatesPage> {
   }
 
   Future<void> _install() async {
+    if (_pendingApkPath != null) {
+      // Already downloaded and verified: only the installer step is left.
+      final granted = await NativeBridgeService.canInstallPackages();
+      if (!granted) {
+        await NativeBridgeService.installApk(_pendingApkPath!, expectedSha256: _pendingSha); // opens the permission screen
+        return;
+      }
+      await _installDownloaded();
+      return;
+    }
     final info = _info!;
     setState(() {
       _downloading = true;
@@ -699,17 +817,18 @@ class _UpdatesPageState extends State<UpdatesPage> {
       return;
     }
 
-    switch (await NativeBridgeService.installApk(file.path, expectedSha256: sha)) {
-      case InstallApkResult.started:
-        break;
-      case InstallApkResult.needsPermission:
-        _snack("اسمح بتثبيت التطبيقات من هذا المصدر، ثم اضغط \"تثبيت\" مرة أخرى");
-      case InstallApkResult.checksumMismatch:
-        _snack("ملف التحديث غير موثوق (البصمة غير مطابقة) وتم حذفه");
-      case InstallApkResult.fileNotFound:
-      case InstallApkResult.error:
-        _snack("تعذر بدء التثبيت. جرّب فتح الرابط من المتصفح");
+    final result = await NativeBridgeService.installApk(file.path, expectedSha256: sha);
+    if (!mounted) return;
+    if (result == InstallApkResult.needsPermission) {
+      // Android opened its "install unknown apps" screen; finish when the driver comes back.
+      setState(() {
+        _pendingApkPath = file.path;
+        _pendingSha = sha;
+      });
+      _snack("اسمح بتثبيت التطبيقات من هذا المصدر، ثم ارجع للتطبيق: التثبيت هيكمل لوحده");
+      return;
     }
+    _reportInstall(result);
   }
 
   @override
@@ -774,7 +893,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                       Expanded(
                         child: FilledButton.icon(
                           icon: const Icon(Icons.install_mobile),
-                          label: const Text("تحميل وتثبيت"),
+                          label: Text(_pendingApkPath != null ? "تثبيت" : "تحميل وتثبيت"),
                           onPressed: _install,
                         ),
                       ),

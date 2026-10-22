@@ -78,13 +78,17 @@ class DatabaseService {
     return getExpensesSince(timestamp).fold(0.0, (sum, e) => sum + e.amount);
   }
 
-  List<Expense> getFuelRefills() {
-    return getAllExpenses().where((e) => e.category == "FUEL").toList();
+  /// Refills, newest first; only [vehicleId]'s when given.
+  List<Expense> getFuelRefills({String? vehicleId}) {
+    return getAllExpenses()
+        .where((e) => e.category == "FUEL" && (vehicleId == null || e.vehicleId == vehicleId))
+        .toList();
   }
 
-  /// Average consumption over the most recent [window] refills that recorded distance.
-  double? getRecentAverageFuelConsumption({int window = 3}) {
-    final refills = getFuelRefills()
+  /// Average consumption over the most recent [window] refills that recorded distance
+  /// (of [vehicleId] only, when given: each car has its own consumption).
+  double? getRecentAverageFuelConsumption({int window = 3, String? vehicleId}) {
+    final refills = getFuelRefills(vehicleId: vehicleId)
         .where((e) => e.consumptionLPer100Km != null && e.consumptionLPer100Km! > 0)
         .take(window)
         .toList();
@@ -106,6 +110,23 @@ class DatabaseService {
 
   Future<void> deleteExpense(int expenseId) async {
     final current = getAllExpenses().where((e) => e.id != expenseId).toList();
+    _cachedExpenses = current;
+    await prefs.setString(keyExpenses, jsonEncode(current.map((e) => e.toJson()).toList()));
+  }
+
+  /// Gives expenses saved before vehicles were tracked (no vehicleId) to [vehicleId].
+  /// The cache is updated at once; the returned future completes when it is written.
+  Future<void> assignUntaggedExpenses(String vehicleId) async {
+    final all = getAllExpenses();
+    if (!all.any((e) => e.vehicleId == null)) return;
+    final current = [for (final e in all) e.vehicleId == null ? e.copyWith(vehicleId: vehicleId) : e];
+    _cachedExpenses = current;
+    await prefs.setString(keyExpenses, jsonEncode(current.map((e) => e.toJson()).toList()));
+  }
+
+  /// Removes every expense of a deleted vehicle.
+  Future<void> deleteExpensesOfVehicle(String vehicleId) async {
+    final current = getAllExpenses().where((e) => e.vehicleId != vehicleId).toList();
     _cachedExpenses = current;
     await prefs.setString(keyExpenses, jsonEncode(current.map((e) => e.toJson()).toList()));
   }

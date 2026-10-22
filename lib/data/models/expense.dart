@@ -27,6 +27,9 @@ class Expense {
   final double? odometerKm;
   final String description;
 
+  /// Vehicle this expense belongs to (VehicleProfile.id). Null only for records saved before 1.14.
+  final String? vehicleId;
+
   Expense({
     int? id,
     int? timestamp,
@@ -47,6 +50,7 @@ class Expense {
     this.appliedWearPerKm,
     this.odometerKm,
     this.description = "",
+    this.vehicleId,
   })  : id = id ?? DateTime.now().microsecondsSinceEpoch,
         timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch;
 
@@ -70,6 +74,7 @@ class Expense {
     double? appliedWearPerKm,
     double? odometerKm,
     String? description,
+    String? vehicleId,
   }) {
     return Expense(
       id: id ?? this.id,
@@ -91,6 +96,7 @@ class Expense {
       appliedWearPerKm: appliedWearPerKm ?? this.appliedWearPerKm,
       odometerKm: odometerKm ?? this.odometerKm,
       description: description ?? this.description,
+      vehicleId: vehicleId ?? this.vehicleId,
     );
   }
 
@@ -115,6 +121,7 @@ class Expense {
       'appliedWearPerKm': appliedWearPerKm,
       'odometerKm': odometerKm,
       'description': description,
+      'vehicleId': vehicleId,
     };
   }
 
@@ -139,6 +146,7 @@ class Expense {
       appliedWearPerKm: (json['appliedWearPerKm'] as num?)?.toDouble(),
       odometerKm: (json['odometerKm'] as num?)?.toDouble(),
       description: json['description'] as String? ?? "",
+      vehicleId: json['vehicleId'] as String?,
     );
   }
 }

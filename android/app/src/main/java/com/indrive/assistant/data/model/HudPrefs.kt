@@ -25,7 +25,13 @@ data class HudPrefs(
     /** 0 = never auto-collapse the expanded card */
     val autoCollapseSeconds: Int = 0,
     /** Read the trip length drawn on the Ride-request map with on-device OCR (Android 11+). */
-    val readMapDistance: Boolean = true
+    val readMapDistance: Boolean = true,
+    /** B: reuse trip lengths read earlier for the same pickup → destination (kept on the phone). */
+    val tripFromHistory: Boolean = true,
+    /** A: estimate the trip length from the two addresses (Geocoder; sends address text to Google). */
+    val tripFromAddresses: Boolean = false,
+    /** C: open unread requests automatically, read the map, and go back (taps inside inDrive). */
+    val tripAutoOpen: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("style", style)
@@ -43,6 +49,9 @@ data class HudPrefs(
         put("showZones", showZones)
         put("autoCollapseSeconds", autoCollapseSeconds)
         put("readMapDistance", readMapDistance)
+        put("tripFromHistory", tripFromHistory)
+        put("tripFromAddresses", tripFromAddresses)
+        put("tripAutoOpen", tripAutoOpen)
     }
 
     companion object {
@@ -63,7 +72,10 @@ data class HudPrefs(
                 showCostBreakdown = json.optBoolean("showCostBreakdown", fallback.showCostBreakdown),
                 showZones = json.optBoolean("showZones", fallback.showZones),
                 autoCollapseSeconds = json.optInt("autoCollapseSeconds", fallback.autoCollapseSeconds).coerceIn(0, 120),
-                readMapDistance = json.optBoolean("readMapDistance", fallback.readMapDistance)
+                readMapDistance = json.optBoolean("readMapDistance", fallback.readMapDistance),
+                tripFromHistory = json.optBoolean("tripFromHistory", fallback.tripFromHistory),
+                tripFromAddresses = json.optBoolean("tripFromAddresses", fallback.tripFromAddresses),
+                tripAutoOpen = json.optBoolean("tripAutoOpen", fallback.tripAutoOpen)
             )
         }
     }
