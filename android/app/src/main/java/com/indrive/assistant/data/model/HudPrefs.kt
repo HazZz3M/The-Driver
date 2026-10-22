@@ -31,7 +31,9 @@ data class HudPrefs(
     /** A: estimate the trip length from the two addresses (Geocoder; sends address text to Google). */
     val tripFromAddresses: Boolean = false,
     /** C: open unread requests automatically, read the map, and go back (taps inside inDrive). */
-    val tripAutoOpen: Boolean = false
+    val tripAutoOpen: Boolean = false,
+    /** Circles over the Ride-request counter-bid buttons: OFF | HIGHLIGHT | AUTO_TAP (taps the best). */
+    val bidChipsMode: String = "HIGHLIGHT"
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("style", style)
@@ -52,6 +54,7 @@ data class HudPrefs(
         put("tripFromHistory", tripFromHistory)
         put("tripFromAddresses", tripFromAddresses)
         put("tripAutoOpen", tripAutoOpen)
+        put("bidChipsMode", bidChipsMode)
     }
 
     companion object {
@@ -75,7 +78,8 @@ data class HudPrefs(
                 readMapDistance = json.optBoolean("readMapDistance", fallback.readMapDistance),
                 tripFromHistory = json.optBoolean("tripFromHistory", fallback.tripFromHistory),
                 tripFromAddresses = json.optBoolean("tripFromAddresses", fallback.tripFromAddresses),
-                tripAutoOpen = json.optBoolean("tripAutoOpen", fallback.tripAutoOpen)
+                tripAutoOpen = json.optBoolean("tripAutoOpen", fallback.tripAutoOpen),
+                bidChipsMode = json.optString("bidChipsMode", fallback.bidChipsMode)
             )
         }
     }

@@ -31,6 +31,7 @@ import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.MainActivity
 import com.indrive.assistant.data.model.HudPrefs
 import com.indrive.assistant.data.model.ParsedRideData
+import com.indrive.assistant.engine.BidAdvisor
 import com.indrive.assistant.engine.FareAnalysisResult
 import com.indrive.assistant.engine.FareCalculatorEngine
 import com.indrive.assistant.engine.ProfitabilityLevel
@@ -205,6 +206,9 @@ class FloatingHudService : Service() {
                     vibrateSingleShotOnce(card, analysis)
                 }
             }
+
+            // 3. Circles over the counter-bid buttons (Ride-request screen only)
+            syncBidChips(cards)
         }
     }
 
@@ -1125,6 +1129,91 @@ class FloatingHudService : Service() {
         val wm = windowManager ?: return
         activePopups.values.forEach { removePopupWindow(wm, it) }
         activePopups.clear()
+        clearBidChips()
+    }
+
+    // =========================================================================
+    // COUNTER-BID CIRCLES (Ride-request screen)
+    // A small circle above each of inDrive's bid buttons with the net profit of that bid; the
+    // best bid (BidAdvisor) is filled and starred. Touches pass through to inDrive.
+    // =========================================================================
+    private val chipViews = mutableListOf<View>()
+    private var chipKey = ""
+
+    private fun syncBidChips(cards: List<ParsedRideData>) {
+        val wm = windowManager ?: return
+        val card = cards.singleOrNull()?.takeIf { it.bidChips.isNotEmpty() && hudPrefs().bidChipsMode != "OFF" }
+        if (card == null) {
+            clearBidChips()
+            return
+        }
+        val rated = BidAdvisor.rate(card, InDriveAssistantApp.instance.repository.getDriverSettings())
+        val best = BidAdvisor.best(rated)
+        val key = rated.joinToString("|") {
+            "${it.chip.value}@${it.chip.bounds.toShortString()}:${it.analysis.netProfit.roundToInt()}:${it.analysis.profitabilityLevel}"
+        } + "#" + best?.chip?.value
+        if (key == chipKey) return
+        clearBidChips()
+        chipKey = key
+
+        val density = resources.displayMetrics.density
+        val size = (46 * density).toInt()
+        for (rb in rated) {
+            val view = buildBidCircle(rb, rb === best, density)
+            val params = baseLayoutParams().apply {
+                flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                width = size
+                height = size
+                gravity = Gravity.TOP or Gravity.LEFT
+                x = rb.chip.bounds.centerX() - size / 2
+                val above = rb.chip.bounds.top - size - (2 * density).toInt()
+                y = if (above > 30) above else rb.chip.bounds.bottom + (2 * density).toInt()
+            }
+            try {
+                wm.addView(view, params)
+                chipViews.add(view)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not show bid circle", e)
+            }
+        }
+    }
+
+    private fun clearBidChips() {
+        val wm = windowManager
+        chipViews.forEach { v -> try { wm?.removeView(v) } catch (_: Exception) {} }
+        chipViews.clear()
+        chipKey = ""
+    }
+
+    private fun levelColor(level: ProfitabilityLevel): String = when (level) {
+        ProfitabilityLevel.EXCELLENT_PROFIT -> COLOR_EXCELLENT
+        ProfitabilityLevel.GOOD_PROFIT -> COLOR_GOOD
+        ProfitabilityLevel.POOR_MARGIN -> COLOR_POOR
+        ProfitabilityLevel.LOSS_DANGER -> COLOR_LOSS
+    }
+
+    private fun buildBidCircle(rb: BidAdvisor.RatedBid, isBest: Boolean, density: Float): View {
+        val color = levelColor(rb.analysis.profitabilityLevel)
+        val frame = FrameLayout(this)
+        val d = (40 * density).toInt()
+        frame.addView(TextView(this).apply {
+            text = signedInt(rb.analysis.netProfit)
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(if (isBest) Color.parseColor(COLOR_INK) else Color.WHITE)
+            layoutParams = FrameLayout.LayoutParams(d, d).apply { gravity = Gravity.CENTER }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (isBest) Color.parseColor(color) else Color.parseColor("#0B0F19"))
+                setStroke(((if (isBest) 3f else 2f) * density).toInt(), Color.parseColor(if (isBest) COLOR_INK else color))
+            }
+            elevation = 6 * density
+            contentDescription = "مزايدة ${rb.chip.value}: صافي ${rb.analysis.netProfit.roundToInt()}" + if (isBest) "، أفضل عرض" else ""
+        })
+        if (isBest) frame.addView(cornerChip("★", COLOR_FAVORITE, Gravity.TOP or Gravity.END, density))
+        return frame
     }
 
     // =========================================================================

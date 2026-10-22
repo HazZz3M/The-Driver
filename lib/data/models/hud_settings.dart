@@ -19,6 +19,7 @@ class HudSettings {
   final bool tripFromHistory; // B: reuse lengths read earlier for the same pickup → destination
   final bool tripFromAddresses; // A: estimate from the two addresses (Geocoder, online)
   final bool tripAutoOpen; // C: open unread requests, read the map, go back
+  final String bidChipsMode; // OFF | HIGHLIGHT | AUTO_TAP: circles over the request's bid buttons
 
   const HudSettings({
     this.style = "COMPACT_CIRCLE",
@@ -39,6 +40,7 @@ class HudSettings {
     this.tripFromHistory = true,
     this.tripFromAddresses = false,
     this.tripAutoOpen = false,
+    this.bidChipsMode = "HIGHLIGHT",
   });
 
   HudSettings copyWith({
@@ -60,6 +62,7 @@ class HudSettings {
     bool? tripFromHistory,
     bool? tripFromAddresses,
     bool? tripAutoOpen,
+    String? bidChipsMode,
   }) {
     return HudSettings(
       style: style ?? this.style,
@@ -80,6 +83,7 @@ class HudSettings {
       tripFromHistory: tripFromHistory ?? this.tripFromHistory,
       tripFromAddresses: tripFromAddresses ?? this.tripFromAddresses,
       tripAutoOpen: tripAutoOpen ?? this.tripAutoOpen,
+      bidChipsMode: bidChipsMode ?? this.bidChipsMode,
     );
   }
 
@@ -102,6 +106,7 @@ class HudSettings {
         'tripFromHistory': tripFromHistory,
         'tripFromAddresses': tripFromAddresses,
         'tripAutoOpen': tripAutoOpen,
+        'bidChipsMode': bidChipsMode,
       };
 
   factory HudSettings.fromJson(Map<String, dynamic> json, {HudSettings fallback = const HudSettings()}) {
@@ -124,6 +129,7 @@ class HudSettings {
       tripFromHistory: json['tripFromHistory'] as bool? ?? fallback.tripFromHistory,
       tripFromAddresses: json['tripFromAddresses'] as bool? ?? fallback.tripFromAddresses,
       tripAutoOpen: json['tripAutoOpen'] as bool? ?? fallback.tripAutoOpen,
+      bidChipsMode: json['bidChipsMode'] as String? ?? fallback.bidChipsMode,
     );
   }
 

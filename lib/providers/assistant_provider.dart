@@ -439,6 +439,9 @@ class AssistantProvider extends ChangeNotifier {
   bool get autoAcceptConsentGiven => repository.autoAcceptConsentGiven;
   Future<void> recordAutoAcceptConsent() => repository.setAutoAcceptConsentGiven();
 
+  bool get tutorialSeen => repository.tutorialSeen;
+  Future<void> markTutorialSeen() => repository.setTutorialSeen();
+
   /// Updates what the floating HUD shows; applied live to the running overlay.
   Future<void> updateHud(HudSettings newHud) async {
     hud = newHud;

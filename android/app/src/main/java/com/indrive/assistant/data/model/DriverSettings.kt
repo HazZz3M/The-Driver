@@ -30,6 +30,18 @@ data class DriverSettings(
     val pickupProfitPerKm: Double = 3.0,
     /** Share of the inDrive commission counted on pickup km, in %. */
     val pickupCommissionSharePercent: Double = 50.0,
+    /** When pickup pricing applies (no rule on = always); see FareCalculatorEngine.pickupRuleApplies. */
+    val pickupRuleLongerThanTrip: Boolean = false,
+    val pickupRuleOverKm: Boolean = false,
+    val pickupRuleThresholdKm: Double = 2.0,
+    val pickupRuleMatchAll: Boolean = false,
+    /** Pickup km pricing when the rules don't hold: COST_ONLY | FREE | AS_TRIP. */
+    val pickupShortMode: String = "COST_ONLY",
+
+    /** Auto-accept: when several requests qualify, take the best one (ranked by [autoAcceptRankBy]). */
+    val autoAcceptPickBest: Boolean = false,
+    /** PROFIT_PER_KM | NET_PROFIT | MARGIN */
+    val autoAcceptRankBy: String = "PROFIT_PER_KM",
 
     // Passenger lists (matched by the name shown on the card)
     val favoritePassengers: List<String> = emptyList(),

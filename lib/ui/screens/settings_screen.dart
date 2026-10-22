@@ -6,6 +6,7 @@ import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
 import '../components/ui_kit.dart';
 import 'settings_pages.dart';
+import 'tutorial_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -73,6 +74,13 @@ class SettingsScreen extends StatelessWidget {
 
             const SectionLabel("التطبيق"),
             SettingsGroup(children: [
+              NavTile(
+                icon: Icons.school_outlined,
+                color: AppColors.emeraldPrimary,
+                title: "شرح التطبيق",
+                subtitle: "جولة سريعة على كل المميزات",
+                onTap: () => _open(context, const TutorialScreen()),
+              ),
               NavTile(
                 icon: Icons.system_update_outlined,
                 color: AppColors.accentPurple,

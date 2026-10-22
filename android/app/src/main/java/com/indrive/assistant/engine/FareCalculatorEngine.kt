@@ -266,8 +266,24 @@ object FareCalculatorEngine {
         }
         val share = (settings.pickupCommissionSharePercent / 100.0).coerceIn(0.0, 1.0)
         val tripPart = tripKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c)
-        val pickupPart = pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share)
+        val pickupPart = if (pickupRuleApplies(pickupKm, tripKm, settings)) {
+            pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share)
+        } else when (settings.pickupShortMode) {
+            "FREE" -> 0.0 // the driver absorbs a short pickup
+            "AS_TRIP" -> pickupKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c)
+            else -> pickupKm * costPerKm / max(0.01, 1.0 - c * share) // COST_ONLY: covered, no profit
+        }
         return tripPart + pickupPart
+    }
+
+    /** Mirrors pickupRuleApplies in fare_calculator_engine.dart. No rule switched on = always. */
+    fun pickupRuleApplies(pickupKm: Double, tripKm: Double, s: DriverSettings): Boolean {
+        val rules = buildList {
+            if (s.pickupRuleLongerThanTrip) add(pickupKm > tripKm)
+            if (s.pickupRuleOverKm) add(pickupKm > s.pickupRuleThresholdKm)
+        }
+        if (rules.isEmpty()) return true
+        return if (s.pickupRuleMatchAll) rules.all { it } else rules.any { it }
     }
 
     /** Exact (normalised) name match; first names are short, so a substring match would be wrong. */

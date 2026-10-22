@@ -78,6 +78,13 @@ class PreferencesManager(context: Context) {
             pickupPricingEnabled = prefs.getBoolean(KEY_PICKUP_PRICING_ENABLED, d.pickupPricingEnabled),
             pickupProfitPerKm = prefs.getFloat(KEY_PICKUP_PROFIT_KM, d.pickupProfitPerKm.toFloat()).toDouble(),
             pickupCommissionSharePercent = prefs.getFloat(KEY_PICKUP_COMMISSION_SHARE, d.pickupCommissionSharePercent.toFloat()).toDouble(),
+            pickupRuleLongerThanTrip = prefs.getBoolean(KEY_PICKUP_RULE_LONGER, d.pickupRuleLongerThanTrip),
+            pickupRuleOverKm = prefs.getBoolean(KEY_PICKUP_RULE_OVER_KM, d.pickupRuleOverKm),
+            pickupRuleThresholdKm = prefs.getFloat(KEY_PICKUP_RULE_THRESHOLD, d.pickupRuleThresholdKm.toFloat()).toDouble(),
+            pickupRuleMatchAll = prefs.getBoolean(KEY_PICKUP_RULE_MATCH_ALL, d.pickupRuleMatchAll),
+            pickupShortMode = prefs.getString(KEY_PICKUP_SHORT_MODE, d.pickupShortMode) ?: d.pickupShortMode,
+            autoAcceptPickBest = prefs.getBoolean(KEY_AUTO_ACCEPT_PICK_BEST, d.autoAcceptPickBest),
+            autoAcceptRankBy = prefs.getString(KEY_AUTO_ACCEPT_RANK_BY, d.autoAcceptRankBy) ?: d.autoAcceptRankBy,
             favoritePassengers = decodeList(prefs.getString(KEY_FAVORITE_PASSENGERS, null)) ?: d.favoritePassengers,
             blacklistedPassengers = decodeList(prefs.getString(KEY_BLACKLISTED_PASSENGERS, null)) ?: d.blacklistedPassengers
         )
@@ -105,6 +112,13 @@ class PreferencesManager(context: Context) {
             putBoolean(KEY_PICKUP_PRICING_ENABLED, settings.pickupPricingEnabled)
             putFloat(KEY_PICKUP_PROFIT_KM, settings.pickupProfitPerKm.toFloat())
             putFloat(KEY_PICKUP_COMMISSION_SHARE, settings.pickupCommissionSharePercent.toFloat())
+            putBoolean(KEY_PICKUP_RULE_LONGER, settings.pickupRuleLongerThanTrip)
+            putBoolean(KEY_PICKUP_RULE_OVER_KM, settings.pickupRuleOverKm)
+            putFloat(KEY_PICKUP_RULE_THRESHOLD, settings.pickupRuleThresholdKm.toFloat())
+            putBoolean(KEY_PICKUP_RULE_MATCH_ALL, settings.pickupRuleMatchAll)
+            putString(KEY_PICKUP_SHORT_MODE, settings.pickupShortMode)
+            putBoolean(KEY_AUTO_ACCEPT_PICK_BEST, settings.autoAcceptPickBest)
+            putString(KEY_AUTO_ACCEPT_RANK_BY, settings.autoAcceptRankBy)
             // JSON arrays: a name may contain a comma.
             putString(KEY_FAVORITE_PASSENGERS, JSONArray(settings.favoritePassengers).toString())
             putString(KEY_BLACKLISTED_PASSENGERS, JSONArray(settings.blacklistedPassengers).toString())
@@ -150,6 +164,13 @@ class PreferencesManager(context: Context) {
                 pickupPricingEnabled = bool("pickupPricingEnabled", d.pickupPricingEnabled),
                 pickupProfitPerKm = dbl("pickupProfitPerKm", d.pickupProfitPerKm),
                 pickupCommissionSharePercent = dbl("pickupCommissionSharePercent", d.pickupCommissionSharePercent),
+                pickupRuleLongerThanTrip = bool("pickupRuleLongerThanTrip", d.pickupRuleLongerThanTrip),
+                pickupRuleOverKm = bool("pickupRuleOverKm", d.pickupRuleOverKm),
+                pickupRuleThresholdKm = dbl("pickupRuleThresholdKm", d.pickupRuleThresholdKm),
+                pickupRuleMatchAll = bool("pickupRuleMatchAll", d.pickupRuleMatchAll),
+                pickupShortMode = json.optString("pickupShortMode", d.pickupShortMode),
+                autoAcceptPickBest = bool("autoAcceptPickBest", d.autoAcceptPickBest),
+                autoAcceptRankBy = json.optString("autoAcceptRankBy", d.autoAcceptRankBy),
                 favoritePassengers = list("favoritePassengers", d.favoritePassengers),
                 blacklistedPassengers = list("blacklistedPassengers", d.blacklistedPassengers)
             )
@@ -278,6 +299,13 @@ class PreferencesManager(context: Context) {
         private const val KEY_PICKUP_PRICING_ENABLED = "pickup_pricing_enabled"
         private const val KEY_PICKUP_PROFIT_KM = "pickup_profit_km"
         private const val KEY_PICKUP_COMMISSION_SHARE = "pickup_commission_share"
+        private const val KEY_PICKUP_RULE_LONGER = "pickup_rule_longer_than_trip"
+        private const val KEY_PICKUP_RULE_OVER_KM = "pickup_rule_over_km"
+        private const val KEY_PICKUP_RULE_THRESHOLD = "pickup_rule_threshold_km"
+        private const val KEY_PICKUP_RULE_MATCH_ALL = "pickup_rule_match_all"
+        private const val KEY_PICKUP_SHORT_MODE = "pickup_short_mode"
+        private const val KEY_AUTO_ACCEPT_PICK_BEST = "auto_accept_pick_best"
+        private const val KEY_AUTO_ACCEPT_RANK_BY = "auto_accept_rank_by"
         private const val KEY_FAVORITE_PASSENGERS = "favorite_passengers"
         private const val KEY_BLACKLISTED_PASSENGERS = "blacklisted_passengers"
 
