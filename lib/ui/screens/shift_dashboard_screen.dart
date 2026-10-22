@@ -66,7 +66,10 @@ class _ShiftDashboardScreenState extends State<ShiftDashboardScreen> {
                       label: const Text("إنهاء"),
                       onPressed: () {
                         HapticFeedback.mediumImpact();
+                        final startedAt = provider.shiftStartTime;
+                        final lasted = _formatDuration(provider.shiftDuration);
                         provider.toggleShift();
+                        showUndoSnackBar(context, "انتهت الوردية بعد $lasted", () => provider.resumeShift(startedAt));
                       },
                     )
                   : FilledButton.icon(
@@ -211,7 +214,7 @@ class _ShiftDashboardScreenState extends State<ShiftDashboardScreen> {
             if (trips.isNotEmpty)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
-                child: Text("اسحب الرحلة لحذفها", textAlign: TextAlign.center, style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5)),
+                child: Text("اسحب الرحلة لحذفها", textAlign: TextAlign.center, style: TextStyle(color: AppColors.textTertiary, fontSize: 12)),
               ),
           ],
         ),
@@ -266,7 +269,7 @@ class _TripRow extends StatelessWidget {
               child: Column(
                 children: [
                   Text("${trip.offeredFare.toInt()}", style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  Text(currency, style: const TextStyle(color: AppColors.textTertiary, fontSize: 10)),
+                  Text(currency, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
                 ],
               ),
             ),
@@ -282,7 +285,7 @@ class _TripRow extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     "وصول ${trip.pickupDistanceKm.toStringAsFixed(1)} + مشوار ${trip.tripDistanceKm.toStringAsFixed(1)} كم • $time",
-                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 12),
                   ),
                 ],
               ),
@@ -339,7 +342,7 @@ class _WeekChart extends StatelessWidget {
                       children: [
                         if (d.net > 0)
                           FittedBox(
-                            child: Text("${d.net.toInt()}", style: const TextStyle(color: AppColors.textTertiary, fontSize: 10)),
+                            child: Text("${d.net.toInt()}", style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
                           ),
                         const SizedBox(height: 4),
                         AnimatedContainer(
@@ -351,12 +354,16 @@ class _WeekChart extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 6),
-                        Text(
-                          DateFormat('E', 'ar').format(d.day),
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            color: isToday ? AppColors.emeraldLight : AppColors.textTertiary,
-                            fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
+                        // Arabic day names are long ("الأربعاء"): shrink to fit a 1/7 column.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            DateFormat('E', 'ar').format(d.day),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isToday ? AppColors.emeraldLight : AppColors.textTertiary,
+                              fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
+                            ),
                           ),
                         ),
                       ],

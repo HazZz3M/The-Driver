@@ -157,6 +157,14 @@ class AssistantProvider extends ChangeNotifier {
     await repository.saveShift(active: isShiftActive, startTime: shiftStartTime);
   }
 
+  /// Undo for an accidental "end shift": restarts the shift with its original start time.
+  Future<void> resumeShift(int startTime) async {
+    isShiftActive = true;
+    shiftStartTime = startTime;
+    notifyListeners();
+    await repository.saveShift(active: true, startTime: startTime);
+  }
+
   Duration get shiftDuration => isShiftActive && shiftStartTime > 0
       ? DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(shiftStartTime))
       : Duration.zero;
@@ -290,7 +298,7 @@ class AssistantProvider extends ChangeNotifier {
       description: description.isNotEmpty
           ? description
           : (costPerKm != null
-              ? "قطعة غيار: $partName (عمر ${lifespanKm!.toInt()} كم • ${costPerKm.toStringAsFixed(2)} ج/كم)"
+              ? "قطعة غيار: $partName (عمر ${lifespanKm!.toInt()} كم • ${costPerKm.toStringAsFixed(2)} ج.م/كم)"
               : "قطعة غيار / صيانة: $partName"),
     ));
 

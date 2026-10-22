@@ -122,7 +122,7 @@ class StatusPill extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (icon != null) ...[Icon(icon, size: 14, color: color), const SizedBox(width: 5)],
-          Text(label, style: TextStyle(color: color, fontSize: 11.5, fontWeight: FontWeight.w700)),
+          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -184,7 +184,7 @@ class StatTile extends StatelessWidget {
             Text(caption!,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppColors.textTertiary, fontSize: 11)),
+                style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
         ],
       ),
     );
@@ -384,7 +384,7 @@ class NumberStepperTile extends StatelessWidget {
               children: [
                 Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 if (subtitle != null)
-                  Text(subtitle!, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+                  Text(subtitle!, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
               ],
             ),
           ),
@@ -413,7 +413,7 @@ class NumberStepperTile extends StatelessWidget {
                 children: [
                   Text(formatNumber(value),
                       style: const TextStyle(color: AppColors.emeraldLight, fontWeight: FontWeight.w800, fontSize: 15)),
-                  Text(unit, style: const TextStyle(color: AppColors.textTertiary, fontSize: 10)),
+                  Text(unit, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
                 ],
               ),
             ),

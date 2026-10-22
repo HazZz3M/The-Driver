@@ -43,7 +43,7 @@ class SmartBidCard extends StatelessWidget {
             children: [
               Text(
                 _tagLabels[bid.tag] ?? bid.tag,
-                style: TextStyle(color: tagColor, fontSize: 11.5, fontWeight: FontWeight.w700),
+                style: TextStyle(color: tagColor, fontSize: 12, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 6),
               FittedBox(
@@ -52,14 +52,14 @@ class SmartBidCard extends StatelessWidget {
                   style: const TextStyle(color: AppColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w900),
                 ),
               ),
-              Text(currency, style: const TextStyle(color: AppColors.textTertiary, fontSize: 10.5)),
+              Text(currency, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
               const SizedBox(height: 6),
               FittedBox(
                 child: Text(
                   "صافي ${signed(bid.netProfit, decimals: 0)}",
                   style: TextStyle(
                     color: bid.netProfit >= 0 ? AppColors.emeraldLight : AppColors.lossRed,
-                    fontSize: 11.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
                 ),

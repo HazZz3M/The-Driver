@@ -2,6 +2,7 @@ package com.indrive.assistant.service
 
 import android.animation.ValueAnimator
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -40,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 class FloatingHudService : Service() {
@@ -86,6 +88,12 @@ class FloatingHudService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_PAUSE_READING) {
+            if (InDriveAccessibilityService.pause()) {
+                toast("تم إيقاف قراءة الشاشة. يمكنك فتح تطبيقات البنوك الآن، وشغّلها من نفس الإشعار عند العودة لإن درايف")
+            }
+            return START_STICKY
+        }
         if (intent?.action == ACTION_CAPTURE) {
             InDriveAccessibilityService.captureRequested = true
             toast("أغلق الإشعارات وافتح شاشة الطلبات في إن درايف: سيتم الالتقاط تلقائياً")
@@ -113,12 +121,37 @@ class FloatingHudService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Screen reading on: pause it here. Off: only the driver can switch it on, in Settings.
+        val reading = InDriveAccessibilityService.isRunning()
+        val readingAction = if (reading) {
+            NotificationCompat.Action(
+                android.R.drawable.ic_media_pause,
+                "إيقاف قراءة الشاشة",
+                PendingIntent.getService(
+                    this,
+                    3,
+                    Intent(this, FloatingHudService::class.java).setAction(ACTION_PAUSE_READING),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+        } else {
+            NotificationCompat.Action(
+                android.R.drawable.ic_media_play,
+                "تشغيل قراءة الشاشة",
+                ScreenReadingTileService.settingsPendingIntent(this, 4)
+            )
+        }
+
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
             .setContentTitle("The Driver")
-            .setContentText("المساعد العائم يعمل ويحلل عروض إن درايف")
+            .setContentText(
+                if (reading) "المساعد العائم يعمل ويحلل عروض إن درايف"
+                else "قراءة الشاشة متوقفة: لن تظهر العلامات حتى تشغّلها"
+            )
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(openIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent)
+            .addAction(readingAction)
             .addAction(
                 android.R.drawable.ic_menu_camera,
                 "التقاط للتشخيص",
@@ -339,7 +372,11 @@ class FloatingHudService : Service() {
     // RENDERING
     // =========================================================================
 
-    private data class BadgeTheme(val colorHex: String, val label: String)
+    /**
+     * [filled] = solid background (only "excellent", so it stands out more than "good");
+     * [glyph] = status symbol shown next to the colour so the state never relies on colour alone.
+     */
+    private data class BadgeTheme(val colorHex: String, val label: String, val filled: Boolean = false, val glyph: String? = null)
 
     /** Profitability decides the colour; zones only add a marker and a label. */
     private fun themeFor(ride: ParsedRideData, analysis: FareAnalysisResult): BadgeTheme {
@@ -350,10 +387,10 @@ class FloatingHudService : Service() {
             else -> ""
         } + if (ride.distanceEstimated) " • ربح تقريبي" else ""
         return when (analysis.profitabilityLevel) {
-            ProfitabilityLevel.EXCELLENT_PROFIT -> BadgeTheme(COLOR_EXCELLENT, "ربح ممتاز$zoneSuffix")
-            ProfitabilityLevel.GOOD_PROFIT -> BadgeTheme(COLOR_GOOD, "عرض رابح$zoneSuffix")
-            ProfitabilityLevel.POOR_MARGIN -> BadgeTheme(COLOR_POOR, "هامش ضعيف - اقترح زيادة$zoneSuffix")
-            ProfitabilityLevel.LOSS_DANGER -> BadgeTheme(COLOR_LOSS, "${analysis.statusMessage}$zoneSuffix")
+            ProfitabilityLevel.EXCELLENT_PROFIT -> BadgeTheme(COLOR_EXCELLENT, "ربح ممتاز$zoneSuffix", filled = true, glyph = "✓")
+            ProfitabilityLevel.GOOD_PROFIT -> BadgeTheme(COLOR_GOOD, "عرض رابح$zoneSuffix", glyph = "✓")
+            ProfitabilityLevel.POOR_MARGIN -> BadgeTheme(COLOR_POOR, "هامش ضعيف - اقترح زيادة$zoneSuffix", glyph = "!")
+            ProfitabilityLevel.LOSS_DANGER -> BadgeTheme(COLOR_LOSS, "${analysis.statusMessage}$zoneSuffix", glyph = "✕")
         }
     }
 
@@ -439,64 +476,80 @@ class FloatingHudService : Service() {
         val isFav = holder.analysis.isFavoriteZone && !holder.ride.distanceUnknown
 
         val badgeView = when (style) {
-            "SLIM_PILL" -> buildSlimPill(value, theme.colorHex, sizeScale, density)
-            "SPEEDO_GAUGE" -> buildSpeedoGauge(value, theme.colorHex, sizeScale, density)
-            "MINI_TAG" -> buildMiniTag(value, theme.colorHex, sizeScale, density)
-            "CORNER_RIBBON" -> buildCornerRibbon(value, theme.colorHex, sizeScale, density)
-            "GLOW_DOT" -> buildGlowDot(value, theme.colorHex, sizeScale, density)
-            else -> buildCompactCircle(value, theme.colorHex, sizeScale, density)
+            "SLIM_PILL" -> buildSlimPill(value, theme, sizeScale, density)
+            "SPEEDO_GAUGE" -> buildSpeedoGauge(value, theme, sizeScale, density)
+            "MINI_TAG" -> buildMiniTag(value, theme, sizeScale, density)
+            "CORNER_RIBBON" -> buildCornerRibbon(value, theme, sizeScale, density)
+            "GLOW_DOT" -> buildGlowDot(value, theme, sizeScale, density)
+            else -> buildCompactCircle(value, theme, sizeScale, density)
         }
         badgeView.contentDescription = "${theme.label}: ${badgeCaption()} $value"
 
         badgeView.setOnClickListener { togglePopupExpanded(holder) }
         setupDragTouchListener(badgeView, holder)
 
-        if (isFav) startPulsatingGlowAnimation(badgeView, holder, COLOR_FAVORITE)
-
         holder.container.addView(badgeView)
 
-        // Zone marker: gold star for favourites, red bar for blacklisted zones.
+        // Status symbol (top-end corner), so the verdict never relies on colour alone.
+        theme.glyph?.let { holder.container.addView(cornerChip(it, theme.colorHex, Gravity.TOP or Gravity.END, density)) }
+
+        // Zone marker (top-start corner): brand star for favourites, red sign for blacklisted zones.
         val marker = when {
-            holder.analysis.isBlacklistedZone -> "⛔" to "#FF3355"
+            holder.analysis.isBlacklistedZone -> "⛔" to COLOR_LOSS
             isFav -> "★" to COLOR_FAVORITE
             else -> null
         }
         if (marker != null) {
-            holder.container.addView(TextView(this).apply {
-                text = marker.first
-                setTextColor(Color.parseColor("#070B14"))
-                textSize = 9f
-                typeface = Typeface.DEFAULT_BOLD
-                gravity = Gravity.CENTER
-                val d = (16 * density).toInt()
-                layoutParams = FrameLayout.LayoutParams(d, d).apply { gravity = Gravity.TOP or Gravity.START }
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor(marker.second))
-                    setStroke((1 * density).toInt(), Color.parseColor("#070B14"))
-                }
-            })
+            holder.container.addView(cornerChip(marker.first, marker.second, Gravity.TOP or Gravity.START, density))
         }
     }
 
+    /** Small round chip pinned to a corner of the compact badge. */
+    private fun cornerChip(symbol: String, colorHex: String, corner: Int, density: Float): View = TextView(this).apply {
+        text = symbol
+        setTextColor(Color.parseColor(COLOR_INK))
+        textSize = 11f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        val d = (18 * density).toInt()
+        layoutParams = FrameLayout.LayoutParams(d, d).apply { gravity = corner }
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.parseColor(colorHex))
+            setStroke((1 * density).toInt(), Color.parseColor(COLOR_INK))
+        }
+        elevation = 9 * density
+    }
+
+    /** Badge text size: scaled with the chosen size, but never below 11sp. */
+    private fun sp(base: Float, scale: Float): Float = max(11f, base * scale)
+
+    /** Background of a badge: solid status colour when [BadgeTheme.filled], otherwise the dark default. */
+    private fun badgeFill(theme: BadgeTheme, darkDefault: String): Int =
+        Color.parseColor(if (theme.filled) theme.colorHex else darkDefault)
+
+    /** Text colour that stays readable on [badgeFill]. */
+    private fun badgeInk(theme: BadgeTheme): Int = if (theme.filled) Color.parseColor(COLOR_INK) else Color.WHITE
+
     // Style 1: COMPACT_CIRCLE
-    private fun buildCompactCircle(value: String, colorHex: String, scale: Float, density: Float): View {
-        val diameter = (52 * scale * density).toInt()
+    private fun buildCompactCircle(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val diameter = (56 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(diameter, diameter)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#0B0F19"))
-                setStroke((2.5f * density).toInt(), Color.parseColor(colorHex))
+                setColor(badgeFill(theme, "#0B0F19"))
+                setStroke((2.5f * density).toInt(), Color.parseColor(theme.colorHex))
             }
             elevation = 6 * density
         }
         layout.addView(TextView(this).apply {
             text = value
-            setTextColor(Color.WHITE)
-            textSize = 13f * scale
+            setTextColor(badgeInk(theme))
+            textSize = sp(14f, scale)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setSingleLine(true)
@@ -506,8 +559,8 @@ class FloatingHudService : Service() {
     }
 
     // Style 2: SLIM_PILL
-    private fun buildSlimPill(value: String, colorHex: String, scale: Float, density: Float): View {
-        val h = (30 * scale * density).toInt()
+    private fun buildSlimPill(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val h = (32 * scale * density).toInt()
         val padH = (10 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -517,8 +570,8 @@ class FloatingHudService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 16 * density
-                setColor(Color.parseColor("#0B0F19"))
-                setStroke((2.2f * density).toInt(), Color.parseColor(colorHex))
+                setColor(badgeFill(theme, "#0B0F19"))
+                setStroke((2.2f * density).toInt(), Color.parseColor(theme.colorHex))
             }
             elevation = 6 * density
         }
@@ -527,13 +580,13 @@ class FloatingHudService : Service() {
             layoutParams = LinearLayout.LayoutParams(dotSize, dotSize).apply { marginEnd = (6 * density).toInt() }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor(colorHex))
+                setColor(if (theme.filled) Color.parseColor(COLOR_INK) else Color.parseColor(theme.colorHex))
             }
         })
         layout.addView(TextView(this).apply {
             text = "$value ${badgeCaption()}"
-            setTextColor(Color.WHITE)
-            textSize = 12.5f * scale
+            setTextColor(badgeInk(theme))
+            textSize = sp(13.5f, scale)
             typeface = Typeface.DEFAULT_BOLD
             setSingleLine(true)
         })
@@ -541,9 +594,9 @@ class FloatingHudService : Service() {
     }
 
     // Style 3: SPEEDO_GAUGE
-    private fun buildSpeedoGauge(value: String, colorHex: String, scale: Float, density: Float): View {
-        val w = (58 * scale * density).toInt()
-        val h = (46 * scale * density).toInt()
+    private fun buildSpeedoGauge(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val w = (62 * scale * density).toInt()
+        val h = (50 * scale * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -551,37 +604,39 @@ class FloatingHudService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 10 * density
-                setColor(Color.parseColor("#0F172A"))
-                setStroke((2.5f * density).toInt(), Color.parseColor(colorHex))
+                setColor(badgeFill(theme, "#0F172A"))
+                setStroke((2.5f * density).toInt(), Color.parseColor(theme.colorHex))
             }
             elevation = 6 * density
         }
         layout.addView(View(this).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (3 * density).toInt())
-            background = GradientDrawable().apply { setColor(Color.parseColor(colorHex)) }
+            background = GradientDrawable().apply { setColor(Color.parseColor(theme.colorHex)) }
         })
         layout.addView(TextView(this).apply {
             text = value
-            setTextColor(Color.WHITE)
-            textSize = 13f * scale
+            setTextColor(badgeInk(theme))
+            textSize = sp(14f, scale)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setSingleLine(true)
+            includeFontPadding = false
             setPadding(0, (2 * density).toInt(), 0, 0)
         })
         layout.addView(TextView(this).apply {
             text = badgeCaption()
-            setTextColor(Color.parseColor("#94A3B8"))
-            textSize = 9f * scale
+            setTextColor(if (theme.filled) Color.parseColor(COLOR_INK) else Color.parseColor("#A3AEC2"))
+            textSize = 11f
             gravity = Gravity.CENTER
             setSingleLine(true)
+            includeFontPadding = false
         })
         return layout
     }
 
-    // Style 4: MINI_TAG
-    private fun buildMiniTag(value: String, colorHex: String, scale: Float, density: Float): View {
-        val h = (30 * scale * density).toInt()
+    // Style 4: MINI_TAG (always a solid tag; the corner symbol tells the states apart)
+    private fun buildMiniTag(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val h = (32 * scale * density).toInt()
         val padH = (9 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -591,22 +646,22 @@ class FloatingHudService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 6 * density
-                setColor(Color.parseColor(colorHex))
+                setColor(Color.parseColor(theme.colorHex))
             }
             elevation = 6 * density
         }
         layout.addView(TextView(this).apply {
             text = "$value ${badgeCaption()}"
-            setTextColor(Color.parseColor("#0F172A"))
-            textSize = 13f * scale
+            setTextColor(Color.parseColor(COLOR_INK))
+            textSize = sp(13.5f, scale)
             typeface = Typeface.DEFAULT_BOLD
         })
         return layout
     }
 
     // Style 5: CORNER_RIBBON
-    private fun buildCornerRibbon(value: String, colorHex: String, scale: Float, density: Float): View {
-        val h = (28 * scale * density).toInt()
+    private fun buildCornerRibbon(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val h = (30 * scale * density).toInt()
         val padH = (10 * density).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -616,37 +671,37 @@ class FloatingHudService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 12 * density
-                setColor(Color.parseColor("#0B132B"))
-                setStroke((1.8f * density).toInt(), Color.parseColor(colorHex))
+                setColor(badgeFill(theme, "#0B132B"))
+                setStroke((1.8f * density).toInt(), Color.parseColor(theme.colorHex))
             }
             elevation = 6 * density
         }
         layout.addView(TextView(this).apply {
             text = "${badgeCaption()} $value"
-            setTextColor(Color.parseColor(colorHex))
-            textSize = 12f * scale
+            setTextColor(if (theme.filled) Color.parseColor(COLOR_INK) else Color.parseColor(theme.colorHex))
+            textSize = sp(13f, scale)
             typeface = Typeface.DEFAULT_BOLD
         })
         return layout
     }
 
     // Style 6: GLOW_DOT
-    private fun buildGlowDot(value: String, colorHex: String, scale: Float, density: Float): View {
-        val diameter = (48 * scale * density).toInt()
+    private fun buildGlowDot(value: String, theme: BadgeTheme, scale: Float, density: Float): View {
+        val diameter = (52 * scale * density).toInt()
         val layout = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(diameter, diameter)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#0D1B2A"))
-                setStroke((3.5f * density).toInt(), Color.parseColor(colorHex))
+                setColor(badgeFill(theme, "#0D1B2A"))
+                setStroke((3.5f * density).toInt(), Color.parseColor(theme.colorHex))
             }
             elevation = 8 * density
         }
         layout.addView(TextView(this).apply {
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
             text = value
-            setTextColor(Color.WHITE)
-            textSize = 13.5f * scale
+            setTextColor(badgeInk(theme))
+            textSize = sp(14f, scale)
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         })
@@ -682,7 +737,7 @@ class FloatingHudService : Service() {
         }
         topRow.addView(TextView(this).apply {
             text = theme.label
-            setTextColor(if (theme.colorHex == COLOR_POOR || theme.colorHex == COLOR_GOOD) Color.parseColor("#070B14") else Color.WHITE)
+            setTextColor(Color.parseColor(COLOR_INK))
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(10f), dp(5f), dp(10f), dp(5f))
@@ -720,7 +775,7 @@ class FloatingHudService : Service() {
         val netProfitVal = String.format(Locale.US, "%.1f", analysis.netProfit)
         val profitPerKmVal = String.format(Locale.US, "%.1f", analysis.profitPerKm)
         val profitRow = infoRow(
-            "صافي الربح: $netProfitVal ج.م  ($profitPerKmVal ج/كم)",
+            "صافي الربح: $netProfitVal ج.م  ($profitPerKmVal ج.م/كم)",
             if (analysis.netProfit >= 0) "#38BDF8" else "#EF4444",
             density,
             bold = true
@@ -855,7 +910,7 @@ class FloatingHudService : Service() {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 10 * density
                 setColor(Color.parseColor("#0F1728"))
-                setStroke(dp(1.5f), Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) "#FF3355" else "#223554"))
+                setStroke(dp(1.5f), Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) COLOR_LOSS else "#223554"))
             }
             setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
         }
@@ -867,7 +922,7 @@ class FloatingHudService : Service() {
         }
         container.addView(TextView(this).apply {
             text = "$prefix: $address$statusTag"
-            setTextColor(Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) "#FF3355" else "#F8FAFC"))
+            setTextColor(Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) COLOR_LOSS else "#F8FAFC"))
             textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 2
@@ -900,8 +955,8 @@ class FloatingHudService : Service() {
 
         btnRow.addView(actionChip(
             label = if (isBlack) "إلغاء الحظر" else "+ محظورة",
-            textColor = Color.WHITE,
-            bgColor = if (isBlack) "#475569" else "#FF3355",
+            textColor = if (isBlack) Color.WHITE else Color.parseColor(COLOR_INK),
+            bgColor = if (isBlack) "#475569" else COLOR_LOSS,
             density = density,
             marginStart = dp(8f)
         ) {
@@ -952,28 +1007,6 @@ class FloatingHudService : Service() {
         holder.analysis = analyze(holder.ride)
         renderPopupIfChanged(holder)
         safeUpdateLayout(holder)
-    }
-
-    // =========================================================================
-    // PULSATING GLOW (favourite zones)
-    // =========================================================================
-    private fun startPulsatingGlowAnimation(view: View, holder: CardPopupViewHolder, colorHex: String) {
-        val baseColor = Color.parseColor(colorHex)
-        val strokeWidth = (3.5f * resources.displayMetrics.density).toInt()
-        val animator = ValueAnimator.ofFloat(0.35f, 1.0f).apply {
-            duration = 850L
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { va ->
-                val alpha = ((va.animatedValue as Float) * 255).toInt()
-                (view.background as? GradientDrawable)?.setStroke(
-                    strokeWidth,
-                    Color.argb(alpha, Color.red(baseColor), Color.green(baseColor), Color.blue(baseColor))
-                )
-            }
-        }
-        animator.start()
-        holder.pulseAnimator = animator
     }
 
     // Drag touch listener: the offset is remembered per card.
@@ -1074,13 +1107,17 @@ class FloatingHudService : Service() {
         private const val EXPANDED_HEIGHT_ESTIMATE_DP = 300
         const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
         const val ACTION_CAPTURE = "com.indrive.assistant.action.CAPTURE_SCREEN"
+        const val ACTION_PAUSE_READING = "com.indrive.assistant.action.PAUSE_SCREEN_READING"
 
-        private const val COLOR_EXCELLENT = "#10B981"
-        private const val COLOR_GOOD = "#00EA80"
-        private const val COLOR_POOR = "#FACC15"
-        private const val COLOR_LOSS = "#EF4444"
-        private const val COLOR_UNKNOWN = "#64748B"
-        private const val COLOR_FAVORITE = "#FFB800"
+        // Money colours only mean money; "excellent" is the strongest (solid fill), favourites use
+        // the brand indigo so they can't be confused with the amber "thin margin".
+        private const val COLOR_EXCELLENT = "#22C55E"
+        private const val COLOR_GOOD = "#4ADE80"
+        private const val COLOR_POOR = "#F59E0B"
+        private const val COLOR_LOSS = "#F87171"
+        private const val COLOR_UNKNOWN = "#94A3B8"
+        private const val COLOR_FAVORITE = "#7C8CFF"
+        private const val COLOR_INK = "#0B0F17"
 
         @Volatile
         private var activeInstance: FloatingHudService? = null
@@ -1091,5 +1128,18 @@ class FloatingHudService : Service() {
         }
 
         fun isRunning(): Boolean = activeInstance != null
+
+        /** Rebuilds the notification so its screen-reading action matches the service state. */
+        fun onScreenReadingChanged() {
+            val service = activeInstance ?: return
+            service.serviceScope.launch {
+                try {
+                    val nm = service.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.notify(NOTIFICATION_ID, service.createNotification())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notification refresh failed", e)
+                }
+            }
+        }
     }
 }

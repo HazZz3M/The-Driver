@@ -102,7 +102,7 @@ class _Ratio extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Text(label, style: const TextStyle(color: AppColors.textTertiary, fontSize: 11)),
+            Text(label, style: const TextStyle(color: AppColors.textTertiary, fontSize: 12)),
             const SizedBox(height: 2),
             FittedBox(
               child: Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w700)),

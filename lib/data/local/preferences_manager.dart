@@ -55,7 +55,8 @@ class PreferencesManager {
       targetDailyEarnings: prefs.getDouble(keyDailyTarget) ?? d.targetDailyEarnings,
       minProfitPerKm: prefs.getDouble(keyMinProfitKm) ?? d.minProfitPerKm,
       assumedTripKm: prefs.getDouble(keyAssumedTripKm) ?? d.assumedTripKm,
-      currency: prefs.getString(keyCurrency) ?? d.currency,
+      // Builds before 1.13 stored the Latin "EGP"; the UI is Arabic, so show "ج.م" everywhere.
+      currency: switch (prefs.getString(keyCurrency)) { null || "EGP" => d.currency, final c => c },
       favoriteZones: prefs.getStringList(keyFavoriteZones) ?? d.favoriteZones,
       blacklistedZones: prefs.getStringList(keyBlacklistedZones) ?? d.blacklistedZones,
       autoAcceptEnabled: prefs.getBool(keyAutoAcceptEnabled) ?? d.autoAcceptEnabled,

@@ -3,7 +3,9 @@ package com.indrive.assistant.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -11,6 +13,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.provider.Settings
+import android.service.quicksettings.TileService
 import android.text.TextUtils
 import android.util.Log
 import android.view.Display
@@ -51,7 +54,73 @@ class InDriveAccessibilityService : AccessibilityService() {
         workerThread = HandlerThread("a11y-ride-parser").apply { start() }
         worker = Handler(workerThread.looper)
         instance = this
+        restrictEventsToInDrive()
+        onRunningStateChanged(this)
         Log.d(TAG, "InDriveAccessibilityService connected")
+    }
+
+    /**
+     * Ask the system for events from the installed inDrive packages only, instead of every app.
+     * Leaving inDrive then produces no event, so [leaveCheckRunnable] notices it instead.
+     */
+    private fun restrictEventsToInDrive() {
+        val info = serviceInfo ?: return
+        val installed = try {
+            val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            packageManager.queryIntentActivities(launcher, 0)
+                .map { it.activityInfo.packageName }
+                .filter { isTargetPackage(it, packageName) }
+                .distinct()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not list installed inDrive packages", e)
+            emptyList()
+        }
+        info.packageNames = (installed.ifEmpty { listOf(DEFAULT_INDRIVE_PACKAGE) }).toTypedArray()
+        serviceInfo = info
+        Log.d(TAG, "Listening to: ${info.packageNames.joinToString()}")
+    }
+
+    // Accessed only on the worker thread.
+    private var popupsShown = false
+    private var missedLeaveChecks = 0
+
+    /**
+     * While badges are on screen, checks every second that inDrive is still in front and hides
+     * them once it is not (events from other apps no longer reach this service).
+     */
+    private val leaveCheckRunnable: Runnable = Runnable {
+        if (!popupsShown) return@Runnable
+        val root = rootInActiveWindow
+        val pkg = root?.packageName?.toString()
+        root?.recycle()
+        val inDriveInFront = pkg != null && isTargetPackage(pkg, packageName)
+        val transient = pkg != null && isTransientPackage(pkg, packageName)
+        // An unreadable window twice in a row (another app, a lock screen) counts as leaving.
+        missedLeaveChecks = if (pkg == null) missedLeaveChecks + 1 else 0
+        if (!inDriveInFront && !transient && (pkg != null || missedLeaveChecks >= 2)) {
+            hidePopups()
+        } else {
+            worker.postDelayed(leaveCheckRunnable, LEAVE_CHECK_MS)
+        }
+    }
+
+    /** Runs on the worker thread. */
+    private fun showPopups(rides: List<ParsedRideData>) {
+        FloatingHudService.onCardsSync(rides)
+        val wasShown = popupsShown
+        popupsShown = rides.isNotEmpty()
+        if (popupsShown && !wasShown) {
+            missedLeaveChecks = 0
+            worker.postDelayed(leaveCheckRunnable, LEAVE_CHECK_MS)
+        }
+    }
+
+    /** Runs on the worker thread. */
+    private fun hidePopups() {
+        worker.removeCallbacks(leaveCheckRunnable)
+        popupsShown = false
+        pendingAutoAcceptFingerprint = null
+        FloatingHudService.onCardsSync(emptyList())
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -69,11 +138,11 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
             event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && !isTransientPackage(pkg, packageName) -> {
-                // The driver switched to a different app: hide all ride popups.
+                // The driver switched to a different app (only seen if the package filter is not
+                // applied): hide all ride popups.
                 worker.removeCallbacks(scanRunnable)
                 scanScheduled = false
-                pendingAutoAcceptFingerprint = null
-                FloatingHudService.onCardsSync(emptyList())
+                worker.post { hidePopups() }
             }
             // System UI, keyboards and our own overlay windows: keep popups as they are.
         }
@@ -85,7 +154,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         try {
             val pkg = root.packageName?.toString() ?: return
             if (!isTargetPackage(pkg, packageName)) {
-                if (!isTransientPackage(pkg, packageName)) FloatingHudService.onCardsSync(emptyList())
+                if (!isTransientPackage(pkg, packageName)) hidePopups()
                 return
             }
             val rides = findRideCards(root)
@@ -93,7 +162,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 captureRequested = false
                 saveDiagnosticDump(root, pkg, rides)
             }
-            FloatingHudService.onCardsSync(rides)
+            showPopups(rides)
             maybeScheduleAutoAccept(rides)
             maybeReadTripFromMap(root, rides)
         } catch (e: Exception) {
@@ -399,6 +468,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             instance = null
         }
         FloatingHudService.onCardsSync(emptyList())
+        onRunningStateChanged(this)
         super.onDestroy()
     }
 
@@ -408,9 +478,36 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val AUTO_ACCEPT_COOLDOWN_MS = 5000L
         private const val MAX_DUMP_NODES = 900
         const val DUMP_FILE = "inDrive_screen_dump.txt"
+        private const val LEAVE_CHECK_MS = 1000L
+        /** Used as the event filter when no inDrive app can be found on the phone. */
+        private const val DEFAULT_INDRIVE_PACKAGE = "sinet.startup.inDriver"
 
         @Volatile
         private var instance: InDriveAccessibilityService? = null
+
+        /** True while the service is switched on in Android's accessibility settings and connected. */
+        fun isRunning(): Boolean = instance != null
+
+        /**
+         * Switches the service off in Android's accessibility settings (as if the driver turned it
+         * off), e.g. so banking apps that refuse to run next to a screen reader can be opened.
+         * Only the driver can switch it back on, from Settings. Returns false if it was not running.
+         */
+        fun pause(): Boolean {
+            val service = instance ?: return false
+            service.disableSelf()
+            return true
+        }
+
+        /** Refreshes the Quick Settings tile and the HUD notification after the service starts / stops. */
+        private fun onRunningStateChanged(context: Context) {
+            try {
+                TileService.requestListeningState(context, ComponentName(context, ScreenReadingTileService::class.java))
+            } catch (e: Exception) {
+                Log.w(TAG, "Tile refresh failed", e)
+            }
+            FloatingHudService.onScreenReadingChanged()
+        }
 
         /** Set by the app / HUD notification; the next inDrive scan writes a diagnostic dump. */
         @Volatile
