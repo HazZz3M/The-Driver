@@ -1,7 +1,7 @@
 name: indrive_assistant
 description: "Smart Driver Companion, Fare Optimizer & Floating HUD for inDrive Drivers."
 publish_to: 'none'
-version: 1.16.0+21
+version: 1.17.0+22
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
