@@ -23,8 +23,22 @@ data class DriverSettings(
     val autoAcceptMaxPickupKm: Double = 3.5,
     val autoAcceptOnlyFavoriteZones: Boolean = false,
     val autoAcceptRejectBlacklisted: Boolean = true,
-    val autoAcceptDelaySeconds: Double = 1.5
+    val autoAcceptDelaySeconds: Double = 1.5,
+
+    // Pickup pricing (mirrors driver_settings.dart; see FareCalculatorEngine.fairPrice)
+    val pickupPricingEnabled: Boolean = true,
+    val pickupProfitPerKm: Double = 3.0,
+    /** Share of the inDrive commission counted on pickup km, in %. */
+    val pickupCommissionSharePercent: Double = 50.0,
+
+    // Passenger lists (matched by the name shown on the card)
+    val favoritePassengers: List<String> = emptyList(),
+    val blacklistedPassengers: List<String> = emptyList()
 ) {
+    fun isFavoritePassenger(name: String?): Boolean = FareCalculatorEngine.matchPassenger(name, favoritePassengers) != null
+
+    fun isBlacklistedPassenger(name: String?): Boolean = FareCalculatorEngine.matchPassenger(name, blacklistedPassengers) != null
+
     fun matchedFavorite(zone: String?): String? = FareCalculatorEngine.matchZone(zone, favoriteZones)
 
     fun matchedBlacklist(zone: String?): String? = FareCalculatorEngine.matchZone(zone, blacklistedZones)

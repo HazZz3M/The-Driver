@@ -83,8 +83,19 @@ class AssistantProvider extends ChangeNotifier {
       final black = native.mode == "replace"
           ? native.blacklistedZones
           : _union(driverSettings.blacklistedZones, native.blacklistedZones);
-      if (!listEquals(fav, driverSettings.favoriteZones) || !listEquals(black, driverSettings.blacklistedZones)) {
-        driverSettings = driverSettings.copyWith(favoriteZones: fav, blacklistedZones: black);
+      // Passenger lists only come back when edited from the HUD ("replace").
+      final favP = native.mode == "replace" ? native.favoritePassengers ?? driverSettings.favoritePassengers : driverSettings.favoritePassengers;
+      final blackP = native.mode == "replace" ? native.blacklistedPassengers ?? driverSettings.blacklistedPassengers : driverSettings.blacklistedPassengers;
+      if (!listEquals(fav, driverSettings.favoriteZones) ||
+          !listEquals(black, driverSettings.blacklistedZones) ||
+          !listEquals(favP, driverSettings.favoritePassengers) ||
+          !listEquals(blackP, driverSettings.blacklistedPassengers)) {
+        driverSettings = driverSettings.copyWith(
+          favoriteZones: fav,
+          blacklistedZones: black,
+          favoritePassengers: favP,
+          blacklistedPassengers: blackP,
+        );
         _recalculateAnalysis();
         notifyListeners();
         await repository.updateDriverSettings(driverSettings);
@@ -525,6 +536,21 @@ class AssistantProvider extends ChangeNotifier {
     } else {
       notifyListeners();
     }
+  }
+
+  // Passenger Lists
+  /// [favorite] true → favourites, false → blocked, null → removes the name from both lists.
+  /// Returns false when [name] is empty.
+  Future<bool> setPassengerList(String name, bool? favorite) async {
+    final clean = name.trim();
+    if (clean.isEmpty) return false;
+    bool same(String p) => FareCalculatorEngine.matchPassenger(clean, [p]) != null;
+    final fav = driverSettings.favoritePassengers.where((p) => !same(p)).toList();
+    final black = driverSettings.blacklistedPassengers.where((p) => !same(p)).toList();
+    if (favorite == true) fav.add(clean);
+    if (favorite == false) black.add(clean);
+    await updateSettings(driverSettings.copyWith(favoritePassengers: fav, blacklistedPassengers: black));
+    return true;
   }
 
   // Zone Actions

@@ -55,7 +55,11 @@ data class FareAnalysisResult(
     val isFavoriteZone: Boolean = false,
     val matchedFavoriteZone: String? = null,
     val isBlacklistedZone: Boolean = false,
-    val matchedBlacklistZone: String? = null
+    val matchedBlacklistZone: String? = null,
+
+    // Passenger lists
+    val isFavoritePassenger: Boolean = false,
+    val isBlacklistedPassenger: Boolean = false
 )
 
 object FareCalculatorEngine {
@@ -97,7 +101,8 @@ object FareCalculatorEngine {
         offeredFare: Double,
         settings: DriverSettings,
         pickupAddress: String = "",
-        dropoffAddress: String = ""
+        dropoffAddress: String = "",
+        passengerName: String = ""
     ): FareAnalysisResult {
         val totalDistanceKm = max(0.1, pickupDistanceKm + tripDistanceKm)
         val validMinutes = max(1, estimatedMinutes)
@@ -129,10 +134,14 @@ object FareCalculatorEngine {
         val rawBreakEven = nonCommissionCosts / netDivisor
         val breakEvenFare = roundToSmartStep(rawBreakEven)
 
-        // Recommended Sweet Spot (Yields target profit per km)
-        val targetProfit = totalDistanceKm * settings.minProfitPerKm
-        val rawRecommended = (nonCommissionCosts + targetProfit) / netDivisor
+        // Recommended Sweet Spot (the fair price)
+        val rawRecommended = fairPrice(pickupDistanceKm, totalDistanceKm - max(0.0, pickupDistanceKm), settings)
         val recommendedFare = max(breakEvenFare + 10.0, roundToSmartStep(rawRecommended))
+
+        // Net profit targeted on this ride: what the fair price leaves after all costs.
+        // Without pickup pricing this is exactly totalKm × minProfitPerKm.
+        val targetProfit = max(0.0, rawRecommended * (1.0 - commissionRate) - nonCommissionCosts)
+        val targetProfitPerKm = targetProfit / totalDistanceKm
 
         // Aggressive Bid (Target profit * 1.5 or rush surge)
         val rawAggressive = (nonCommissionCosts + (targetProfit * 1.6)) / netDivisor
@@ -147,7 +156,7 @@ object FareCalculatorEngine {
         var (level, statusMessage, warningNote) = evaluateProfitability(
             netProfit = netProfit,
             profitPerKm = profitPerKm,
-            minTargetProfitPerKm = settings.minProfitPerKm,
+            minTargetProfitPerKm = targetProfitPerKm,
             totalOperatingCost = totalOperatingCost,
             offeredFare = offeredFare
         )
@@ -155,7 +164,7 @@ object FareCalculatorEngine {
         // Apply Zone Business Rules:
         if (matchedBlacklist != null) {
             // Rule: Accept only if fare is exceptionally high
-            if (offeredFare >= aggressiveFare || profitPerKm >= settings.minProfitPerKm * 1.4) {
+            if (offeredFare >= aggressiveFare || profitPerKm >= targetProfitPerKm * 1.4) {
                 level = ProfitabilityLevel.GOOD_PROFIT
                 statusMessage = "مقبول فقط لارتفاع السعر الاستثنائي"
                 warningNote = "تنبيه: الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع."
@@ -170,6 +179,17 @@ object FareCalculatorEngine {
             } else if (level == ProfitabilityLevel.POOR_MARGIN) {
                 statusMessage = "منطقة مفضلة ($matchedFavorite) - ارفع السعر قليلاً"
             }
+        }
+
+        // Passenger lists: a blocked passenger is always a rejection; a favourite only adds a note.
+        val blockedPassenger = matchPassenger(passengerName, settings.blacklistedPassengers)
+        val favoritePassenger = if (blockedPassenger == null) matchPassenger(passengerName, settings.favoritePassengers) else null
+        if (blockedPassenger != null) {
+            level = ProfitabilityLevel.LOSS_DANGER
+            statusMessage = "عميل محظور ($blockedPassenger)"
+            warningNote = "العميل ده في قائمتك المحظورة."
+        } else if (favoritePassenger != null && level != ProfitabilityLevel.LOSS_DANGER) {
+            statusMessage = "عميل مميز ($favoritePassenger) - $statusMessage"
         }
 
         // Create Smart Bid Cards
@@ -225,8 +245,36 @@ object FareCalculatorEngine {
             isFavoriteZone = (matchedFavorite != null),
             matchedFavoriteZone = matchedFavorite,
             isBlacklistedZone = (matchedBlacklist != null),
-            matchedBlacklistZone = matchedBlacklist
+            matchedBlacklistZone = matchedBlacklist,
+            isFavoritePassenger = favoritePassenger != null,
+            isBlacklistedPassenger = blockedPassenger != null
         )
+    }
+
+    /**
+     * The fair price before rounding (mirrors fairPrice in fare_calculator_engine.dart).
+     * Trip km: fuel + wear + profit per km, grossed up for the full commission. With pickup pricing
+     * on, pickup km use their own profit per km and only a share of the commission.
+     */
+    fun fairPrice(pickupDistanceKm: Double, tripDistanceKm: Double, settings: DriverSettings): Double {
+        val costPerKm = (settings.fuelConsumptionLPer100Km / 100.0) * settings.fuelPricePerLiter + settings.wearAndTearPerKm
+        val c = settings.inDriveCommissionPercent / 100.0
+        val pickupKm = max(0.0, pickupDistanceKm)
+        val tripKm = max(0.0, tripDistanceKm)
+        if (!settings.pickupPricingEnabled) {
+            return (pickupKm + tripKm) * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c)
+        }
+        val share = (settings.pickupCommissionSharePercent / 100.0).coerceIn(0.0, 1.0)
+        val tripPart = tripKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c)
+        val pickupPart = pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share)
+        return tripPart + pickupPart
+    }
+
+    /** Exact (normalised) name match; first names are short, so a substring match would be wrong. */
+    fun matchPassenger(name: String?, list: List<String>): String? {
+        if (name.isNullOrBlank()) return null
+        val n = normalizeArabicText(name)
+        return list.firstOrNull { normalizeArabicText(it) == n }
     }
 
     private fun evaluateProfitability(

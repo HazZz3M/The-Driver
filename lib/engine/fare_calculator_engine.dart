@@ -63,6 +63,10 @@ class FareAnalysisResult {
   final bool isBlacklistedZone;
   final String? matchedBlacklistZone;
 
+  // Passenger lists
+  final bool isFavoritePassenger;
+  final bool isBlacklistedPassenger;
+
   const FareAnalysisResult({
     required this.pickupDistanceKm,
     required this.tripDistanceKm,
@@ -89,6 +93,8 @@ class FareAnalysisResult {
     this.matchedFavoriteZone,
     this.isBlacklistedZone = false,
     this.matchedBlacklistZone,
+    this.isFavoritePassenger = false,
+    this.isBlacklistedPassenger = false,
   });
 }
 
@@ -133,6 +139,7 @@ class FareCalculatorEngine {
     required DriverSettings settings,
     String pickupAddress = "",
     String dropoffAddress = "",
+    String passengerName = "",
   }) {
     final totalDistanceKm = max(0.1, pickupDistanceKm + tripDistanceKm);
     final validMinutes = max(1, estimatedMinutes);
@@ -164,10 +171,18 @@ class FareCalculatorEngine {
     final rawBreakEven = nonCommissionCosts / netDivisor;
     final breakEvenFare = roundToSmartStep(rawBreakEven);
 
-    // Recommended Sweet Spot (Yields target profit per km)
-    final targetProfit = totalDistanceKm * settings.minProfitPerKm;
-    final rawRecommended = (nonCommissionCosts + targetProfit) / netDivisor;
+    // Recommended Sweet Spot (the fair price)
+    final rawRecommended = fairPrice(
+      pickupDistanceKm: pickupDistanceKm,
+      tripDistanceKm: totalDistanceKm - max(0.0, pickupDistanceKm),
+      settings: settings,
+    );
     final recommendedFare = max(breakEvenFare + 10.0, roundToSmartStep(rawRecommended));
+
+    // Net profit the driver targets on this ride: what the fair price leaves after all costs.
+    // Without pickup pricing this is exactly totalKm × minProfitPerKm.
+    final targetProfit = max(0.0, rawRecommended * (1.0 - commissionRate) - nonCommissionCosts);
+    final targetProfitPerKm = targetProfit / totalDistanceKm;
 
     // Aggressive Bid (Target profit * 1.6)
     final rawAggressive = (nonCommissionCosts + (targetProfit * 1.6)) / netDivisor;
@@ -182,7 +197,7 @@ class FareCalculatorEngine {
     final evaluation = _evaluateProfitability(
       netProfit: netProfit,
       profitPerKm: profitPerKm,
-      minTargetProfitPerKm: settings.minProfitPerKm,
+      minTargetProfitPerKm: targetProfitPerKm,
       totalOperatingCost: totalOperatingCost,
       offeredFare: offeredFare,
     );
@@ -193,7 +208,7 @@ class FareCalculatorEngine {
 
     // Apply Zone Business Rules
     if (matchedBlacklist != null) {
-      if (offeredFare >= aggressiveFare || profitPerKm >= settings.minProfitPerKm * 1.4) {
+      if (offeredFare >= aggressiveFare || profitPerKm >= targetProfitPerKm * 1.4) {
         level = ProfitabilityLevel.goodProfit;
         statusMessage = "مقبول فقط لارتفاع السعر الاستثنائي";
         warningNote = "تنبيه: الرحلة تمر بمنطقة غير مرغوبة ($matchedBlacklist). القبول مشروط بالسعر المرتفع.";
@@ -208,6 +223,17 @@ class FareCalculatorEngine {
       } else if (level == ProfitabilityLevel.poorMargin) {
         statusMessage = "منطقة مفضلة ($matchedFavorite) - ارفع السعر قليلاً";
       }
+    }
+
+    // Passenger lists: a blocked passenger is always a rejection; a favourite only adds a note.
+    final blockedPassenger = matchPassenger(passengerName, settings.blacklistedPassengers);
+    final favoritePassenger = blockedPassenger == null ? matchPassenger(passengerName, settings.favoritePassengers) : null;
+    if (blockedPassenger != null) {
+      level = ProfitabilityLevel.lossDanger;
+      statusMessage = "عميل محظور ($blockedPassenger)";
+      warningNote = "العميل ده في قائمتك المحظورة.";
+    } else if (favoritePassenger != null && level != ProfitabilityLevel.lossDanger) {
+      statusMessage = "عميل مميز ($favoritePassenger) - $statusMessage";
     }
 
     // Create Smart Bid Cards
@@ -264,7 +290,43 @@ class FareCalculatorEngine {
       matchedFavoriteZone: matchedFavorite,
       isBlacklistedZone: matchedBlacklist != null,
       matchedBlacklistZone: matchedBlacklist,
+      isFavoritePassenger: favoritePassenger != null,
+      isBlacklistedPassenger: blockedPassenger != null,
     );
+  }
+
+  /// The fair price before rounding.
+  ///
+  /// Trip km: fuel + wear + the driver's profit per km, grossed up for the full inDrive commission.
+  /// With pickup pricing on, pickup km are priced on their own, cheaper: fuel + wear + the
+  /// pickup profit per km, grossed up for only a share of the commission (e.g. 50% of 10%).
+  /// With it off, every km is priced like a trip km (the pre-1.15 formula).
+  static double fairPrice({
+    required double pickupDistanceKm,
+    required double tripDistanceKm,
+    required DriverSettings settings,
+  }) {
+    final costPerKm = (settings.fuelConsumptionLPer100Km / 100.0) * settings.fuelPricePerLiter + settings.wearAndTearPerKm;
+    final c = settings.inDriveCommissionPercent / 100.0;
+    final pickupKm = max(0.0, pickupDistanceKm);
+    final tripKm = max(0.0, tripDistanceKm);
+    if (!settings.pickupPricingEnabled) {
+      return (pickupKm + tripKm) * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c);
+    }
+    final share = (settings.pickupCommissionSharePercent / 100.0).clamp(0.0, 1.0);
+    final tripPart = tripKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c);
+    final pickupPart = pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share);
+    return tripPart + pickupPart;
+  }
+
+  /// Exact (normalised) name match; first names are short, so a substring match would be wrong.
+  static String? matchPassenger(String? name, List<String> list) {
+    if (name == null || name.trim().isEmpty) return null;
+    final n = normalizeArabicText(name);
+    for (final p in list) {
+      if (normalizeArabicText(p) == n) return p;
+    }
+    return null;
   }
 
   static (ProfitabilityLevel, String, String?) _evaluateProfitability({

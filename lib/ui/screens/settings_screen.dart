@@ -49,6 +49,13 @@ class SettingsScreen extends StatelessWidget {
                 subtitle: "${s.favoriteZones.length} مفضلة • ${s.blacklistedZones.length} محظورة",
                 onTap: () => _open(context, const ZonesPage()),
               ),
+              NavTile(
+                icon: Icons.people_alt_outlined,
+                color: AppColors.accentAmber,
+                title: "العملاء",
+                subtitle: "${s.favoritePassengers.length} مميز • ${s.blacklistedPassengers.length} محظور",
+                onTap: () => _open(context, const PassengersPage()),
+              ),
             ]),
 
             const SectionLabel("الحسابات"),
@@ -58,7 +65,8 @@ class SettingsScreen extends StatelessWidget {
                 color: AppColors.accentCyan,
                 title: "التسعير والتكاليف",
                 subtitle:
-                    "عمولة ${formatNumber(s.inDriveCommissionPercent)}% • هدف ${formatNumber(s.minProfitPerKm)} ${s.currency}/كم",
+                    "عمولة ${formatNumber(s.inDriveCommissionPercent)}% • هدف ${formatNumber(s.minProfitPerKm)} ${s.currency}/كم"
+                    "${s.pickupPricingEnabled ? " • الوصول ${formatNumber(s.pickupProfitPerKm)}" : ""}",
                 onTap: () => _open(context, const PricingPage()),
               ),
             ]),

@@ -33,6 +33,12 @@ class PreferencesManager {
   static const String keyAutoAcceptDelay = "auto_accept_delay";
   static const String keyAutoAcceptConsentGiven = "auto_accept_consent_given";
 
+  static const String keyPickupPricingEnabled = "pickup_pricing_enabled";
+  static const String keyPickupProfitKm = "pickup_profit_km";
+  static const String keyPickupCommissionShare = "pickup_commission_share";
+  static const String keyFavoritePassengers = "favorite_passengers";
+  static const String keyBlacklistedPassengers = "blacklisted_passengers";
+
   static const String keyShiftActive = "shift_active";
   static const String keyShiftStartTime = "shift_start_time";
 
@@ -66,6 +72,11 @@ class PreferencesManager {
       autoAcceptOnlyFavoriteZones: prefs.getBool(keyAutoAcceptOnlyFav) ?? d.autoAcceptOnlyFavoriteZones,
       autoAcceptRejectBlacklisted: prefs.getBool(keyAutoAcceptRejectBlack) ?? d.autoAcceptRejectBlacklisted,
       autoAcceptDelaySeconds: prefs.getDouble(keyAutoAcceptDelay) ?? d.autoAcceptDelaySeconds,
+      pickupPricingEnabled: prefs.getBool(keyPickupPricingEnabled) ?? d.pickupPricingEnabled,
+      pickupProfitPerKm: prefs.getDouble(keyPickupProfitKm) ?? d.pickupProfitPerKm,
+      pickupCommissionSharePercent: prefs.getDouble(keyPickupCommissionShare) ?? d.pickupCommissionSharePercent,
+      favoritePassengers: prefs.getStringList(keyFavoritePassengers) ?? d.favoritePassengers,
+      blacklistedPassengers: prefs.getStringList(keyBlacklistedPassengers) ?? d.blacklistedPassengers,
     );
   }
 
@@ -89,6 +100,11 @@ class PreferencesManager {
       prefs.setBool(keyAutoAcceptOnlyFav, s.autoAcceptOnlyFavoriteZones),
       prefs.setBool(keyAutoAcceptRejectBlack, s.autoAcceptRejectBlacklisted),
       prefs.setDouble(keyAutoAcceptDelay, s.autoAcceptDelaySeconds),
+      prefs.setBool(keyPickupPricingEnabled, s.pickupPricingEnabled),
+      prefs.setDouble(keyPickupProfitKm, s.pickupProfitPerKm),
+      prefs.setDouble(keyPickupCommissionShare, s.pickupCommissionSharePercent),
+      prefs.setStringList(keyFavoritePassengers, s.favoritePassengers),
+      prefs.setStringList(keyBlacklistedPassengers, s.blacklistedPassengers),
     ]);
   }
 

@@ -25,4 +25,9 @@ class AssistantRepository(
     fun removeBlacklistZone(zone: String): Boolean = preferencesManager.removeBlacklistZone(zone)
     fun isFavoriteZone(zone: String): Boolean = preferencesManager.isFavoriteZone(zone)
     fun isBlacklistedZone(zone: String): Boolean = preferencesManager.isBlacklistedZone(zone)
+
+    /** favorite = true → favourites, false → blocked, null → neither. */
+    fun setPassengerList(name: String, favorite: Boolean?) = preferencesManager.setPassengerList(name, favorite)
+    fun isFavoritePassenger(name: String): Boolean = preferencesManager.isFavoritePassenger(name)
+    fun isBlacklistedPassenger(name: String): Boolean = preferencesManager.isBlacklistedPassenger(name)
 }
