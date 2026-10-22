@@ -22,6 +22,16 @@ class DriverSettings {
   final bool autoAcceptRejectBlacklisted;
   final double autoAcceptDelaySeconds;
 
+  // Pickup pricing: the km to the passenger are priced cheaper than trip km (see fairPrice).
+  final bool pickupPricingEnabled;
+  final double pickupProfitPerKm;
+  /// Share of the inDrive commission counted on pickup km, in % (50 = half of the commission).
+  final double pickupCommissionSharePercent;
+
+  // Passenger lists (matched by the name shown on the card)
+  final List<String> favoritePassengers;
+  final List<String> blacklistedPassengers;
+
   const DriverSettings({
     this.fuelConsumptionLPer100Km = 8.5,
     this.fuelPricePerLiter = 15.25,
@@ -41,7 +51,16 @@ class DriverSettings {
     this.autoAcceptOnlyFavoriteZones = false,
     this.autoAcceptRejectBlacklisted = true,
     this.autoAcceptDelaySeconds = 1.5,
+    this.pickupPricingEnabled = true,
+    this.pickupProfitPerKm = 3.0,
+    this.pickupCommissionSharePercent = 50.0,
+    this.favoritePassengers = const [],
+    this.blacklistedPassengers = const [],
   });
+
+  bool isFavoritePassenger(String? name) => FareCalculatorEngine.matchPassenger(name, favoritePassengers) != null;
+
+  bool isBlacklistedPassenger(String? name) => FareCalculatorEngine.matchPassenger(name, blacklistedPassengers) != null;
 
   bool isFavorite(String? zone) => FareCalculatorEngine.matchZone(zone, favoriteZones) != null;
 
@@ -65,6 +84,11 @@ class DriverSettings {
     bool? autoAcceptOnlyFavoriteZones,
     bool? autoAcceptRejectBlacklisted,
     double? autoAcceptDelaySeconds,
+    bool? pickupPricingEnabled,
+    double? pickupProfitPerKm,
+    double? pickupCommissionSharePercent,
+    List<String>? favoritePassengers,
+    List<String>? blacklistedPassengers,
   }) {
     return DriverSettings(
       fuelConsumptionLPer100Km: fuelConsumptionLPer100Km ?? this.fuelConsumptionLPer100Km,
@@ -84,6 +108,11 @@ class DriverSettings {
       autoAcceptOnlyFavoriteZones: autoAcceptOnlyFavoriteZones ?? this.autoAcceptOnlyFavoriteZones,
       autoAcceptRejectBlacklisted: autoAcceptRejectBlacklisted ?? this.autoAcceptRejectBlacklisted,
       autoAcceptDelaySeconds: autoAcceptDelaySeconds ?? this.autoAcceptDelaySeconds,
+      pickupPricingEnabled: pickupPricingEnabled ?? this.pickupPricingEnabled,
+      pickupProfitPerKm: pickupProfitPerKm ?? this.pickupProfitPerKm,
+      pickupCommissionSharePercent: pickupCommissionSharePercent ?? this.pickupCommissionSharePercent,
+      favoritePassengers: favoritePassengers ?? this.favoritePassengers,
+      blacklistedPassengers: blacklistedPassengers ?? this.blacklistedPassengers,
     );
   }
 
@@ -107,6 +136,11 @@ class DriverSettings {
       'autoAcceptOnlyFavoriteZones': autoAcceptOnlyFavoriteZones,
       'autoAcceptRejectBlacklisted': autoAcceptRejectBlacklisted,
       'autoAcceptDelaySeconds': autoAcceptDelaySeconds,
+      'pickupPricingEnabled': pickupPricingEnabled,
+      'pickupProfitPerKm': pickupProfitPerKm,
+      'pickupCommissionSharePercent': pickupCommissionSharePercent,
+      'favoritePassengers': favoritePassengers,
+      'blacklistedPassengers': blacklistedPassengers,
     };
   }
 }

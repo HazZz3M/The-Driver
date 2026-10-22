@@ -11,8 +11,12 @@ class NativeZones {
   final String mode;
   final List<String> favoriteZones;
   final List<String> blacklistedZones;
+  /// Passenger lists edited from the HUD (same "mode"); null from builds before 1.15.
+  final List<String>? favoritePassengers;
+  final List<String>? blacklistedPassengers;
 
-  const NativeZones(this.mode, this.favoriteZones, this.blacklistedZones);
+  const NativeZones(this.mode, this.favoriteZones, this.blacklistedZones,
+      [this.favoritePassengers, this.blacklistedPassengers]);
 }
 
 class NativeBridgeService {
@@ -112,7 +116,9 @@ class NativeBridgeService {
       if (raw == null) return null;
       final json = jsonDecode(raw) as Map<String, dynamic>;
       List<String> list(String k) => ((json[k] as List?) ?? const []).map((e) => e.toString()).toList();
-      return NativeZones(json['mode'] as String? ?? "none", list('favoriteZones'), list('blacklistedZones'));
+      List<String>? optList(String k) => json.containsKey(k) ? list(k) : null;
+      return NativeZones(json['mode'] as String? ?? "none", list('favoriteZones'), list('blacklistedZones'),
+          optList('favoritePassengers'), optList('blacklistedPassengers'));
     } catch (e) {
       debugPrint("getNativeZones failed: $e");
       return null;

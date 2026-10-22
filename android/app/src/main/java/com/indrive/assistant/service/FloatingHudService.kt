@@ -240,7 +240,8 @@ class FloatingHudService : Service() {
             offeredFare = card.fare,
             settings = settings,
             pickupAddress = card.pickupAddress,
-            dropoffAddress = card.dropoffAddress
+            dropoffAddress = card.dropoffAddress,
+            passengerName = card.passengerName
         )
     }
 
@@ -404,7 +405,8 @@ class FloatingHudService : Service() {
             r.pickupAddress, r.dropoffAddress, String.format(Locale.US, "%.1f/%.1f", r.pickupDistanceKm, r.tripDistanceKm),
             hudPrefs(),
             repo.isFavoriteZone(r.pickupAddress), repo.isBlacklistedZone(r.pickupAddress),
-            repo.isFavoriteZone(r.dropoffAddress), repo.isBlacklistedZone(r.dropoffAddress)
+            repo.isFavoriteZone(r.dropoffAddress), repo.isBlacklistedZone(r.dropoffAddress),
+            r.passengerName, repo.isFavoritePassenger(r.passengerName), repo.isBlacklistedPassenger(r.passengerName)
         ).joinToString("|")
         if (key == holder.renderKey) return
         holder.renderKey = key
@@ -473,7 +475,7 @@ class FloatingHudService : Service() {
         }
 
         val value = badgeValue(holder)
-        val isFav = holder.analysis.isFavoriteZone && !holder.ride.distanceUnknown
+        val isFav = (holder.analysis.isFavoriteZone || holder.analysis.isFavoritePassenger) && !holder.ride.distanceUnknown
 
         val badgeView = when (style) {
             "SLIM_PILL" -> buildSlimPill(value, theme, sizeScale, density)
@@ -495,7 +497,7 @@ class FloatingHudService : Service() {
 
         // Zone marker (top-start corner): brand star for favourites, red sign for blacklisted zones.
         val marker = when {
-            holder.analysis.isBlacklistedZone -> "⛔" to COLOR_LOSS
+            holder.analysis.isBlacklistedZone || holder.analysis.isBlacklistedPassenger -> "⛔" to COLOR_LOSS
             isFav -> "★" to COLOR_FAVORITE
             else -> null
         }
@@ -809,6 +811,11 @@ class FloatingHudService : Service() {
         if (hud.showDistance) cardRoot.addView(distRow)
         if (hud.showCostBreakdown) cardRoot.addView(costRow)
 
+        // Passenger lists: always offered when the card shows a name.
+        if (card.passengerName.isNotBlank()) {
+            cardRoot.addView(buildPassengerActionRow(card.passengerName, holder, density))
+        }
+
         if (!hud.showZones) {
             holder.container.addView(cardRoot)
             return
@@ -970,6 +977,69 @@ class FloatingHudService : Service() {
             refreshAnalysis(holder)
         })
 
+        container.addView(btnRow)
+        return container
+    }
+
+    /** "العميل: name" with 1-tap buttons to mark the passenger as favourite or blocked. */
+    private fun buildPassengerActionRow(name: String, holder: CardPopupViewHolder, density: Float): View {
+        val repo = InDriveAssistantApp.instance.repository
+        val isFav = repo.isFavoritePassenger(name)
+        val isBlack = repo.isBlacklistedPassenger(name)
+        fun dp(v: Float) = (v * density).toInt()
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { setMargins(0, dp(6f), 0, dp(4f)) }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#0F1728"))
+                setStroke(dp(1.5f), Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) COLOR_LOSS else "#223554"))
+            }
+            setPadding(dp(10f), dp(8f), dp(10f), dp(8f))
+        }
+        container.addView(TextView(this).apply {
+            text = "العميل: $name" + when {
+                isFav -> " (مميز ★)"
+                isBlack -> " (محظور)"
+                else -> ""
+            }
+            setTextColor(Color.parseColor(if (isFav) COLOR_FAVORITE else if (isBlack) COLOR_LOSS else "#F8FAFC"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        val btnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(6f) }
+        }
+        btnRow.addView(actionChip(
+            label = if (isFav) "إلغاء التمييز" else "+ عميل مميز",
+            textColor = if (isFav) Color.WHITE else Color.parseColor(COLOR_INK),
+            bgColor = if (isFav) "#475569" else COLOR_FAVORITE,
+            density = density,
+            marginStart = 0
+        ) {
+            repo.setPassengerList(name, if (isFav) null else true)
+            toast(if (isFav) "تمت إزالة '$name' من العملاء المميزين" else "تمت إضافة '$name' للعملاء المميزين")
+            refreshAnalysis(holder)
+        })
+        btnRow.addView(actionChip(
+            label = if (isBlack) "إلغاء الحظر" else "+ عميل محظور",
+            textColor = if (isBlack) Color.WHITE else Color.parseColor(COLOR_INK),
+            bgColor = if (isBlack) "#475569" else COLOR_LOSS,
+            density = density,
+            marginStart = dp(8f)
+        ) {
+            repo.setPassengerList(name, if (isBlack) null else false)
+            toast(if (isBlack) "تم إلغاء حظر '$name'" else "تمت إضافة '$name' للعملاء المحظورين")
+            refreshAnalysis(holder)
+        })
         container.addView(btnRow)
         return container
     }

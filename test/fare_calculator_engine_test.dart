@@ -11,6 +11,10 @@ void main() {
     minProfitPerKm: 8.0,
     favoriteZones: ["المعادي"],
     blacklistedZones: ["حلوان"],
+    // The tests below check the flat formula; pickup pricing has its own group.
+    pickupPricingEnabled: false,
+    blacklistedPassengers: ["محمود"],
+    favoritePassengers: ["سارة"],
   );
 
   group('FareCalculatorEngine.analyze', () {
@@ -84,6 +88,64 @@ void main() {
     test('empty address never matches', () {
       expect(FareCalculatorEngine.matchZone("", ["حلوان"]), isNull);
       expect(FareCalculatorEngine.matchZone(null, ["حلوان"]), isNull);
+    });
+  });
+
+  group('pickup pricing', () {
+    final withPickup = settings.copyWith(
+      pickupPricingEnabled: true,
+      pickupProfitPerKm: 3.0,
+      pickupCommissionSharePercent: 50.0,
+    );
+
+    test('fair price prices pickup km with their own margin and half the commission', () {
+      // cost/km = 1.5 fuel + 1 wear = 2.5 ; trip 8 km: 8 × (2.5 + 8) / 0.9 ; pickup 2 km: 2 × (2.5 + 3) / 0.95
+      final expected = 8 * 10.5 / 0.9 + 2 * 5.5 / 0.95;
+      expect(
+        FareCalculatorEngine.fairPrice(pickupDistanceKm: 2, tripDistanceKm: 8, settings: withPickup),
+        closeTo(expected, 1e-9),
+      );
+    });
+
+    test('off: every km is priced like a trip km', () {
+      expect(
+        FareCalculatorEngine.fairPrice(pickupDistanceKm: 2, tripDistanceKm: 8, settings: settings),
+        closeTo(10 * 10.5 / 0.9, 1e-9),
+      );
+    });
+
+    test('an offer at the fair price is not rated as a thin margin', () {
+      final fair = FareCalculatorEngine.fairPrice(pickupDistanceKm: 2, tripDistanceKm: 8, settings: withPickup);
+      final r = FareCalculatorEngine.analyze(
+        pickupDistanceKm: 2,
+        tripDistanceKm: 8,
+        estimatedMinutes: 25,
+        offeredFare: fair + 0.01, // a hair above, so float rounding can't tip it under the target
+        settings: withPickup,
+      );
+      expect(r.profitabilityLevel, ProfitabilityLevel.goodProfit);
+      expect(r.recommendedFare, lessThan(FareCalculatorEngine.roundToSmartStep(10 * 10.5 / 0.9) + 1e-9));
+    });
+  });
+
+  group('passenger lists', () {
+    test('a blocked passenger is always a rejection', () {
+      final r = FareCalculatorEngine.analyze(
+        pickupDistanceKm: 1,
+        tripDistanceKm: 5,
+        estimatedMinutes: 15,
+        offeredFare: 500,
+        settings: settings,
+        passengerName: "محمود",
+      );
+      expect(r.isBlacklistedPassenger, isTrue);
+      expect(r.profitabilityLevel, ProfitabilityLevel.lossDanger);
+    });
+
+    test('names match exactly (normalised), never as a substring', () {
+      expect(FareCalculatorEngine.matchPassenger("ساره", ["سارة"]), "سارة");
+      expect(FareCalculatorEngine.matchPassenger("محمود علي", ["محمود"]), isNull);
+      expect(FareCalculatorEngine.matchPassenger("", ["محمود"]), isNull);
     });
   });
 

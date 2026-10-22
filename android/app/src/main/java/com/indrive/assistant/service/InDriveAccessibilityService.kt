@@ -520,6 +520,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun qualifiesForAutoAccept(card: ParsedRideData, settings: DriverSettings): Boolean {
         if (card.distanceEstimated) return false
+        if (settings.isBlacklistedPassenger(card.passengerName)) return false
         if (settings.autoAcceptRejectBlacklisted &&
             (settings.isBlacklisted(card.pickupAddress) || settings.isBlacklisted(card.dropoffAddress))
         ) return false
@@ -540,7 +541,8 @@ class InDriveAccessibilityService : AccessibilityService() {
         offeredFare = card.fare,
         settings = settings,
         pickupAddress = card.pickupAddress,
-        dropoffAddress = card.dropoffAddress
+        dropoffAddress = card.dropoffAddress,
+        passengerName = card.passengerName
     )
 
     /** Finds an "Accept" button whose centre lies inside [cardBounds] and performs ACTION_CLICK on it. */

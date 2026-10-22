@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.indrive.assistant.data.model.DriverSettings
 import com.indrive.assistant.data.model.HudPrefs
+import com.indrive.assistant.engine.FareCalculatorEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -73,7 +74,12 @@ class PreferencesManager(context: Context) {
             autoAcceptMaxPickupKm = prefs.getFloat(KEY_AUTO_ACCEPT_MAX_PICKUP_KM, d.autoAcceptMaxPickupKm.toFloat()).toDouble(),
             autoAcceptOnlyFavoriteZones = prefs.getBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, d.autoAcceptOnlyFavoriteZones),
             autoAcceptRejectBlacklisted = prefs.getBoolean(KEY_AUTO_ACCEPT_REJECT_BLACK, d.autoAcceptRejectBlacklisted),
-            autoAcceptDelaySeconds = prefs.getFloat(KEY_AUTO_ACCEPT_DELAY, d.autoAcceptDelaySeconds.toFloat()).toDouble()
+            autoAcceptDelaySeconds = prefs.getFloat(KEY_AUTO_ACCEPT_DELAY, d.autoAcceptDelaySeconds.toFloat()).toDouble(),
+            pickupPricingEnabled = prefs.getBoolean(KEY_PICKUP_PRICING_ENABLED, d.pickupPricingEnabled),
+            pickupProfitPerKm = prefs.getFloat(KEY_PICKUP_PROFIT_KM, d.pickupProfitPerKm.toFloat()).toDouble(),
+            pickupCommissionSharePercent = prefs.getFloat(KEY_PICKUP_COMMISSION_SHARE, d.pickupCommissionSharePercent.toFloat()).toDouble(),
+            favoritePassengers = decodeList(prefs.getString(KEY_FAVORITE_PASSENGERS, null)) ?: d.favoritePassengers,
+            blacklistedPassengers = decodeList(prefs.getString(KEY_BLACKLISTED_PASSENGERS, null)) ?: d.blacklistedPassengers
         )
     }
 
@@ -96,6 +102,12 @@ class PreferencesManager(context: Context) {
             putBoolean(KEY_AUTO_ACCEPT_ONLY_FAV, settings.autoAcceptOnlyFavoriteZones)
             putBoolean(KEY_AUTO_ACCEPT_REJECT_BLACK, settings.autoAcceptRejectBlacklisted)
             putFloat(KEY_AUTO_ACCEPT_DELAY, settings.autoAcceptDelaySeconds.toFloat())
+            putBoolean(KEY_PICKUP_PRICING_ENABLED, settings.pickupPricingEnabled)
+            putFloat(KEY_PICKUP_PROFIT_KM, settings.pickupProfitPerKm.toFloat())
+            putFloat(KEY_PICKUP_COMMISSION_SHARE, settings.pickupCommissionSharePercent.toFloat())
+            // JSON arrays: a name may contain a comma.
+            putString(KEY_FAVORITE_PASSENGERS, JSONArray(settings.favoritePassengers).toString())
+            putString(KEY_BLACKLISTED_PASSENGERS, JSONArray(settings.blacklistedPassengers).toString())
             apply()
         }
         cachedSettings = settings
@@ -134,7 +146,12 @@ class PreferencesManager(context: Context) {
                 autoAcceptMaxPickupKm = dbl("autoAcceptMaxPickupKm", d.autoAcceptMaxPickupKm),
                 autoAcceptOnlyFavoriteZones = bool("autoAcceptOnlyFavoriteZones", d.autoAcceptOnlyFavoriteZones),
                 autoAcceptRejectBlacklisted = bool("autoAcceptRejectBlacklisted", d.autoAcceptRejectBlacklisted),
-                autoAcceptDelaySeconds = dbl("autoAcceptDelaySeconds", d.autoAcceptDelaySeconds)
+                autoAcceptDelaySeconds = dbl("autoAcceptDelaySeconds", d.autoAcceptDelaySeconds),
+                pickupPricingEnabled = bool("pickupPricingEnabled", d.pickupPricingEnabled),
+                pickupProfitPerKm = dbl("pickupProfitPerKm", d.pickupProfitPerKm),
+                pickupCommissionSharePercent = dbl("pickupCommissionSharePercent", d.pickupCommissionSharePercent),
+                favoritePassengers = list("favoritePassengers", d.favoritePassengers),
+                blacklistedPassengers = list("blacklistedPassengers", d.blacklistedPassengers)
             )
         )
 
@@ -162,8 +179,29 @@ class PreferencesManager(context: Context) {
             put("mode", mode)
             put("favoriteZones", JSONArray(s.favoriteZones))
             put("blacklistedZones", JSONArray(s.blacklistedZones))
+            // Passenger lists edited from the HUD travel with the same "dirty" flag.
+            put("favoritePassengers", JSONArray(s.favoritePassengers))
+            put("blacklistedPassengers", JSONArray(s.blacklistedPassengers))
         }
     }
+
+    // =========================================================================
+    // QUICK PASSENGER OPERATIONS (1-Tap from the HUD). Adding to one list removes from the other.
+    // =========================================================================
+    fun setPassengerList(name: String, favorite: Boolean?) {
+        val clean = name.trim()
+        if (clean.isEmpty()) return
+        val current = cachedSettings
+        fun without(list: List<String>) = list.filterNot { FareCalculatorEngine.matchPassenger(clean, listOf(it)) != null }
+        val fav = without(current.favoritePassengers).let { if (favorite == true) it + clean else it }
+        val black = without(current.blacklistedPassengers).let { if (favorite == false) it + clean else it }
+        saveSettings(current.copy(favoritePassengers = fav, blacklistedPassengers = black))
+        markZonesDirty()
+    }
+
+    fun isFavoritePassenger(name: String): Boolean = cachedSettings.isFavoritePassenger(name)
+
+    fun isBlacklistedPassenger(name: String): Boolean = cachedSettings.isBlacklistedPassenger(name)
 
     private fun markZonesDirty() {
         prefs.edit().putBoolean(KEY_ZONES_DIRTY, true).apply()
@@ -237,6 +275,11 @@ class PreferencesManager(context: Context) {
         private const val KEY_AUTO_ACCEPT_REJECT_BLACK = "auto_accept_reject_black"
         private const val KEY_AUTO_ACCEPT_DELAY = "auto_accept_delay"
         private const val KEY_ZONES_DIRTY = "zones_dirty_since_flutter_sync"
+        private const val KEY_PICKUP_PRICING_ENABLED = "pickup_pricing_enabled"
+        private const val KEY_PICKUP_PROFIT_KM = "pickup_profit_km"
+        private const val KEY_PICKUP_COMMISSION_SHARE = "pickup_commission_share"
+        private const val KEY_FAVORITE_PASSENGERS = "favorite_passengers"
+        private const val KEY_BLACKLISTED_PASSENGERS = "blacklisted_passengers"
 
         private fun isLegacyList(raw: String?): Boolean =
             raw != null && raw.isNotBlank() && !raw.trim().startsWith("[")

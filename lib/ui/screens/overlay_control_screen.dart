@@ -300,6 +300,14 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
                       "${provider.driverSettings.favoriteZones.length} / ${provider.driverSettings.blacklistedZones.length}",
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ZonesPage())),
                 ),
+                NavTile(
+                  icon: Icons.people_alt_outlined,
+                  color: AppColors.accentAmber,
+                  title: "العملاء المميزين والمحظورين",
+                  trailingText:
+                      "${provider.driverSettings.favoritePassengers.length} / ${provider.driverSettings.blacklistedPassengers.length}",
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PassengersPage())),
+                ),
               ]),
 
               // Legend

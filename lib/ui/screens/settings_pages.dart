@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../data/models/driver_settings.dart';
 import '../../data/models/hud_settings.dart';
+import '../../engine/fare_calculator_engine.dart';
 import '../../providers/assistant_provider.dart';
 import '../../services/native_bridge_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/number_parsing.dart';
 import '../../utils/update_manager.dart';
 import '../components/dialogs.dart';
 import '../components/hud_preview.dart';
@@ -596,6 +598,144 @@ class ZonesPage extends StatelessWidget {
 }
 
 // =============================================================================
+// PASSENGERS (favourite / blocked)
+// =============================================================================
+class PassengersPage extends StatelessWidget {
+  const PassengersPage({super.key});
+
+  Future<void> _add(BuildContext context, {required bool favorite}) async {
+    final ctrl = TextEditingController();
+    String? error;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text(favorite ? "إضافة عميل مميز" : "إضافة عميل محظور"),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: InputDecoration(hintText: "الاسم زي ما بيظهر في إن درايف", errorText: error),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("إلغاء")),
+            FilledButton(
+              onPressed: () async {
+                final name = ctrl.text.trim();
+                if (name.isEmpty) {
+                  setDlg(() => error = "اكتب اسم العميل");
+                  return;
+                }
+                await context.read<AssistantProvider>().setPassengerList(name, favorite);
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text("إضافة"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _section(
+    BuildContext context, {
+    required String title,
+    required String hint,
+    required IconData icon,
+    required Color color,
+    required List<String> names,
+    required bool favorite,
+  }) {
+    final provider = context.read<AssistantProvider>();
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              TileIcon(icon, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                    Text(hint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                tooltip: "إضافة",
+                icon: const Icon(Icons.add),
+                onPressed: () => _add(context, favorite: favorite),
+              ),
+            ],
+          ),
+          const SizedBox(height: Insets.md),
+          if (names.isEmpty)
+            const Text("لا يوجد عملاء بعد", style: TextStyle(color: AppColors.textTertiary, fontSize: 12.5))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: names
+                  .map((n) => InputChip(
+                        label: Text(n),
+                        backgroundColor: color.withValues(alpha: 0.12),
+                        side: BorderSide(color: color.withValues(alpha: 0.35)),
+                        deleteIconColor: color,
+                        onDeleted: () async {
+                          await provider.setPassengerList(n, null);
+                          if (context.mounted) {
+                            showUndoSnackBar(context, "تمت إزالة '$n'", () => provider.setPassengerList(n, favorite));
+                          }
+                        },
+                      ))
+                  .toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.watch<AssistantProvider>().driverSettings;
+    return _SubPage(
+      title: "العملاء",
+      children: [
+        const SizedBox(height: Insets.sm),
+        _section(
+          context,
+          title: "عملاء مميزين",
+          hint: "بيظهروا بنجمة ★ على العلامة",
+          icon: Icons.star_rounded,
+          color: AppColors.accentAmber,
+          names: s.favoritePassengers,
+          favorite: true,
+        ),
+        const SizedBox(height: Insets.md),
+        _section(
+          context,
+          title: "عملاء محظورين",
+          hint: "طلباتهم بتظهر حمرا، والقبول التلقائي مش هيقبلها أبداً",
+          icon: Icons.block,
+          color: AppColors.lossRed,
+          names: s.blacklistedPassengers,
+          favorite: false,
+        ),
+        const SizedBox(height: Insets.md),
+        const Text(
+          "التطابق بيكون على الاسم اللي بيظهر في الكارت بالظبط (مع تجاهل الهمزات). "
+          "إن درايف بيعرض الاسم الأول بس، فحظر اسم شائع زي \"أحمد\" هيحظر كل اللي اسمهم كده. "
+          "تقدر كمان تضيف العميل من البطاقة العائمة فوق إن درايف.",
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+        ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
 // PRICING
 // =============================================================================
 class PricingPage extends StatelessWidget {
@@ -669,6 +809,47 @@ class PricingPage extends StatelessWidget {
             max: 100,
             onChanged: (v) => change((x) => x.copyWith(minProfitPerKm: v)),
           ),
+        ]),
+        const SectionLabel("تسعير مسافة الوصول"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.near_me_outlined,
+            iconColor: AppColors.accentCyan,
+            title: "تسعير منفصل لمسافة الوصول",
+            subtitle: "كيلو الوصول للراكب بيتحسب أرخص من كيلو المشوار: وقود + استهلاك + جزء من العمولة + هامش ربح خاص بيه",
+            value: s.pickupPricingEnabled,
+            onChanged: (v) => change((x) => x.copyWith(pickupPricingEnabled: v)),
+          ),
+          if (s.pickupPricingEnabled) ...[
+            NumberStepperTile(
+              icon: Icons.trending_up,
+              iconColor: AppColors.accentCyan,
+              title: "هامش الربح لكيلو الوصول",
+              subtitle: "كيلو المشوار: ${formatNumber(s.minProfitPerKm)} $c",
+              unit: "$c/كم",
+              value: s.pickupProfitPerKm,
+              step: 0.5,
+              min: 0,
+              max: 100,
+              onChanged: (v) => change((x) => x.copyWith(pickupProfitPerKm: v)),
+            ),
+            NumberStepperTile(
+              icon: Icons.percent,
+              iconColor: AppColors.accentCyan,
+              title: "نسبة العمولة على كيلو الوصول",
+              subtitle: "من عمولة إن درايف (${formatNumber(s.inDriveCommissionPercent)}%)",
+              unit: "%",
+              value: s.pickupCommissionSharePercent,
+              step: 10,
+              min: 0,
+              max: 100,
+              onChanged: (v) => change((x) => x.copyWith(pickupCommissionSharePercent: v)),
+            ),
+            _PickupPricingExample(settings: s),
+          ],
+        ]),
+        const SectionLabel("المسافات والهدف اليومي"),
+        SettingsGroup(children: [
           NumberStepperTile(
             icon: Icons.route_outlined,
             iconColor: AppColors.accentCyan,
@@ -694,6 +875,31 @@ class PricingPage extends StatelessWidget {
           ),
         ]),
       ],
+    );
+  }
+}
+
+/// Worked example of the fair price with and without separate pickup pricing.
+class _PickupPricingExample extends StatelessWidget {
+  final DriverSettings settings;
+
+  const _PickupPricingExample({required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    const pickupKm = 3.0, tripKm = 10.0;
+    final withPickup = FareCalculatorEngine.roundToSmartStep(
+        FareCalculatorEngine.fairPrice(pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings));
+    final flat = FareCalculatorEngine.roundToSmartStep(FareCalculatorEngine.fairPrice(
+        pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings.copyWith(pickupPricingEnabled: false)));
+    final c = settings.currency;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Insets.lg, 4, Insets.lg, Insets.md),
+      child: Text(
+        "مثال: ${formatNumber(pickupKm)} كم وصول + ${formatNumber(tripKm)} كم مشوار ← "
+        "السعر العادل ${withPickup.toInt()} $c (بدل ${flat.toInt()} $c لو الوصول اتحسب زي المشوار)",
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+      ),
     );
   }
 }
