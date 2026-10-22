@@ -223,6 +223,66 @@ class HudSettingsPage extends StatelessWidget {
             value: hud.readMapDistance,
             onChanged: (v) => change((h) => h.copyWith(readMapDistance: v)),
           ),
+          SwitchTile(
+            icon: Icons.history,
+            iconColor: AppColors.accentCyan,
+            title: "تذكّر المسافات من رحلات سابقة",
+            subtitle: "لما تفتح طلب ويتقري طوله، بيتحفظ لنفس مكان التحرك والوصول. "
+                "ولما نفس المشوار يظهر تاني في القائمة يتعرض طوله على طول. كله محفوظ على الموبايل بس",
+            value: hud.tripFromHistory,
+            onChanged: (v) => change((h) => h.copyWith(tripFromHistory: v)),
+          ),
+          SwitchTile(
+            icon: Icons.place_outlined,
+            iconColor: AppColors.accentCyan,
+            title: "تقدير المسافة من العناوين",
+            subtitle: "بيدوّر على العنوانين في خرائط جوجل ويحسب مسافة تقريبية (≈). "
+                "نص العنوان بيتبعت لجوجل، ومحتاج إنترنت",
+            value: hud.tripFromAddresses,
+            onChanged: (v) async {
+              if (v &&
+                  !await confirmAction(
+                    context,
+                    title: "تقدير المسافة من العناوين",
+                    message: "عشان يحسب المسافة، التطبيق هيبعت نص عنوان التحرك والوصول لخدمة العناوين بتاعة جوجل "
+                        "(مش اسم الراكب ولا أي بيانات تانية).\n\n"
+                        "• المسافة تقريبية (خط مستقيم × 1.3) وممكن تفرق 10–25% عن الطريق الحقيقي.\n"
+                        "• بتظهر بعلامة ≈، والقبول التلقائي مش هيقبل طلب بمسافة تقريبية.",
+                    confirmLabel: "موافق، فعّل",
+                    destructive: false,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
+              change((h) => h.copyWith(tripFromAddresses: v));
+            },
+          ),
+          SwitchTile(
+            icon: Icons.touch_app_outlined,
+            iconColor: AppColors.warningYellow,
+            title: "فتح الطلبات تلقائياً لقراءة المسافة",
+            subtitle: "لو طول المشوار مش معروف، التطبيق يفتح الطلب بنفسه ويقرا الخريطة ويرجع للقائمة. "
+                "يحتاج \"قراءة طول المشوار من الخريطة\"",
+            value: hud.tripAutoOpen,
+            onChanged: (v) async {
+              if (v &&
+                  !await confirmAction(
+                    context,
+                    title: "تحذير: فتح الطلبات تلقائياً",
+                    message: "التطبيق هيضغط على كارت الطلب في إن درايف عشان يفتحه، يستنى الخريطة، وبعدين يضغط رجوع.\n\n"
+                        "• مش بيضغط أبداً على \"قبول\" أو \"اقترح\" أو \"تخطي\".\n"
+                        "• طلب واحد كل 8 ثواني على الأكتر، وبيبطّل لو انت فتحت حاجة تانية.\n"
+                        "• الشاشة هتتنقل قدامك، وممكن ده يلخبطك وانت بتختار.\n"
+                        "• الأتمتة ممكن تخالف شروط إن درايف وتعرّض حسابك للإيقاف. انت المسؤول عن استخدامها.",
+                    confirmLabel: "أفهم المخاطر، فعّل",
+                    destructive: false,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
+              change((h) => h.copyWith(tripAutoOpen: v, readMapDistance: v ? true : null));
+            },
+          ),
         ]),
 
         const SectionLabel("التنبيهات"),

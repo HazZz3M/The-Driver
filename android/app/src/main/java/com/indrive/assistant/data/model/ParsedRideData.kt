@@ -18,8 +18,19 @@ data class ParsedRideData(
     val anchorBounds: android.graphics.Rect? = null,
     val timestamp: Long = System.currentTimeMillis(),
     /** Disambiguates two cards that would otherwise share the same identity. */
-    val duplicateIndex: Int = 0
+    val duplicateIndex: Int = 0,
+    /** Where tripDistanceKm came from: one of the SOURCE_* constants. */
+    val tripSource: String = SOURCE_CARD
 ) {
+    companion object {
+        /** Shown on the card / read from the Ride-request map. */
+        const val SOURCE_CARD = "CARD"
+        /** Same pickup → destination read on an earlier ride (saved on the phone). */
+        const val SOURCE_HISTORY = "HISTORY"
+        /** Estimated from the two addresses (straight line × road factor); still "≈". */
+        const val SOURCE_ADDRESSES = "ADDRESSES"
+    }
+
     val totalDistanceKm: Double
         get() = pickupDistanceKm + tripDistanceKm
 

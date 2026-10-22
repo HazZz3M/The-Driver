@@ -16,6 +16,9 @@ class HudSettings {
   final bool showZones;
   final int autoCollapseSeconds; // 0 = never
   final bool readMapDistance; // OCR of the trip length drawn on the Ride-request map
+  final bool tripFromHistory; // B: reuse lengths read earlier for the same pickup → destination
+  final bool tripFromAddresses; // A: estimate from the two addresses (Geocoder, online)
+  final bool tripAutoOpen; // C: open unread requests, read the map, go back
 
   const HudSettings({
     this.style = "COMPACT_CIRCLE",
@@ -33,6 +36,9 @@ class HudSettings {
     this.showZones = true,
     this.autoCollapseSeconds = 0,
     this.readMapDistance = true,
+    this.tripFromHistory = true,
+    this.tripFromAddresses = false,
+    this.tripAutoOpen = false,
   });
 
   HudSettings copyWith({
@@ -51,6 +57,9 @@ class HudSettings {
     bool? showZones,
     int? autoCollapseSeconds,
     bool? readMapDistance,
+    bool? tripFromHistory,
+    bool? tripFromAddresses,
+    bool? tripAutoOpen,
   }) {
     return HudSettings(
       style: style ?? this.style,
@@ -68,6 +77,9 @@ class HudSettings {
       showZones: showZones ?? this.showZones,
       autoCollapseSeconds: autoCollapseSeconds ?? this.autoCollapseSeconds,
       readMapDistance: readMapDistance ?? this.readMapDistance,
+      tripFromHistory: tripFromHistory ?? this.tripFromHistory,
+      tripFromAddresses: tripFromAddresses ?? this.tripFromAddresses,
+      tripAutoOpen: tripAutoOpen ?? this.tripAutoOpen,
     );
   }
 
@@ -87,6 +99,9 @@ class HudSettings {
         'showZones': showZones,
         'autoCollapseSeconds': autoCollapseSeconds,
         'readMapDistance': readMapDistance,
+        'tripFromHistory': tripFromHistory,
+        'tripFromAddresses': tripFromAddresses,
+        'tripAutoOpen': tripAutoOpen,
       };
 
   factory HudSettings.fromJson(Map<String, dynamic> json, {HudSettings fallback = const HudSettings()}) {
@@ -106,6 +121,9 @@ class HudSettings {
       showZones: json['showZones'] as bool? ?? fallback.showZones,
       autoCollapseSeconds: (json['autoCollapseSeconds'] as num?)?.toInt() ?? fallback.autoCollapseSeconds,
       readMapDistance: json['readMapDistance'] as bool? ?? fallback.readMapDistance,
+      tripFromHistory: json['tripFromHistory'] as bool? ?? fallback.tripFromHistory,
+      tripFromAddresses: json['tripFromAddresses'] as bool? ?? fallback.tripFromAddresses,
+      tripAutoOpen: json['tripAutoOpen'] as bool? ?? fallback.tripAutoOpen,
     );
   }
 
