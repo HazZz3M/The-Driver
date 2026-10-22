@@ -1,4 +1,10 @@
-### The Driver v1.13.0 - Clearer badge, fewer surprises
+### The Driver v1.13.0 - Clearer badge, banking apps, fewer surprises
+
+- **Banking apps (InstaPay and others).** Some banking apps refuse to open while screen reading is on. You can now pause it in one tap, then turn it back on when you return to inDrive.
+  - Pause from the Assistant tab ("إيقاف قراءة الشاشة الآن"), from the assistant's notification, or from the new "قراءة الشاشة" Quick Settings tile.
+  - Android only lets you turn screen reading back on yourself, so the notification and the tile open the accessibility settings for that.
+  - The Assistant tab also explains the volume-keys shortcut.
+- **Screen reading now listens to inDrive only**, not to every app on the phone.
 
 - **The floating badge is easier to read at a glance.**
   - "Excellent" rides now have a solid green badge, so they stand out more than ordinary profitable rides (before, "excellent" was the dimmer green).
