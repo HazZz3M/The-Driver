@@ -36,6 +36,14 @@ class PreferencesManager {
   static const String keyPickupPricingEnabled = "pickup_pricing_enabled";
   static const String keyPickupProfitKm = "pickup_profit_km";
   static const String keyPickupCommissionShare = "pickup_commission_share";
+  static const String keyPickupRuleLonger = "pickup_rule_longer_than_trip";
+  static const String keyPickupRuleOverKm = "pickup_rule_over_km";
+  static const String keyPickupRuleThreshold = "pickup_rule_threshold_km";
+  static const String keyPickupRuleMatchAll = "pickup_rule_match_all";
+  static const String keyPickupShortMode = "pickup_short_mode";
+  static const String keyAutoAcceptPickBest = "auto_accept_pick_best";
+  static const String keyAutoAcceptRankBy = "auto_accept_rank_by";
+  static const String keyTutorialSeen = "tutorial_seen";
   static const String keyFavoritePassengers = "favorite_passengers";
   static const String keyBlacklistedPassengers = "blacklisted_passengers";
 
@@ -75,6 +83,13 @@ class PreferencesManager {
       pickupPricingEnabled: prefs.getBool(keyPickupPricingEnabled) ?? d.pickupPricingEnabled,
       pickupProfitPerKm: prefs.getDouble(keyPickupProfitKm) ?? d.pickupProfitPerKm,
       pickupCommissionSharePercent: prefs.getDouble(keyPickupCommissionShare) ?? d.pickupCommissionSharePercent,
+      pickupRuleLongerThanTrip: prefs.getBool(keyPickupRuleLonger) ?? d.pickupRuleLongerThanTrip,
+      pickupRuleOverKm: prefs.getBool(keyPickupRuleOverKm) ?? d.pickupRuleOverKm,
+      pickupRuleThresholdKm: prefs.getDouble(keyPickupRuleThreshold) ?? d.pickupRuleThresholdKm,
+      pickupRuleMatchAll: prefs.getBool(keyPickupRuleMatchAll) ?? d.pickupRuleMatchAll,
+      pickupShortMode: prefs.getString(keyPickupShortMode) ?? d.pickupShortMode,
+      autoAcceptPickBest: prefs.getBool(keyAutoAcceptPickBest) ?? d.autoAcceptPickBest,
+      autoAcceptRankBy: prefs.getString(keyAutoAcceptRankBy) ?? d.autoAcceptRankBy,
       favoritePassengers: prefs.getStringList(keyFavoritePassengers) ?? d.favoritePassengers,
       blacklistedPassengers: prefs.getStringList(keyBlacklistedPassengers) ?? d.blacklistedPassengers,
     );
@@ -103,6 +118,13 @@ class PreferencesManager {
       prefs.setBool(keyPickupPricingEnabled, s.pickupPricingEnabled),
       prefs.setDouble(keyPickupProfitKm, s.pickupProfitPerKm),
       prefs.setDouble(keyPickupCommissionShare, s.pickupCommissionSharePercent),
+      prefs.setBool(keyPickupRuleLonger, s.pickupRuleLongerThanTrip),
+      prefs.setBool(keyPickupRuleOverKm, s.pickupRuleOverKm),
+      prefs.setDouble(keyPickupRuleThreshold, s.pickupRuleThresholdKm),
+      prefs.setBool(keyPickupRuleMatchAll, s.pickupRuleMatchAll),
+      prefs.setString(keyPickupShortMode, s.pickupShortMode),
+      prefs.setBool(keyAutoAcceptPickBest, s.autoAcceptPickBest),
+      prefs.setString(keyAutoAcceptRankBy, s.autoAcceptRankBy),
       prefs.setStringList(keyFavoritePassengers, s.favoritePassengers),
       prefs.setStringList(keyBlacklistedPassengers, s.blacklistedPassengers),
     ]);
@@ -144,6 +166,10 @@ class PreferencesManager {
   // Auto-accept consent (shown once, before the first enable)
   bool get autoAcceptConsentGiven => prefs.getBool(keyAutoAcceptConsentGiven) ?? false;
   Future<void> setAutoAcceptConsentGiven() async => await prefs.setBool(keyAutoAcceptConsentGiven, true);
+
+  /// The walkthrough was finished or skipped once (shown automatically only on first launch).
+  bool get tutorialSeen => prefs.getBool(keyTutorialSeen) ?? false;
+  Future<void> setTutorialSeen() async => await prefs.setBool(keyTutorialSeen, true);
 
   // Shift persistence (Android kills the app while the driver is in inDrive)
   bool get isShiftActive => prefs.getBool(keyShiftActive) ?? false;

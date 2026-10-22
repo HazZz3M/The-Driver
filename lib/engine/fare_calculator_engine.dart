@@ -315,8 +315,28 @@ class FareCalculatorEngine {
     }
     final share = (settings.pickupCommissionSharePercent / 100.0).clamp(0.0, 1.0);
     final tripPart = tripKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c);
-    final pickupPart = pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share);
+    final double pickupPart;
+    if (pickupRuleApplies(pickupKm, tripKm, settings)) {
+      pickupPart = pickupKm * (costPerKm + settings.pickupProfitPerKm) / max(0.01, 1.0 - c * share);
+    } else {
+      pickupPart = switch (settings.pickupShortMode) {
+        "FREE" => 0.0, // the driver absorbs a short pickup
+        "AS_TRIP" => pickupKm * (costPerKm + settings.minProfitPerKm) / max(0.01, 1.0 - c),
+        _ => pickupKm * costPerKm / max(0.01, 1.0 - c * share), // COST_ONLY: covered, no profit
+      };
+    }
     return tripPart + pickupPart;
+  }
+
+  /// Whether the pickup km get their own (pickup) pricing. With no rule switched on: always.
+  /// Rules: pickup longer than the trip, pickup longer than a fixed km count; any or all of them.
+  static bool pickupRuleApplies(double pickupKm, double tripKm, DriverSettings s) {
+    final rules = <bool>[
+      if (s.pickupRuleLongerThanTrip) pickupKm > tripKm,
+      if (s.pickupRuleOverKm) pickupKm > s.pickupRuleThresholdKm,
+    ];
+    if (rules.isEmpty) return true;
+    return s.pickupRuleMatchAll ? rules.every((r) => r) : rules.any((r) => r);
   }
 
   /// Exact (normalised) name match; first names are short, so a substring match would be wrong.

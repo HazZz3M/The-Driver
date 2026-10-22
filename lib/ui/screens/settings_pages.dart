@@ -215,6 +215,40 @@ class HudSettingsPage extends StatelessWidget {
           ),
         ]),
 
+        const SectionLabel("المزايدة في شاشة الطلب"),
+        SettingsGroup(children: [
+          ChoiceTile<String>(
+            title: "دوائر على أزرار المزايدة",
+            subtitle: "دايرة فوق كل سعر مقترح من إن درايف فيها صافي ربحك. أفضل عرض بيتلوّن وعليه نجمة: "
+                "أقل سعر بيحقق هدفك، مش لازم الأعلى",
+            icon: Icons.radio_button_checked,
+            value: hud.bidChipsMode,
+            options: const {
+              "OFF": "متوقفة",
+              "HIGHLIGHT": "عرض الدوائر وتمييز الأفضل",
+              "AUTO_TAP": "تمييز الأفضل والضغط عليه تلقائياً",
+            },
+            onChanged: (v) async {
+              if (v == "AUTO_TAP" &&
+                  !await confirmAction(
+                    context,
+                    title: "تحذير: اختيار المزايدة تلقائياً",
+                    message: "التطبيق هيضغط بنفسه على زر أفضل مزايدة في شاشة الطلب، مرة واحدة لكل طلب، "
+                        "بعد نفس وقت الانتظار بتاع القبول التلقائي.\n\n"
+                        "• الضغط على زر المزايدة في إن درايف ممكن يبعت العرض للراكب على طول.\n"
+                        "• بيعيد قراءة الشاشة قبل الضغط، ومش بيضغط لو الطلب اتغيّر.\n"
+                        "• الأتمتة ممكن تخالف شروط إن درايف وتعرّض حسابك للإيقاف. انت المسؤول عن استخدامها.",
+                    confirmLabel: "أفهم المخاطر، فعّل",
+                    destructive: false,
+                  )) {
+                return;
+              }
+              if (!context.mounted) return;
+              change((h) => h.copyWith(bidChipsMode: v));
+            },
+          ),
+        ]),
+
         const SectionLabel("القراءة"),
         SettingsGroup(children: [
           SwitchTile(
@@ -404,6 +438,30 @@ class AutoAcceptPage extends StatelessWidget {
             max: 8,
             onChanged: (v) => change((x) => x.copyWith(autoAcceptDelaySeconds: v)),
           ),
+        ]),
+        const SectionLabel("أولوية القبول"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.leaderboard_outlined,
+            iconColor: AppColors.warningYellow,
+            title: "اقبل الأعلى ربحاً أولاً",
+            subtitle: "لو أكتر من طلب مطابق ظاهر في نفس الوقت، يقبل الأفضل بدل أول واحد في القائمة",
+            value: s.autoAcceptPickBest,
+            onChanged: (v) => change((x) => x.copyWith(autoAcceptPickBest: v)),
+          ),
+          if (s.autoAcceptPickBest)
+            ChoiceTile<String>(
+              title: "الأفضل حسب",
+              icon: Icons.sort,
+              iconColor: AppColors.warningYellow,
+              value: s.autoAcceptRankBy,
+              options: const {
+                "PROFIT_PER_KM": "الربح لكل كم",
+                "NET_PROFIT": "صافي الربح",
+                "MARGIN": "نسبة الهامش %",
+              },
+              onChanged: (v) => change((x) => x.copyWith(autoAcceptRankBy: v)),
+            ),
         ]),
         const SectionLabel("المناطق"),
         SettingsGroup(children: [
@@ -845,6 +903,55 @@ class PricingPage extends StatelessWidget {
               max: 100,
               onChanged: (v) => change((x) => x.copyWith(pickupCommissionSharePercent: v)),
             ),
+            SwitchTile(
+              icon: Icons.compare_arrows,
+              iconColor: AppColors.accentCyan,
+              title: "بس لما الوصول أطول من المشوار",
+              value: s.pickupRuleLongerThanTrip,
+              onChanged: (v) => change((x) => x.copyWith(pickupRuleLongerThanTrip: v)),
+            ),
+            SwitchTile(
+              icon: Icons.straighten,
+              iconColor: AppColors.accentCyan,
+              title: "بس لما الوصول أطول من عدد كيلومترات ثابت",
+              value: s.pickupRuleOverKm,
+              onChanged: (v) => change((x) => x.copyWith(pickupRuleOverKm: v)),
+            ),
+            if (s.pickupRuleOverKm)
+              NumberStepperTile(
+                icon: Icons.flag_outlined,
+                iconColor: AppColors.accentCyan,
+                title: "الحد الثابت للوصول",
+                unit: "كم",
+                value: s.pickupRuleThresholdKm,
+                step: 0.5,
+                min: 0.5,
+                max: 30,
+                onChanged: (v) => change((x) => x.copyWith(pickupRuleThresholdKm: v)),
+              ),
+            if (s.pickupRuleLongerThanTrip && s.pickupRuleOverKm)
+              ChoiceTile<bool>(
+                title: "لما الشرطين مفعّلين",
+                icon: Icons.rule,
+                iconColor: AppColors.accentCyan,
+                value: s.pickupRuleMatchAll,
+                options: const {false: "يكفي أي شرط", true: "لازم الاتنين"},
+                onChanged: (v) => change((x) => x.copyWith(pickupRuleMatchAll: v)),
+              ),
+            if (s.pickupRuleLongerThanTrip || s.pickupRuleOverKm)
+              ChoiceTile<String>(
+                title: "الوصول القصير يتحسب",
+                subtitle: "لما الشرط مش متحقق",
+                icon: Icons.near_me_disabled_outlined,
+                iconColor: AppColors.accentCyan,
+                value: s.pickupShortMode,
+                options: const {
+                  "COST_ONLY": "تكلفة بس (من غير ربح)",
+                  "FREE": "مجاناً (عليك)",
+                  "AS_TRIP": "زي كيلو المشوار",
+                },
+                onChanged: (v) => change((x) => x.copyWith(pickupShortMode: v)),
+              ),
             _PickupPricingExample(settings: s),
           ],
         ]),
@@ -887,18 +994,22 @@ class _PickupPricingExample extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const pickupKm = 3.0, tripKm = 10.0;
-    final withPickup = FareCalculatorEngine.roundToSmartStep(
-        FareCalculatorEngine.fairPrice(pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings));
-    final flat = FareCalculatorEngine.roundToSmartStep(FareCalculatorEngine.fairPrice(
-        pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings.copyWith(pickupPricingEnabled: false)));
     final c = settings.currency;
+    String line(double pickupKm, double tripKm) {
+      final withPickup = FareCalculatorEngine.roundToSmartStep(
+          FareCalculatorEngine.fairPrice(pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings));
+      final flat = FareCalculatorEngine.roundToSmartStep(FareCalculatorEngine.fairPrice(
+          pickupDistanceKm: pickupKm, tripDistanceKm: tripKm, settings: settings.copyWith(pickupPricingEnabled: false)));
+      final applies = FareCalculatorEngine.pickupRuleApplies(pickupKm, tripKm, settings);
+      return "• ${formatNumber(pickupKm)} كم وصول + ${formatNumber(tripKm)} كم مشوار ← ${withPickup.toInt()} $c "
+          "(${applies ? "تسعير الوصول" : "وصول قصير"}؛ بدل ${flat.toInt()} $c لو اتحسب زي المشوار)";
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(Insets.lg, 4, Insets.lg, Insets.md),
       child: Text(
-        "مثال: ${formatNumber(pickupKm)} كم وصول + ${formatNumber(tripKm)} كم مشوار ← "
-        "السعر العادل ${withPickup.toInt()} $c (بدل ${flat.toInt()} $c لو الوصول اتحسب زي المشوار)",
-        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.5),
+        "أمثلة على السعر العادل:\n${line(1.0, 10.0)}\n${line(6.0, 4.0)}",
+        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.6),
       ),
     );
   }

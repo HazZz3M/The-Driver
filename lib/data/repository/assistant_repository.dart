@@ -37,6 +37,10 @@ class AssistantRepository {
   bool get autoAcceptConsentGiven => preferencesManager.autoAcceptConsentGiven;
   Future<void> setAutoAcceptConsentGiven() => preferencesManager.setAutoAcceptConsentGiven();
 
+  // Tutorial
+  bool get tutorialSeen => preferencesManager.tutorialSeen;
+  Future<void> setTutorialSeen() => preferencesManager.setTutorialSeen();
+
   // Shift
   bool get isShiftActive => preferencesManager.isShiftActive;
   int get shiftStartTime => preferencesManager.shiftStartTime;

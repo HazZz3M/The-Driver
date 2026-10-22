@@ -27,6 +27,19 @@ class DriverSettings {
   final double pickupProfitPerKm;
   /// Share of the inDrive commission counted on pickup km, in % (50 = half of the commission).
   final double pickupCommissionSharePercent;
+  /// When pickup pricing applies. No rule on = always. Rules: pickup longer than the trip,
+  /// and/or pickup longer than [pickupRuleThresholdKm]; [pickupRuleMatchAll] = both must hold.
+  final bool pickupRuleLongerThanTrip;
+  final bool pickupRuleOverKm;
+  final double pickupRuleThresholdKm;
+  final bool pickupRuleMatchAll;
+  /// Pricing of the pickup km when the rules don't hold: COST_ONLY | FREE | AS_TRIP.
+  final String pickupShortMode;
+
+  // Auto-accept: when several requests qualify, take the best one first.
+  final bool autoAcceptPickBest;
+  /// PROFIT_PER_KM | NET_PROFIT | MARGIN
+  final String autoAcceptRankBy;
 
   // Passenger lists (matched by the name shown on the card)
   final List<String> favoritePassengers;
@@ -54,6 +67,13 @@ class DriverSettings {
     this.pickupPricingEnabled = true,
     this.pickupProfitPerKm = 3.0,
     this.pickupCommissionSharePercent = 50.0,
+    this.pickupRuleLongerThanTrip = false,
+    this.pickupRuleOverKm = false,
+    this.pickupRuleThresholdKm = 2.0,
+    this.pickupRuleMatchAll = false,
+    this.pickupShortMode = "COST_ONLY",
+    this.autoAcceptPickBest = false,
+    this.autoAcceptRankBy = "PROFIT_PER_KM",
     this.favoritePassengers = const [],
     this.blacklistedPassengers = const [],
   });
@@ -87,6 +107,13 @@ class DriverSettings {
     bool? pickupPricingEnabled,
     double? pickupProfitPerKm,
     double? pickupCommissionSharePercent,
+    bool? pickupRuleLongerThanTrip,
+    bool? pickupRuleOverKm,
+    double? pickupRuleThresholdKm,
+    bool? pickupRuleMatchAll,
+    String? pickupShortMode,
+    bool? autoAcceptPickBest,
+    String? autoAcceptRankBy,
     List<String>? favoritePassengers,
     List<String>? blacklistedPassengers,
   }) {
@@ -111,6 +138,13 @@ class DriverSettings {
       pickupPricingEnabled: pickupPricingEnabled ?? this.pickupPricingEnabled,
       pickupProfitPerKm: pickupProfitPerKm ?? this.pickupProfitPerKm,
       pickupCommissionSharePercent: pickupCommissionSharePercent ?? this.pickupCommissionSharePercent,
+      pickupRuleLongerThanTrip: pickupRuleLongerThanTrip ?? this.pickupRuleLongerThanTrip,
+      pickupRuleOverKm: pickupRuleOverKm ?? this.pickupRuleOverKm,
+      pickupRuleThresholdKm: pickupRuleThresholdKm ?? this.pickupRuleThresholdKm,
+      pickupRuleMatchAll: pickupRuleMatchAll ?? this.pickupRuleMatchAll,
+      pickupShortMode: pickupShortMode ?? this.pickupShortMode,
+      autoAcceptPickBest: autoAcceptPickBest ?? this.autoAcceptPickBest,
+      autoAcceptRankBy: autoAcceptRankBy ?? this.autoAcceptRankBy,
       favoritePassengers: favoritePassengers ?? this.favoritePassengers,
       blacklistedPassengers: blacklistedPassengers ?? this.blacklistedPassengers,
     );
@@ -139,6 +173,13 @@ class DriverSettings {
       'pickupPricingEnabled': pickupPricingEnabled,
       'pickupProfitPerKm': pickupProfitPerKm,
       'pickupCommissionSharePercent': pickupCommissionSharePercent,
+      'pickupRuleLongerThanTrip': pickupRuleLongerThanTrip,
+      'pickupRuleOverKm': pickupRuleOverKm,
+      'pickupRuleThresholdKm': pickupRuleThresholdKm,
+      'pickupRuleMatchAll': pickupRuleMatchAll,
+      'pickupShortMode': pickupShortMode,
+      'autoAcceptPickBest': autoAcceptPickBest,
+      'autoAcceptRankBy': autoAcceptRankBy,
       'favoritePassengers': favoritePassengers,
       'blacklistedPassengers': blacklistedPassengers,
     };

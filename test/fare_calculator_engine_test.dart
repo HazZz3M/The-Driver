@@ -128,6 +128,36 @@ void main() {
     });
   });
 
+  group('pickup rules', () {
+    // cost/km 2.5 ; trip km at (2.5 + 8) / 0.9 ; long pickup at (2.5 + 3) / 0.95
+    final base = settings.copyWith(pickupPricingEnabled: true, pickupProfitPerKm: 3.0, pickupCommissionSharePercent: 50.0);
+    double fair(DriverSettings s, double pickup, double trip) =>
+        FareCalculatorEngine.fairPrice(pickupDistanceKm: pickup, tripDistanceKm: trip, settings: s);
+
+    test('no rule switched on: pickup pricing always applies', () {
+      expect(fair(base, 1, 10), closeTo(10 * 10.5 / 0.9 + 1 * 5.5 / 0.95, 1e-9));
+    });
+
+    test('longer than the trip: short pickup is cost only by default', () {
+      final s = base.copyWith(pickupRuleLongerThanTrip: true);
+      expect(fair(s, 1, 10), closeTo(10 * 10.5 / 0.9 + 1 * 2.5 / 0.95, 1e-9)); // 1 < 10: short
+      expect(fair(s, 6, 4), closeTo(4 * 10.5 / 0.9 + 6 * 5.5 / 0.95, 1e-9)); // 6 > 4: pickup pricing
+    });
+
+    test('short-pickup modes: free and as trip', () {
+      final s = base.copyWith(pickupRuleOverKm: true, pickupRuleThresholdKm: 2);
+      expect(fair(s.copyWith(pickupShortMode: "FREE"), 1, 10), closeTo(10 * 10.5 / 0.9, 1e-9));
+      expect(fair(s.copyWith(pickupShortMode: "AS_TRIP"), 1, 10), closeTo(11 * 10.5 / 0.9, 1e-9));
+    });
+
+    test('both rules: any vs all', () {
+      final s = base.copyWith(pickupRuleLongerThanTrip: true, pickupRuleOverKm: true, pickupRuleThresholdKm: 5);
+      // pickup 4 > trip 3, but 4 < 5
+      expect(FareCalculatorEngine.pickupRuleApplies(4, 3, s), isTrue);
+      expect(FareCalculatorEngine.pickupRuleApplies(4, 3, s.copyWith(pickupRuleMatchAll: true)), isFalse);
+    });
+  });
+
   group('passenger lists', () {
     test('a blocked passenger is always a rejection', () {
       final r = FareCalculatorEngine.analyze(

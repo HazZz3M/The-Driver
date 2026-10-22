@@ -7,6 +7,7 @@ import 'data/repository/assistant_repository.dart';
 import 'providers/assistant_provider.dart';
 import 'theme/app_theme.dart';
 import 'ui/screens/main_navigation_screen.dart';
+import 'ui/screens/tutorial_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,7 +77,10 @@ class _InDriveAssistantAppState extends State<InDriveAssistantApp> with WidgetsB
       ],
       theme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
-      home: const MainNavigationScreen(),
+      // First launch: the walkthrough first (skippable), then the app.
+      home: context.read<AssistantProvider>().tutorialSeen
+          ? const MainNavigationScreen()
+          : const TutorialScreen(firstRun: true),
     );
   }
 }

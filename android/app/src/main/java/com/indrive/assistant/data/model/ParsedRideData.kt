@@ -20,8 +20,12 @@ data class ParsedRideData(
     /** Disambiguates two cards that would otherwise share the same identity. */
     val duplicateIndex: Int = 0,
     /** Where tripDistanceKm came from: one of the SOURCE_* constants. */
-    val tripSource: String = SOURCE_CARD
+    val tripSource: String = SOURCE_CARD,
+    /** Counter-bid buttons on the Ride-request screen ("EGP 90" chips), with their screen bounds. */
+    val bidChips: List<BidChip> = emptyList()
 ) {
+    data class BidChip(val value: Int, val bounds: android.graphics.Rect)
+
     companion object {
         /** Shown on the card / read from the Ride-request map. */
         const val SOURCE_CARD = "CARD"

@@ -27,6 +27,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.data.model.DriverSettings
 import com.indrive.assistant.data.model.ParsedRideData
+import com.indrive.assistant.engine.BidAdvisor
 import com.indrive.assistant.engine.FareCalculatorEngine
 import java.io.File
 import java.util.concurrent.Executor
@@ -167,6 +168,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             maybeScheduleAutoAccept(rides)
             maybeReadTripFromMap(root, rides)
             maybeAutoOpen(root, rides, onRequestScreen)
+            maybeAutoTapBestBid(rides, onRequestScreen)
         } catch (e: Exception) {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
@@ -248,6 +250,87 @@ class InDriveAccessibilityService : AccessibilityService() {
             lastAutoOpenAt = now
             worker.postDelayed(autoOpenTimeout, AUTO_OPEN_TIMEOUT_MS + 200)
             Log.i(TAG, "Auto-open: opened request to read its trip length")
+        }
+    }
+
+    // =========================================================================
+    // AUTO-TAP THE BEST COUNTER-BID (opt-in, bidChipsMode == AUTO_TAP)
+    // On a Ride-request screen, once per ride: wait, re-read the screen, and click the button of
+    // the best bid (BidAdvisor) if it is still there with the same value.
+    // =========================================================================
+
+    // Worker thread only.
+    private val bidTappedKeys = LinkedHashSet<String>()
+    private var pendingBidTap: String? = null
+
+    private fun maybeAutoTapBestBid(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        if (!onRequestScreen || pendingBidTap != null || autoOpenKey != null) return
+        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP") return
+        val card = rides.singleOrNull() ?: return
+        if (card.bidChips.isEmpty()) return
+        val key = rideKey(card) ?: card.fingerprint
+        if (key in bidTappedKeys) return
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        val best = BidAdvisor.best(BidAdvisor.rate(card, settings)) ?: return
+
+        bidTappedKeys.add(key)
+        while (bidTappedKeys.size > 100) bidTappedKeys.remove(bidTappedKeys.first())
+        pendingBidTap = key
+        val delayMs = (settings.autoAcceptDelaySeconds * 1000).toLong().coerceIn(500L, 8000L)
+        worker.postDelayed({ executeBidTap(key, best.chip.value) }, delayMs)
+    }
+
+    private fun executeBidTap(key: String, value: Int) {
+        pendingBidTap = null
+        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP") return
+        val root = rootInActiveWindow ?: return
+        try {
+            if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
+            val card = findRideCards(root).singleOrNull() ?: return
+            if ((rideKey(card) ?: card.fingerprint) != key) return // another request is open now
+            val chip = card.bidChips.firstOrNull { it.value == value } ?: return
+            if (clickNodeAt(root, chip.bounds)) {
+                mainHandler.post {
+                    Toast.makeText(applicationContext, "تم اختيار أفضل مزايدة: $value ج.م", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Bid auto-tap failed", e)
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /** Clicks the clickable node at [bounds] (the node itself or its nearest clickable ancestor). */
+    private fun clickNodeAt(root: AccessibilityNodeInfo, bounds: Rect): Boolean {
+        val seen = mutableListOf<AccessibilityNodeInfo>()
+        var match: AccessibilityNodeInfo? = null
+        fun visit(node: AccessibilityNodeInfo) {
+            if (match != null) return
+            val r = Rect()
+            node.getBoundsInScreen(r)
+            if (r == bounds) {
+                match = node
+                return
+            }
+            if (!Rect.intersects(r, bounds) && node !== root) return
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                seen.add(child)
+                visit(child)
+            }
+        }
+        return try {
+            visit(root)
+            var target = match
+            var depth = 0
+            while (target != null && !target.isClickable && depth < 4) {
+                target = target.parent?.also { seen.add(it) }
+                depth++
+            }
+            target != null && target.isClickable && target.isEnabled && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        } finally {
+            seen.forEach { it.recycle() }
         }
     }
 
@@ -462,8 +545,13 @@ class InDriveAccessibilityService : AccessibilityService() {
         if (pendingAutoAcceptFingerprint != null) return
         if (System.currentTimeMillis() - lastAutoAcceptTimestamp < AUTO_ACCEPT_COOLDOWN_MS) return
 
-        val candidate = rides.firstOrNull { it.fingerprint != lastAutoAcceptedFingerprint && qualifiesForAutoAccept(it, settings) }
-            ?: return
+        val qualifying = rides.filter { it.fingerprint != lastAutoAcceptedFingerprint && qualifiesForAutoAccept(it, settings) }
+        // Either the first qualifying card on screen, or (driver's option) the best one by their ranking.
+        val candidate = (if (settings.autoAcceptPickBest) {
+            qualifying.maxByOrNull { rankScore(it, settings) }
+        } else {
+            qualifying.firstOrNull()
+        }) ?: return
 
         pendingAutoAcceptFingerprint = candidate.fingerprint
         val delayMs = (settings.autoAcceptDelaySeconds * 1000).toLong().coerceIn(300L, 8000L)
@@ -515,6 +603,16 @@ class InDriveAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Auto-accept failed", e)
         } finally {
             root.recycle()
+        }
+    }
+
+    /** Higher is better: profit per km (default), net profit, or margin %. */
+    private fun rankScore(card: ParsedRideData, settings: DriverSettings): Double {
+        val a = analyze(card, settings)
+        return when (settings.autoAcceptRankBy) {
+            "NET_PROFIT" -> a.netProfit
+            "MARGIN" -> a.profitMarginPercent
+            else -> a.profitPerKm
         }
     }
 
@@ -771,7 +869,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                     if (card != null) {
                         val top = mainFareNodeTop(fareNodes, card.fare) ?: (rootBounds.height() * 0.45).toInt()
                         val bounds = Rect(0, (top - 24).coerceAtLeast(0), rootBounds.width(), rootBounds.bottom)
-                        parsedCards.add(card.copy(screenBounds = bounds, anchorBounds = bounds))
+                        parsedCards.add(card.copy(screenBounds = bounds, anchorBounds = bounds, bidChips = findBidChips(root, card.fare)))
                     }
                 } else {
                     val seenItems = mutableSetOf<String>()
@@ -806,6 +904,37 @@ class InDriveAccessibilityService : AccessibilityService() {
                 seenFingerprints[card.fingerprint] = n + 1
                 if (n == 0) card else card.copy(duplicateIndex = n)
             }
+        }
+
+        /**
+         * The counter-bid buttons of the Ride-request screen: price-only texts ("EGP 90", "90")
+         * laid out side by side in one row. Returns the row with the most such buttons (2+),
+         * left to right; the ride's own fare is excluded.
+         */
+        fun findBidChips(root: AccessibilityNodeInfo, fare: Double): List<ParsedRideData.BidChip> {
+            val found = mutableListOf<ParsedRideData.BidChip>()
+            fun visit(node: AccessibilityNodeInfo) {
+                val r = Rect()
+                node.getBoundsInScreen(r)
+                if (node.isVisibleToUser && r.width() > 0 && r.height() > 0) {
+                    val norm = normalizeArabicDigits("${node.text ?: node.contentDescription ?: ""}".trim())
+                    val v = COUNTER_BID.find(norm)?.groupValues?.get(1)?.toIntOrNull()
+                    if (v != null && v in 5..5000 && v.toDouble() != fare && found.none { it.bounds == r }) {
+                        found.add(ParsedRideData.BidChip(v, Rect(r)))
+                    }
+                }
+                for (i in 0 until node.childCount) {
+                    val child = node.getChild(i) ?: continue
+                    visit(child)
+                    child.recycle()
+                }
+            }
+            visit(root)
+            // Group by row (similar vertical centre) and keep the fullest row.
+            val rows = found.groupBy { it.bounds.centerY() / 40 }
+            val row = rows.values.maxByOrNull { it.size } ?: return emptyList()
+            if (row.size < 2) return emptyList()
+            return row.distinctBy { it.value }.sortedBy { it.bounds.left }
         }
 
         /** Top of the node showing the ride's own price (not "Accept for…", not a bid chip). */
