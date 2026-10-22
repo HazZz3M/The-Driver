@@ -149,6 +149,16 @@ class NativeBridgeService {
     }
   }
 
+  /// Whether Android currently allows this app to install updates ("install unknown apps").
+  static Future<bool> canInstallPackages() async {
+    try {
+      return await _channel.invokeMethod<bool>('canInstallPackages') ?? false;
+    } catch (e) {
+      debugPrint("canInstallPackages failed: $e");
+      return false;
+    }
+  }
+
   /// Verifies [expectedSha256] (when given) and starts the system installer.
   static Future<InstallApkResult> installApk(String filePath, {String? expectedSha256}) async {
     try {

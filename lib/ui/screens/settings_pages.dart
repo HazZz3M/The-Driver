@@ -648,19 +648,67 @@ class UpdatesPage extends StatefulWidget {
   State<UpdatesPage> createState() => _UpdatesPageState();
 }
 
-class _UpdatesPageState extends State<UpdatesPage> {
+class _UpdatesPageState extends State<UpdatesPage> with WidgetsBindingObserver {
   bool _checking = false;
   bool _downloading = false;
   double _progress = 0;
   UpdateInfo? _info;
   String _installed = "";
 
+  /// A verified download waiting for "install unknown apps" permission. Kept so the driver
+  /// doesn't download again: installing resumes when they come back from Android settings.
+  String? _pendingApkPath;
+  String? _pendingSha;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     UpdateManager.currentVersion().then((v) {
       if (mounted) setState(() => _installed = v);
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _pendingApkPath != null) _installDownloaded();
+  }
+
+  /// Hands the already-downloaded APK to the installer again (after the permission was granted).
+  Future<void> _installDownloaded() async {
+    final path = _pendingApkPath;
+    if (path == null) return;
+    if (!await NativeBridgeService.canInstallPackages()) {
+      // Still not allowed (came back without enabling it): keep the file; don't reopen Settings.
+      _snack("لسه إذن التثبيت مش مفعّل. اضغط \"تثبيت\" لما تفعّله");
+      return;
+    }
+    final result = await NativeBridgeService.installApk(path, expectedSha256: _pendingSha);
+    if (!mounted) return;
+    setState(() {
+      _pendingApkPath = null;
+      _pendingSha = null;
+    });
+    _reportInstall(result);
+  }
+
+  void _reportInstall(InstallApkResult result) {
+    switch (result) {
+      case InstallApkResult.started:
+      case InstallApkResult.needsPermission:
+        break;
+      case InstallApkResult.checksumMismatch:
+        _snack("ملف التحديث غير موثوق (البصمة غير مطابقة) وتم حذفه");
+      case InstallApkResult.fileNotFound:
+      case InstallApkResult.error:
+        _snack("تعذر بدء التثبيت. جرّب فتح الرابط من المتصفح");
+    }
   }
 
   void _snack(String msg) {
@@ -683,6 +731,16 @@ class _UpdatesPageState extends State<UpdatesPage> {
   }
 
   Future<void> _install() async {
+    if (_pendingApkPath != null) {
+      // Already downloaded and verified: only the installer step is left.
+      final granted = await NativeBridgeService.canInstallPackages();
+      if (!granted) {
+        await NativeBridgeService.installApk(_pendingApkPath!, expectedSha256: _pendingSha); // opens the permission screen
+        return;
+      }
+      await _installDownloaded();
+      return;
+    }
     final info = _info!;
     setState(() {
       _downloading = true;
@@ -699,17 +757,18 @@ class _UpdatesPageState extends State<UpdatesPage> {
       return;
     }
 
-    switch (await NativeBridgeService.installApk(file.path, expectedSha256: sha)) {
-      case InstallApkResult.started:
-        break;
-      case InstallApkResult.needsPermission:
-        _snack("اسمح بتثبيت التطبيقات من هذا المصدر، ثم اضغط \"تثبيت\" مرة أخرى");
-      case InstallApkResult.checksumMismatch:
-        _snack("ملف التحديث غير موثوق (البصمة غير مطابقة) وتم حذفه");
-      case InstallApkResult.fileNotFound:
-      case InstallApkResult.error:
-        _snack("تعذر بدء التثبيت. جرّب فتح الرابط من المتصفح");
+    final result = await NativeBridgeService.installApk(file.path, expectedSha256: sha);
+    if (!mounted) return;
+    if (result == InstallApkResult.needsPermission) {
+      // Android opened its "install unknown apps" screen; finish when the driver comes back.
+      setState(() {
+        _pendingApkPath = file.path;
+        _pendingSha = sha;
+      });
+      _snack("اسمح بتثبيت التطبيقات من هذا المصدر، ثم ارجع للتطبيق: التثبيت هيكمل لوحده");
+      return;
     }
+    _reportInstall(result);
   }
 
   @override
@@ -774,7 +833,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                       Expanded(
                         child: FilledButton.icon(
                           icon: const Icon(Icons.install_mobile),
-                          label: const Text("تحميل وتثبيت"),
+                          label: Text(_pendingApkPath != null ? "تثبيت" : "تحميل وتثبيت"),
                           onPressed: _install,
                         ),
                       ),

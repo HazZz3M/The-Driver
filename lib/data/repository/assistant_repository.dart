@@ -52,9 +52,12 @@ class AssistantRepository {
   // Expenses
   List<Expense> getAllExpenses() => database.getAllExpenses();
   double getTotalExpensesSince(int timestamp) => database.getTotalExpensesSince(timestamp);
-  List<Expense> getFuelRefills() => database.getFuelRefills();
-  double? getRecentAverageFuelConsumption() => database.getRecentAverageFuelConsumption();
+  List<Expense> getFuelRefills({String? vehicleId}) => database.getFuelRefills(vehicleId: vehicleId);
+  double? getRecentAverageFuelConsumption({String? vehicleId}) =>
+      database.getRecentAverageFuelConsumption(vehicleId: vehicleId);
   List<Expense> getOilChanges() => database.getOilChanges();
   Future<void> recordExpense(Expense expense) => database.recordExpense(expense);
   Future<void> deleteExpense(int expenseId) => database.deleteExpense(expenseId);
+  Future<void> assignUntaggedExpenses(String vehicleId) => database.assignUntaggedExpenses(vehicleId);
+  Future<void> deleteExpensesOfVehicle(String vehicleId) => database.deleteExpensesOfVehicle(vehicleId);
 }

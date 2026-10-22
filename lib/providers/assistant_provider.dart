@@ -49,6 +49,13 @@ class AssistantProvider extends ChangeNotifier {
     isShiftActive = repository.isShiftActive;
     shiftStartTime = repository.shiftStartTime;
 
+    // Before 1.14 expenses were not tied to a vehicle: give them to the vehicle that was active.
+    final owner = activeProfile?.id;
+    if (owner != null) {
+      if (activeVehicleId != owner) activeVehicleId = owner;
+      repository.assignUntaggedExpenses(owner);
+    }
+
     // Pre-1.10 builds updated settings without updating the vehicle; adopt the settings
     // (what the engine actually used) into the active vehicle so both agree from now on.
     final active = activeProfile;
@@ -195,6 +202,9 @@ class AssistantProvider extends ChangeNotifier {
   // Expenses
   List<Expense> get allExpenses => repository.getAllExpenses();
 
+  /// Fuel, oil and parts of the active vehicle only (newest first).
+  List<Expense> get vehicleExpenses => allExpenses.where((e) => e.vehicleId == activeVehicleId).toList();
+
   Future<void> saveCurrentRide([double? fareToSave]) async {
     final actualFare = fareToSave ?? offeredFare;
     final recalculated = FareCalculatorEngine.analyze(
@@ -243,10 +253,11 @@ class AssistantProvider extends ChangeNotifier {
       description: description.isNotEmpty
           ? description
           : "تفويلة (${liters.toStringAsFixed(1)} لتر × ${pricePerLiter.toStringAsFixed(2)} ج.م)",
+      vehicleId: activeVehicleId,
     ));
 
-    // Average of the last few refills smooths out partial fills.
-    final averaged = consumption > 0 ? repository.getRecentAverageFuelConsumption() : null;
+    // Average of this car's last few refills smooths out partial fills.
+    final averaged = consumption > 0 ? repository.getRecentAverageFuelConsumption(vehicleId: activeVehicleId) : null;
     await updateSettings(driverSettings.copyWith(
       fuelConsumptionLPer100Km: averaged != null ? (averaged * 10).round() / 10.0 : null,
       fuelPricePerLiter: pricePerLiter,
@@ -274,6 +285,7 @@ class AssistantProvider extends ChangeNotifier {
       description: description.isNotEmpty
           ? description
           : "غيار زيت موتور ($oilVolumeMl ملل، عمر ${oilLifespanKm.toInt()} كم)",
+      vehicleId: activeVehicleId,
     ));
     notifyListeners();
   }
@@ -300,6 +312,7 @@ class AssistantProvider extends ChangeNotifier {
           : (costPerKm != null
               ? "قطعة غيار: $partName (عمر ${lifespanKm!.toInt()} كم • ${costPerKm.toStringAsFixed(2)} ج.م/كم)"
               : "قطعة غيار / صيانة: $partName"),
+      vehicleId: activeVehicleId,
     ));
 
     if (applied != null) {
@@ -321,12 +334,31 @@ class AssistantProvider extends ChangeNotifier {
     await repository.deleteExpense(expense.id);
     final applied = expense.appliedWearPerKm;
     if (applied != null && applied > 0) {
-      // Undo this part's contribution to the wear rate.
-      final rate = ((driverSettings.wearAndTearPerKm - applied) * 100).round() / 100.0;
-      await updateSettings(driverSettings.copyWith(wearAndTearPerKm: rate < 0 ? 0.0 : rate));
+      // Undo this part's contribution to its vehicle's wear rate.
+      await _addToWearRate(expense.vehicleId, -applied);
     } else {
       notifyListeners();
     }
+  }
+
+  /// Adds [delta] to the wear rate of [vehicleId]: through the settings (what pricing uses) for
+  /// the active vehicle, directly on the profile for any other one.
+  Future<void> _addToWearRate(String? vehicleId, double delta) async {
+    double next(double rate) {
+      final r = ((rate + delta) * 100).round() / 100.0;
+      return r < 0 ? 0.0 : r;
+    }
+
+    if (vehicleId == null || vehicleId == activeVehicleId) {
+      await updateSettings(driverSettings.copyWith(wearAndTearPerKm: next(driverSettings.wearAndTearPerKm)));
+      return;
+    }
+    final owner = vehicleProfiles.where((p) => p.id == vehicleId).firstOrNull;
+    if (owner != null) {
+      _replaceProfile(owner.copyWith(wearAndTearPerKm: next(owner.wearAndTearPerKm)));
+      await repository.saveVehicleProfiles(vehicleProfiles);
+    }
+    notifyListeners();
   }
 
   // Vehicle Profiles (the active vehicle owns consumption, fuel price and wear rate)
@@ -361,6 +393,7 @@ class AssistantProvider extends ChangeNotifier {
     if (vehicleProfiles.length <= 1) return false;
     vehicleProfiles = vehicleProfiles.where((p) => p.id != profile.id).toList();
     await repository.saveVehicleProfiles(vehicleProfiles);
+    await repository.deleteExpensesOfVehicle(profile.id);
     if (profile.id == activeVehicleId) {
       await switchActiveVehicle(vehicleProfiles.first);
     } else {
@@ -488,9 +521,7 @@ class AssistantProvider extends ChangeNotifier {
     await repository.recordExpense(expense);
     final applied = expense.appliedWearPerKm;
     if (applied != null && applied > 0) {
-      await updateSettings(driverSettings.copyWith(
-        wearAndTearPerKm: ((driverSettings.wearAndTearPerKm + applied) * 100).round() / 100.0,
-      ));
+      await _addToWearRate(expense.vehicleId, applied);
     } else {
       notifyListeners();
     }

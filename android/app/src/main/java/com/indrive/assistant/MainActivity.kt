@@ -86,6 +86,9 @@ class MainActivity : FlutterActivity() {
                     val info = packageManager.getPackageInfo(packageName, 0)
                     result.success(info.versionName ?: "")
                 }
+                "canInstallPackages" -> {
+                    result.success(Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls())
+                }
                 "installApk" -> {
                     val filePath = call.argument<String>("filePath")
                     if (filePath == null) {

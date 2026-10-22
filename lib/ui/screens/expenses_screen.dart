@@ -24,7 +24,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     final provider = context.watch<AssistantProvider>();
     final activeProfile = provider.activeProfile;
     final settings = provider.driverSettings;
-    final expenses = provider.allExpenses;
+    // Each vehicle keeps its own log; switching the vehicle switches the list.
+    final expenses = provider.vehicleExpenses;
 
     final filteredExpenses = _selectedCategoryFilter == "ALL"
         ? expenses
@@ -162,7 +163,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ),
 
             // 2. Action Buttons
-            const SectionLabel("تسجيل مصروف"),
+            SectionLabel("تسجيل مصروف لـ ${activeProfile?.name ?? 'المركبة'}"),
             Row(
               children: [
                 Expanded(child: _actionButton("تفويلة", Icons.local_gas_station, AppColors.neonGreen, () => _showFuelDialog(context, provider))),
@@ -174,7 +175,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
             ),
 
             // 3. Category Filter
-            const SectionLabel("السجل"),
+            SectionLabel("سجل ${activeProfile?.name ?? 'المركبة'}"),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -193,7 +194,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
               const EmptyState(
                 icon: Icons.receipt_long_outlined,
                 title: "لا توجد مصاريف هنا",
-                message: "سجّل التفويلة أو غيار الزيت لحساب تكلفة الكيلومتر الحقيقية",
+                message: "سجّل التفويلة أو غيار الزيت لهذه المركبة لحساب تكلفة الكيلومتر الحقيقية",
               )
             else
               ...filteredExpenses.map((exp) => _buildExpenseCard(context, exp, provider)),
@@ -603,7 +604,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 final ok = await confirmAction(
                   context,
                   title: "حذف المركبة؟",
-                  message: "سيتم حذف '${prof.name}'. المصاريف المسجلة لن تُحذف.",
+                  message: "سيتم حذف '${prof.name}' وكل مصاريفها المسجلة (تفويلات، زيت، قطع غيار). لا يمكن التراجع.",
                 );
                 if (ok) await provider.deleteVehicleProfile(prof);
               },
