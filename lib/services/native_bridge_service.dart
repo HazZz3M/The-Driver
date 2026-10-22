@@ -155,6 +155,58 @@ class NativeBridgeService {
     }
   }
 
+  // ---- Request log (lib/data/models/request_record.dart) ----
+
+  /// Every request seen in inDrive, oldest first, as raw JSON maps. Empty on failure.
+  static Future<List<Map<String, dynamic>>> getRequestLog() async {
+    try {
+      final raw = await _channel.invokeMethod<String>('getRequestLog');
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    } catch (e) {
+      debugPrint("getRequestLog failed: $e");
+      return const [];
+    }
+  }
+
+  static Future<bool> rateRequest(int id, int stars, List<String> tags, String note) async {
+    try {
+      return await _channel.invokeMethod<bool>('rateRequest', {'id': id, 'stars': stars, 'tags': tags, 'note': note}) ?? false;
+    } catch (e) {
+      debugPrint("rateRequest failed: $e");
+      return false;
+    }
+  }
+
+  static Future<bool> clearRequestLog() async {
+    try {
+      return await _channel.invokeMethod<bool>('clearRequestLog') ?? false;
+    } catch (e) {
+      debugPrint("clearRequestLog failed: $e");
+      return false;
+    }
+  }
+
+  /// Writes the log as CSV (or JSON) to the app cache and returns the file path.
+  static Future<String?> exportRequestLog({required bool csv}) async {
+    try {
+      return await _channel.invokeMethod<String>('exportRequestLog', {'csv': csv});
+    } catch (e) {
+      debugPrint("exportRequestLog failed: $e");
+      return null;
+    }
+  }
+
+  /// Opens Android's share sheet for a file in the app cache.
+  static Future<bool> shareFile(String path, {required String mime, required String title}) async {
+    try {
+      return await _channel.invokeMethod<bool>('shareFile', {'path': path, 'mime': mime, 'title': title}) ?? false;
+    } catch (e) {
+      debugPrint("shareFile failed: $e");
+      return false;
+    }
+  }
+
   /// Whether Android currently allows this app to install updates ("install unknown apps").
   static Future<bool> canInstallPackages() async {
     try {

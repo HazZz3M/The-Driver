@@ -3,9 +3,14 @@ package com.indrive.assistant.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.ScreenshotResult
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import androidx.core.app.NotificationCompat
+import com.indrive.assistant.MainActivity
+import com.indrive.assistant.data.local.RequestLog
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
@@ -129,6 +134,12 @@ class InDriveAccessibilityService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
 
         when {
+            isTargetPackage(pkg, packageName) && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                // The driver tapped something in inDrive (Accept, a bid button…): log the outcome.
+                val label = (event.text?.joinToString(" ") ?: "") + " " + (event.contentDescription ?: "")
+                val bounds = event.source?.let { src -> Rect().also { src.getBoundsInScreen(it); src.recycle() } }
+                worker.post { handleInDriveClick(label.trim(), bounds) }
+            }
             isTargetPackage(pkg, packageName) -> {
                 // Throttle with a guaranteed trailing scan: the first event schedules a scan,
                 // later events within the window are folded into it, so the final screen state
@@ -165,6 +176,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                 saveDiagnosticDump(root, pkg, rides)
             }
             showPopups(rides)
+            logRequests(rides, onRequestScreen)
+            maybePromptRating(rides, onRequestScreen)
             maybeScheduleAutoAccept(rides)
             maybeReadTripFromMap(root, rides)
             maybeAutoOpen(root, rides, onRequestScreen)
@@ -173,6 +186,73 @@ class InDriveAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
             root.recycle()
+        }
+    }
+
+    // =========================================================================
+    // REQUEST LOG (for the analysis & recommendations tab) and RATING PROMPT
+    // =========================================================================
+
+    // Worker thread only.
+    private var lastRides: List<ParsedRideData> = emptyList()
+    private var ratingPendingFingerprint: String? = null
+    private var ratingAcceptedAt = 0L
+
+    private fun logRequests(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        lastRides = rides
+        if (rides.isEmpty()) return
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        val analyses = rides.map { analyze(it, settings) }
+        RequestLog.recordSeen(applicationContext, rides, analyses, onRequestScreen, if (onRequestScreen) lastScreenTexts else emptyList())
+    }
+
+    /** A click inside inDrive: Accept → accepted; a bid button → bid sent. Worker thread. */
+    private fun handleInDriveClick(label: String, bounds: Rect?) {
+        val rides = lastRides
+        val card = rides.singleOrNull()
+            ?: rides.firstOrNull { c -> bounds != null && c.screenBounds?.contains(bounds.centerX(), bounds.centerY()) == true }
+            ?: return
+        val norm = normalizeArabicDigits(label)
+        when {
+            ACCEPT_BUTTON_REGEX.containsMatchIn(norm) -> markAccepted(card)
+            else -> {
+                val v = COUNTER_BID.find(norm)?.groupValues?.get(1)?.toIntOrNull() ?: return
+                if (card.bidChips.any { it.value == v } || card.counterBids.contains(v)) {
+                    RequestLog.recordOutcome(applicationContext, card.fingerprint, RequestLog.STATUS_BID_SENT, v)
+                }
+            }
+        }
+    }
+
+    private fun markAccepted(card: ParsedRideData) {
+        RequestLog.recordOutcome(applicationContext, card.fingerprint, RequestLog.STATUS_ACCEPTED)
+        ratingPendingFingerprint = card.fingerprint
+        ratingAcceptedAt = System.currentTimeMillis()
+    }
+
+    /**
+     * After an accepted ride, once the driver is back on the requests list (the ride is over),
+     * posts one notification asking to rate it. The app shows the rating sheet when opened.
+     */
+    private fun maybePromptRating(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        if (ratingPendingFingerprint == null || onRequestScreen || rides.isEmpty()) return
+        if (System.currentTimeMillis() - ratingAcceptedAt < RATING_PROMPT_AFTER_MS) return
+        ratingPendingFingerprint = null
+        try {
+            val open = PendingIntent.getActivity(
+                this, 7, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE
+            )
+            val n = NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.btn_star_big_on)
+                .setContentTitle("قيّم رحلتك الأخيرة")
+                .setContentText("تقييمك بيحسّن التحليلات والتوصيات. اضغط هنا.")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(RATING_NOTIFICATION_ID, n)
+        } catch (e: Exception) {
+            Log.w(TAG, "Rating prompt failed", e)
         }
     }
 
@@ -586,6 +666,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 return
             }
             if (clickAcceptButtonInside(root, cardBounds)) {
+                markAccepted(card)
                 lastAutoAcceptedFingerprint = fingerprint
                 lastAutoAcceptTimestamp = System.currentTimeMillis()
                 val analysis = analyze(card, settings)
@@ -713,6 +794,13 @@ class InDriveAccessibilityService : AccessibilityService() {
         /** Whether the last findRideCards call saw the full-screen "Ride request" view (worker thread). */
         @Volatile
         var lastScanWasRequestScreen = false
+
+        /** All texts of the last Ride-request screen read (its "text snapshot" for the request log). */
+        @Volatile
+        var lastScreenTexts: List<String> = emptyList()
+
+        private const val RATING_PROMPT_AFTER_MS = 3 * 60 * 1000L
+        private const val RATING_NOTIFICATION_ID = 2201
         /** Used as the event filter when no inDrive app can be found on the phone. */
         private const val DEFAULT_INDRIVE_PACKAGE = "sinet.startup.inDriver"
 
@@ -858,6 +946,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                     it.equals("Ride request", ignoreCase = true) || it.contains("طلب رحلة")
             }
             lastScanWasRequestScreen = singleRequestScreen
+            lastScreenTexts = if (singleRequestScreen) allScreenTexts.toList() else emptyList()
 
             val fareNodes = mutableListOf<AccessibilityNodeInfo>()
             findFareNodes(root, fareNodes)

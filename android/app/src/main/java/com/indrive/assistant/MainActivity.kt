@@ -7,6 +7,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import com.indrive.assistant.data.local.RequestLog
 import com.indrive.assistant.service.FloatingHudService
 import com.indrive.assistant.service.InDriveAccessibilityService
 import com.indrive.assistant.util.UpdateManager
@@ -85,6 +87,48 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> {
                     val info = packageManager.getPackageInfo(packageName, 0)
                     result.success(info.versionName ?: "")
+                }
+                // ---- Request log (analysis & recommendations) ----
+                "getRequestLog" -> result.success(RequestLog.asJson(this))
+                "rateRequest" -> {
+                    val id = call.argument<Number>("id")?.toLong()
+                    val stars = call.argument<Int>("stars")
+                    if (id == null || stars == null) {
+                        result.error("INVALID_ARGUMENT", "id and stars are required", null)
+                    } else {
+                        val tags = call.argument<List<String>>("tags") ?: emptyList()
+                        result.success(RequestLog.rate(this, id, stars, tags, call.argument<String>("note") ?: ""))
+                    }
+                }
+                "clearRequestLog" -> {
+                    RequestLog.clear(this)
+                    result.success(true)
+                }
+                "exportRequestLog" -> {
+                    try {
+                        result.success(RequestLog.export(this, call.argument<Boolean>("csv") ?: true).absolutePath)
+                    } catch (e: Exception) {
+                        result.error("EXPORT_ERROR", e.message, null)
+                    }
+                }
+                "shareFile" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("INVALID_ARGUMENT", "path is required", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", java.io.File(path))
+                        val send = Intent(Intent.ACTION_SEND)
+                            .setType(call.argument<String>("mime") ?: "text/csv")
+                            .putExtra(Intent.EXTRA_STREAM, uri)
+                            .putExtra(Intent.EXTRA_SUBJECT, call.argument<String>("title") ?: "")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        startActivity(Intent.createChooser(send, call.argument<String>("title") ?: "مشاركة"))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SHARE_ERROR", e.message, null)
+                    }
                 }
                 "canInstallPackages" -> {
                     result.success(Build.VERSION.SDK_INT < Build.VERSION_CODES.O || packageManager.canRequestPackageInstalls())

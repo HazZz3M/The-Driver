@@ -3,6 +3,7 @@ import '../data/models/driver_settings.dart';
 import 'dart:async';
 import '../data/models/expense.dart';
 import '../data/models/hud_settings.dart';
+import '../data/models/request_record.dart';
 import '../data/models/trip.dart';
 import '../data/models/vehicle_profile.dart';
 import '../data/repository/assistant_repository.dart';
@@ -438,6 +439,49 @@ class AssistantProvider extends ChangeNotifier {
 
   bool get autoAcceptConsentGiven => repository.autoAcceptConsentGiven;
   Future<void> recordAutoAcceptConsent() => repository.setAutoAcceptConsentGiven();
+
+  // Request log (every request seen in inDrive; kept natively, see RequestLog.kt)
+  List<RequestRecord> requestLog = const [];
+  bool requestLogLoaded = false;
+  /// Accepted rides the driver chose not to rate now (asked again next app start).
+  final Set<int> _ratingDismissed = {};
+
+  Future<void> loadRequestLog() async {
+    final raw = await NativeBridgeService.getRequestLog();
+    requestLog = raw.map(RequestRecord.fromJson).toList();
+    requestLogLoaded = true;
+    notifyListeners();
+  }
+
+  /// Newest accepted ride of the last 12 hours that is still unrated (and not dismissed).
+  RequestRecord? get rideAwaitingRating {
+    final since = DateTime.now().subtract(const Duration(hours: 12));
+    for (final r in requestLog.reversed) {
+      if (r.accepted && r.rating == null && r.firstSeen.isAfter(since) && !_ratingDismissed.contains(r.id)) return r;
+    }
+    return null;
+  }
+
+  void dismissRating(int id) => _ratingDismissed.add(id);
+
+  Future<bool> rateRequest(int id, int stars, List<String> tags, String note) async {
+    final ok = await NativeBridgeService.rateRequest(id, stars, tags, note);
+    if (ok) await loadRequestLog();
+    return ok;
+  }
+
+  Future<void> clearRequestLog() async {
+    await NativeBridgeService.clearRequestLog();
+    await loadRequestLog();
+  }
+
+  /// Exports the log (CSV for Excel, or JSON) and opens the share sheet. False on failure.
+  Future<bool> shareRequestLog({required bool csv}) async {
+    final path = await NativeBridgeService.exportRequestLog(csv: csv);
+    if (path == null) return false;
+    return NativeBridgeService.shareFile(path,
+        mime: csv ? "text/csv" : "application/json", title: "سجل طلبات The Driver");
+  }
 
   bool get tutorialSeen => repository.tutorialSeen;
   Future<void> markTutorialSeen() => repository.setTutorialSeen();
