@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../engine/fare_calculator_engine.dart';
 import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
@@ -21,11 +22,11 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   bool _isSaving = false;
   bool _showCosts = false;
 
-  Future<void> _save(AssistantProvider provider) async {
+  Future<void> _save(AssistantProvider provider, double? bidFare) async {
     setState(() => _isSaving = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await provider.saveCurrentRide(_selectedBidFare);
+      await provider.saveCurrentRide(bidFare);
       HapticFeedback.mediumImpact();
       messenger.showSnackBar(const SnackBar(content: Text("تم حفظ الرحلة في سجل الوردية")));
     } finally {
@@ -40,6 +41,9 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     final analysis = provider.fareAnalysis;
     final activeVehicle = provider.activeProfile;
     final currency = settings.currency;
+    // Null once the bids are recomputed and the picked price is no longer offered.
+    final SmartBidOption? selectedBid =
+        analysis.smartBids.where((b) => b.suggestedFare == _selectedBidFare).firstOrNull;
 
     return Scaffold(
       body: SafeArea(
@@ -53,8 +57,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 tooltip: "إعادة ضبط",
                 icon: const Icon(Icons.restart_alt, color: AppColors.textSecondary),
                 onPressed: () {
+                  final fare = provider.offeredFare;
+                  final pickup = provider.pickupDistanceKm;
+                  final trip = provider.tripDistanceKm;
+                  final bid = _selectedBidFare;
                   setState(() => _selectedBidFare = null);
                   provider.resetCalculator();
+                  showUndoSnackBar(context, "تمت إعادة ضبط الحاسبة", () {
+                    provider.setPickupDistance(pickup);
+                    provider.setTripDistance(trip);
+                    provider.setOfferedFare(fare);
+                    if (mounted) setState(() => _selectedBidFare = bid);
+                  });
                 },
               ),
             ),
@@ -253,10 +267,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                       bid: bid,
                       currency: currency,
                       isSelected: _selectedBidFare == bid.suggestedFare,
+                      // Keeps the passenger's offer: the bid is only what gets saved / compared.
                       onSelect: () {
                         HapticFeedback.selectionClick();
-                        setState(() => _selectedBidFare = bid.suggestedFare);
-                        provider.setOfferedFare(bid.suggestedFare);
+                        setState(() => _selectedBidFare = _selectedBidFare == bid.suggestedFare ? null : bid.suggestedFare);
                       },
                     ),
                   ),
@@ -264,6 +278,16 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 ],
               ],
             ),
+            if (selectedBid != null)
+              Padding(
+                padding: const EdgeInsets.only(top: Insets.sm),
+                child: Text(
+                  "لو زايدت بـ ${selectedBid.suggestedFare.toInt()} $currency: صافي ${signed(selectedBid.netProfit, decimals: 0)} $currency "
+                  "(بدل ${signed(analysis.netProfit, decimals: 0)} على عرض الراكب ${provider.offeredFare.toInt()})",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: moneyColor(selectedBid.netProfit), fontSize: 12.5, fontWeight: FontWeight.w600),
+                ),
+              ),
 
             const SizedBox(height: Insets.xl),
 
@@ -272,8 +296,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               icon: _isSaving
                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.check_rounded),
-              label: Text("حفظ الرحلة في السجل • ${(_selectedBidFare ?? provider.offeredFare).toInt()} $currency"),
-              onPressed: _isSaving ? null : () => _save(provider),
+              label: Text("حفظ الرحلة في السجل • ${(selectedBid?.suggestedFare ?? provider.offeredFare).toInt()} $currency"),
+              onPressed: _isSaving ? null : () => _save(provider, selectedBid?.suggestedFare),
             ),
           ],
         ),

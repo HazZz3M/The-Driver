@@ -11,9 +11,10 @@ data class DriverSettings(
     val minProfitPerKm: Double = 8.0,
     /** Trip length assumed when a request card doesn't show it (inDrive list cards show pickup only). */
     val assumedTripKm: Double = 4.0,
-    val currency: String = "EGP",
-    val favoriteZones: List<String> = listOf("المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"),
-    val blacklistedZones: List<String> = listOf("شبرا الخيمة", "حلوان", "المرج"),
+    val currency: String = "ج.م",
+    // No zones until the driver picks them (mirrors driver_settings.dart).
+    val favoriteZones: List<String> = emptyList(),
+    val blacklistedZones: List<String> = emptyList(),
 
     // Auto-Accept Automation
     val autoAcceptEnabled: Boolean = false,

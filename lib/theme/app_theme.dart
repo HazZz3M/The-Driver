@@ -16,7 +16,7 @@ class AppTheme {
       bodySmall: base.copyWith(fontSize: 12, color: AppColors.textSecondary),
       labelLarge: base.copyWith(fontSize: 14, fontWeight: FontWeight.w700),
       labelMedium: base.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
-      labelSmall: base.copyWith(fontSize: 11, color: AppColors.textTertiary),
+      labelSmall: base.copyWith(fontSize: 12, color: AppColors.textTertiary),
     );
   }
 
@@ -76,7 +76,7 @@ class AppTheme {
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
-            fontSize: 11.5,
+            fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             color: selected ? AppColors.emeraldLight : AppColors.textSecondary,
           );

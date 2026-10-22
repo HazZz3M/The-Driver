@@ -95,7 +95,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
                   const Text(
                     "التبديل بين المركبات (اضغط مطولاً للتعديل أو الحذف):",
-                    style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
                   ),
 
                   const SizedBox(height: 6),
@@ -151,7 +151,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       Expanded(
                         child: _buildMetricMini(
                           label: "الاستهلاك والصيانة",
-                          value: "${formatNumber(settings.wearAndTearPerKm)} ج/كم",
+                          value: "${formatNumber(settings.wearAndTearPerKm)} ج.م/كم",
                           color: AppColors.accentPurple,
                         ),
                       ),
@@ -250,7 +250,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.textSecondary, fontSize: 10.5)),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
           const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -310,7 +310,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     children: [
                       Icon(icon, size: 14, color: badgeColor),
                       const SizedBox(width: 4),
-                      Text(badgeTitle, style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 11)),
+                      Text(badgeTitle, style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -320,7 +320,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     dateStr,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 11),
+                    style: const TextStyle(color: AppColors.textTertiary, fontSize: 12),
                   ),
                 ),
                 Text(
@@ -350,11 +350,11 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 if (exp.consumptionLPer100Km != null && exp.consumptionLPer100Km! > 0)
                   _buildSubBadge("استهلاك: ${exp.consumptionLPer100Km!.toStringAsFixed(1)} ل/100كم", AppColors.accentCyan),
                 if (exp.fuelCostPerKm != null && exp.fuelCostPerKm! > 0)
-                  _buildSubBadge("تكلفة: ${exp.fuelCostPerKm!.toStringAsFixed(2)} ج/كم", AppColors.neonGreen),
+                  _buildSubBadge("تكلفة: ${exp.fuelCostPerKm!.toStringAsFixed(2)} ج.م/كم", AppColors.neonGreen),
                 if (exp.oilCostPerKm != null && exp.oilCostPerKm! > 0)
-                  _buildSubBadge("تكلفة الزيت: ${exp.oilCostPerKm!.toStringAsFixed(2)} ج/كم", AppColors.accentCyan),
+                  _buildSubBadge("تكلفة الزيت: ${exp.oilCostPerKm!.toStringAsFixed(2)} ج.م/كم", AppColors.accentCyan),
                 if (exp.partCostPerKm != null && exp.partCostPerKm! > 0)
-                  _buildSubBadge("استهلاك القطعة: ${exp.partCostPerKm!.toStringAsFixed(2)} ج/كم", AppColors.accentPurple),
+                  _buildSubBadge("استهلاك القطعة: ${exp.partCostPerKm!.toStringAsFixed(2)} ج.م/كم", AppColors.accentPurple),
                 if (exp.appliedWearPerKm != null && exp.appliedWearPerKm! > 0)
                   _buildSubBadge("مضاف لمعدل الاستهلاك", AppColors.accentAmber),
               ],
@@ -373,7 +373,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
         color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+      child: Text(text, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
     );
   }
 
@@ -413,7 +413,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 const SizedBox(height: 8),
                 const Text(
                   "لحساب الاستهلاك بدقة: املأ التانك بالكامل في كل مرة وسجّل الكيلومترات بين التفويلتين.",
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 11, height: 1.4),
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.4),
                 ),
               ],
             ),
@@ -536,7 +536,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                   title: const Text("إضافة تكلفتها لكل كم إلى معدل الاستهلاك", style: TextStyle(fontSize: 12)),
                   subtitle: const Text(
                     "فعّلها فقط لقطع غير محسوبة في المعدل الحالي. حذف المصروف يلغي الإضافة.",
-                    style: TextStyle(fontSize: 10.5, color: AppColors.textSecondary),
+                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
                   ),
                   value: addToWear,
                   onChanged: (v) => setDlg(() => addToWear = v ?? false),
@@ -648,7 +648,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 const SizedBox(height: 10),
                 NumberField(controller: fuelPriceCtrl, label: "سعر لتر الوقود (ج.م)", errorText: priceError),
                 const SizedBox(height: 10),
-                NumberField(controller: wearCtrl, label: "الاستهلاك والصيانة (ج/كم)", errorText: wearError),
+                NumberField(controller: wearCtrl, label: "الاستهلاك والصيانة (ج.م/كم)", errorText: wearError),
               ],
             ),
           ),

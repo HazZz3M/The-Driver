@@ -9,11 +9,20 @@ class HudBadgePreview extends StatelessWidget {
   final Color color;
   final bool favorite;
 
+  /// Status symbol drawn in the top-end corner, as on the real badge ("✓", "!", "✕").
+  final String? glyph;
+
+  /// The native HUD's colours (FloatingHudService.kt), so the preview matches what shows over inDrive.
+  static const Color hudGood = Color(0xFF4ADE80);
+  static const Color hudFavorite = Color(0xFF7C8CFF);
+  static const Color hudInk = Color(0xFF0B0F17);
+
   const HudBadgePreview({
     super.key,
     required this.hud,
-    this.color = AppColors.emeraldPrimary,
+    this.color = hudGood,
     this.favorite = false,
+    this.glyph = "✓",
   });
 
   String get _value => switch (hud.primaryValue) {
@@ -39,8 +48,8 @@ class HudBadgePreview extends StatelessWidget {
       "SPEEDO_GAUGE" => _speedo(s),
       "MINI_TAG" => _tag(s),
       "CORNER_RIBBON" => _ribbon(s),
-      "GLOW_DOT" => _circle(s, diameter: 48, stroke: 3.5, fontSize: 13.5),
-      _ => _circle(s, diameter: 52, stroke: 2.5, fontSize: 13),
+      "GLOW_DOT" => _circle(s, diameter: 52, stroke: 3.5, fontSize: 14),
+      _ => _circle(s, diameter: 56, stroke: 2.5, fontSize: 14),
     };
     return Opacity(
       opacity: hud.opacity,
@@ -48,22 +57,23 @@ class HudBadgePreview extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           badge,
-          if (favorite)
-            Positioned(
-              top: -4,
-              left: -4,
-              child: Container(
-                width: 16,
-                height: 16,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(color: Color(0xFFFFB800), shape: BoxShape.circle),
-                child: const Text("★", style: TextStyle(fontSize: 9, color: Color(0xFF070B14))),
-              ),
-            ),
+          if (glyph != null) PositionedDirectional(top: -4, end: -4, child: _chip(glyph!, color)),
+          if (favorite) PositionedDirectional(top: -4, start: -4, child: _chip("★", hudFavorite)),
         ],
       ),
     );
   }
+
+  Widget _chip(String symbol, Color bg) => Container(
+        width: 18,
+        height: 18,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: bg, shape: BoxShape.circle, border: Border.all(color: hudInk)),
+        child: Text(symbol, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: hudInk, height: 1)),
+      );
+
+  /// Same rule as the native badge: scaled with the size, never below 11.
+  double _sp(double base, double s) => (base * s).clamp(11.0, double.infinity).toDouble();
 
   TextStyle _valueStyle(double size, {Color c = Colors.white}) =>
       TextStyle(color: c, fontSize: size, fontWeight: FontWeight.w800, height: 1.1);
@@ -78,13 +88,13 @@ class HudBadgePreview extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: color, width: stroke),
       ),
-      child: FittedBox(child: Padding(padding: const EdgeInsets.all(4), child: Text(_value, style: _valueStyle(fontSize * s)))),
+      child: FittedBox(child: Padding(padding: const EdgeInsets.all(4), child: Text(_value, style: _valueStyle(_sp(fontSize, s))))),
     );
   }
 
   Widget _pill(double s) {
     return Container(
-      height: 30 * s,
+      height: 32 * s,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF0B0F19),
@@ -96,7 +106,7 @@ class HudBadgePreview extends StatelessWidget {
         children: [
           Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 6),
-          Text("$_value $_caption", style: _valueStyle(12.5 * s)),
+          Text("$_value $_caption", style: _valueStyle(_sp(13.5, s))),
         ],
       ),
     );
@@ -104,8 +114,8 @@ class HudBadgePreview extends StatelessWidget {
 
   Widget _speedo(double s) {
     return Container(
-      width: 58 * s,
-      height: 46 * s,
+      width: 62 * s,
+      height: 50 * s,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
@@ -119,8 +129,8 @@ class HudBadgePreview extends StatelessWidget {
             child: FittedBox(
               child: Column(
                 children: [
-                  Text(_value, style: _valueStyle(13 * s)),
-                  Text(_caption, style: TextStyle(color: AppColors.textSecondary, fontSize: 9 * s)),
+                  Text(_value, style: _valueStyle(_sp(14, s))),
+                  Text(_caption, style: const TextStyle(color: AppColors.textSecondary, fontSize: 11)),
                 ],
               ),
             ),
@@ -132,17 +142,17 @@ class HudBadgePreview extends StatelessWidget {
 
   Widget _tag(double s) {
     return Container(
-      height: 30 * s,
+      height: 32 * s,
       padding: const EdgeInsets.symmetric(horizontal: 9),
       alignment: Alignment.center,
       decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(6)),
-      child: Text("$_value $_caption", style: _valueStyle(13 * s, c: const Color(0xFF0F172A))),
+      child: Text("$_value $_caption", style: _valueStyle(_sp(13.5, s), c: hudInk)),
     );
   }
 
   Widget _ribbon(double s) {
     return Container(
-      height: 28 * s,
+      height: 30 * s,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       alignment: Alignment.center,
       decoration: BoxDecoration(
@@ -150,7 +160,7 @@ class HudBadgePreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color, width: 1.8),
       ),
-      child: Text("$_caption $_value", style: _valueStyle(12 * s, c: color)),
+      child: Text("$_caption $_value", style: _valueStyle(_sp(13, s), c: color)),
     );
   }
 }

@@ -30,9 +30,10 @@ class DriverSettings {
     this.targetDailyEarnings = 1500.0,
     this.minProfitPerKm = 8.0,
     this.assumedTripKm = 4.0,
-    this.currency = "EGP",
-    this.favoriteZones = const ["المعادي", "التجمع", "مصر الجديدة", "الدقي", "الشيخ زايد"],
-    this.blacklistedZones = const ["شبرا الخيمة", "حلوان", "المرج"],
+    this.currency = "ج.م",
+    // No zones until the driver picks them: preset lists coloured rides the driver never chose.
+    this.favoriteZones = const [],
+    this.blacklistedZones = const [],
     this.autoAcceptEnabled = false,
     this.autoAcceptMinProfitPerKm = 10.0,
     this.autoAcceptMinNetProfit = 25.0,

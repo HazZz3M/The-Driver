@@ -62,7 +62,7 @@ class HudSettingsPage extends StatelessWidget {
         const Text(
           "التغييرات تُطبَّق فوراً على المساعد أثناء تشغيله.",
           textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textTertiary, fontSize: 11.5),
+          style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
         ),
 
         const SectionLabel("ماذا تعرض العلامة"),
@@ -417,6 +417,7 @@ class ZonesPage extends StatelessWidget {
     required List<String> zones,
     required Future<bool> Function(String) onAdd,
     required Future<bool> Function(String) onRemove,
+    List<String> suggestions = const [],
   }) {
     return AppCard(
       child: Column(
@@ -464,10 +465,31 @@ class ZonesPage extends StatelessWidget {
                       ))
                   .toList(),
             ),
+          if (suggestions.isNotEmpty) ...[
+            const SizedBox(height: Insets.md),
+            const Text("اقتراحات (اضغط للإضافة)", style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+            const SizedBox(height: Insets.sm),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: suggestions
+                  .map((z) => ActionChip(
+                        avatar: Icon(Icons.add, size: 16, color: color),
+                        label: Text(z),
+                        onPressed: () => onAdd(z),
+                      ))
+                  .toList(),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  /// Common areas offered as one-tap favourites. Nothing is preselected (see DriverSettings).
+  static const List<String> _suggestedZones = [
+    "المعادي", "التجمع", "مصر الجديدة", "مدينة نصر", "الدقي", "المهندسين", "الشيخ زايد", "6 أكتوبر",
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -487,6 +509,9 @@ class ZonesPage extends StatelessWidget {
           zones: s.favoriteZones,
           onAdd: provider.addFavoriteZone,
           onRemove: provider.removeFavoriteZone,
+          suggestions: _suggestedZones
+              .where((z) => !s.favoriteZones.contains(z) && !s.blacklistedZones.contains(z))
+              .toList(),
         ),
         const SizedBox(height: Insets.md),
         _section(

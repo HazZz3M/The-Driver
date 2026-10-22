@@ -36,7 +36,7 @@ class AppColors {
   // Text
   static const Color textPrimary = Color(0xFFF1F5F9);
   static const Color textSecondary = Color(0xFF9AA6B8);
-  static const Color textTertiary = Color(0xFF66738A);
+  static const Color textTertiary = Color(0xFF8592A8); // 5.5:1 on darkSurface (was 3.7:1)
 
   // Light palette (kept for the unused light theme definition)
   static const Color lightBackground = Color(0xFFF8FAFC);
