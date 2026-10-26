@@ -1,7 +1,9 @@
-### The Driver v1.17.1 - Cleaner request log
+### The Driver v1.18.0 - Auto-hide, auto-open timings, cleaner log
 
-- **Only real requests are logged now.** Other inDrive screens were being saved as rides: the ride in progress ("Cancel ride", "Navigate", "Waiting time"), cancel and rating dialogs, balance / income / VAT / top-up / tier screens, notifications, and the "Wait for the reply" countdown. A screen is now treated as a request only when it really shows one (inDrive's request fields, or an Accept / Offer button).
-- **The countdown is no longer taken as an address** ("31 sec."), so one request no longer becomes a new record every second.
-- **Your existing log is cleaned automatically** the first time the app reads it after the update, so the analysis and recommendations reflect real requests only.
-- Text snapshots of request screens no longer include map markers and internal ids.
-- The floating badge no longer appears on those other screens either.
+- **Auto-hide losing or blocked requests (optional).** Settings → القبول التلقائي → الإخفاء التلقائي:
+  - hide losing requests (net profit below zero, only when both distances were read), blocked zones and passengers, or both;
+  - choose the swipe direction (right or left) and the wait before hiding;
+  - list cards are swiped away; a full-screen request is closed with Skip. You're warned before it turns on.
+- **Control the auto-open timings.** When "open requests automatically" is on, you can set how long a request stays open, the pause before opening the next one, and whether to go back as soon as the trip length is read.
+- **Only real requests are logged** (from 1.17.1): other inDrive screens (ride in progress, cancel, rating, balance, income, VAT, top-up, the reply countdown) are no longer saved as rides, and your existing log is cleaned automatically.
+- After updating, if auto-hide doesn't swipe, turn The Driver's screen reading off and on again (it now needs the "perform gestures" ability).

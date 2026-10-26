@@ -39,7 +39,7 @@ class SettingsScreen extends StatelessWidget {
                 icon: Icons.bolt_outlined,
                 color: AppColors.warningYellow,
                 title: "القبول التلقائي",
-                subtitle: "شروط القبول بدون تدخل",
+                subtitle: "شروط القبول، وإخفاء الطلبات الخاسرة والمحظورة",
                 trailingText: s.autoAcceptEnabled ? "مفعّل" : "متوقف",
                 onTap: () => _open(context, const AutoAcceptPage()),
               ),

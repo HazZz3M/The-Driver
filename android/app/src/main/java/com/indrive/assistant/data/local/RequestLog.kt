@@ -181,6 +181,15 @@ object RequestLog {
         scheduleSave()
     }
 
+    /** The card was hidden automatically ([reason]: losing / blocked). */
+    fun markDismissed(context: Context, fingerprint: String, reason: String) {
+        synchronized(lock) {
+            val r = findRecent(loaded(context), fingerprint, System.currentTimeMillis()) ?: return
+            r.put("autoDismissed", reason)
+        }
+        scheduleSave()
+    }
+
     /** Accepted rides from the last [withinMs] that are not rated yet (newest first). */
     fun unratedAccepted(context: Context, withinMs: Long): List<JSONObject> = synchronized(lock) {
         val now = System.currentTimeMillis()

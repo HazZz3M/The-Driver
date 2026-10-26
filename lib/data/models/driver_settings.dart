@@ -41,6 +41,13 @@ class DriverSettings {
   /// PROFIT_PER_KM | NET_PROFIT | MARGIN
   final String autoAcceptRankBy;
 
+  // Auto-hide: swipe away losing and/or blocked (zone or passenger) request cards.
+  final bool autoDismissLoss;
+  final bool autoDismissBlocked;
+  /// Swipe direction on the card: RIGHT | LEFT.
+  final String autoDismissDirection;
+  final double autoDismissDelaySeconds;
+
   // Passenger lists (matched by the name shown on the card)
   final List<String> favoritePassengers;
   final List<String> blacklistedPassengers;
@@ -74,6 +81,10 @@ class DriverSettings {
     this.pickupShortMode = "COST_ONLY",
     this.autoAcceptPickBest = false,
     this.autoAcceptRankBy = "PROFIT_PER_KM",
+    this.autoDismissLoss = false,
+    this.autoDismissBlocked = false,
+    this.autoDismissDirection = "RIGHT",
+    this.autoDismissDelaySeconds = 2.0,
     this.favoritePassengers = const [],
     this.blacklistedPassengers = const [],
   });
@@ -114,6 +125,10 @@ class DriverSettings {
     String? pickupShortMode,
     bool? autoAcceptPickBest,
     String? autoAcceptRankBy,
+    bool? autoDismissLoss,
+    bool? autoDismissBlocked,
+    String? autoDismissDirection,
+    double? autoDismissDelaySeconds,
     List<String>? favoritePassengers,
     List<String>? blacklistedPassengers,
   }) {
@@ -145,6 +160,10 @@ class DriverSettings {
       pickupShortMode: pickupShortMode ?? this.pickupShortMode,
       autoAcceptPickBest: autoAcceptPickBest ?? this.autoAcceptPickBest,
       autoAcceptRankBy: autoAcceptRankBy ?? this.autoAcceptRankBy,
+      autoDismissLoss: autoDismissLoss ?? this.autoDismissLoss,
+      autoDismissBlocked: autoDismissBlocked ?? this.autoDismissBlocked,
+      autoDismissDirection: autoDismissDirection ?? this.autoDismissDirection,
+      autoDismissDelaySeconds: autoDismissDelaySeconds ?? this.autoDismissDelaySeconds,
       favoritePassengers: favoritePassengers ?? this.favoritePassengers,
       blacklistedPassengers: blacklistedPassengers ?? this.blacklistedPassengers,
     );
@@ -180,6 +199,10 @@ class DriverSettings {
       'pickupShortMode': pickupShortMode,
       'autoAcceptPickBest': autoAcceptPickBest,
       'autoAcceptRankBy': autoAcceptRankBy,
+      'autoDismissLoss': autoDismissLoss,
+      'autoDismissBlocked': autoDismissBlocked,
+      'autoDismissDirection': autoDismissDirection,
+      'autoDismissDelaySeconds': autoDismissDelaySeconds,
       'favoritePassengers': favoritePassengers,
       'blacklistedPassengers': blacklistedPassengers,
     };
