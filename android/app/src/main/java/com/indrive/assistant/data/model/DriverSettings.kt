@@ -43,6 +43,13 @@ data class DriverSettings(
     /** PROFIT_PER_KM | NET_PROFIT | MARGIN */
     val autoAcceptRankBy: String = "PROFIT_PER_KM",
 
+    /** Auto-hide: swipe away losing and/or blocked (zone or passenger) request cards. */
+    val autoDismissLoss: Boolean = false,
+    val autoDismissBlocked: Boolean = false,
+    /** RIGHT | LEFT */
+    val autoDismissDirection: String = "RIGHT",
+    val autoDismissDelaySeconds: Double = 2.0,
+
     // Passenger lists (matched by the name shown on the card)
     val favoritePassengers: List<String> = emptyList(),
     val blacklistedPassengers: List<String> = emptyList()

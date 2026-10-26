@@ -6,6 +6,7 @@ import android.os.HandlerThread
 import android.util.Log
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.engine.FareAnalysisResult
+import com.indrive.assistant.service.InDriveAccessibilityService
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -61,8 +62,27 @@ object RequestLog {
             Log.w(TAG, "Request log unreadable; starting a new one", e)
             try { file(context).renameTo(File(context.filesDir, "request_log_corrupt_${System.currentTimeMillis()}.json")) } catch (_: Exception) {}
         }
+        // Builds before 1.17.1 also logged other inDrive screens (ride in progress, balance, cancel,
+        // the reply countdown) as requests: drop those once, so the analysis isn't skewed.
+        val cleaned = list.filterNot { isJunk(it) }
+        if (cleaned.size != list.size) {
+            Log.i(TAG, "Removed ${list.size - cleaned.size} non-request records")
+            list.clear()
+            list.addAll(cleaned)
+            records = list
+            scheduleSave()
+        }
         records = list
         return list
+    }
+
+    private fun isJunk(r: JSONObject): Boolean {
+        val from = r.optString("pickupAddress")
+        val to = r.optString("dropoffAddress")
+        if (from.isNotBlank() && InDriveAccessibilityService.isNotAPlace(from)) return true
+        if (to.isNotBlank() && InDriveAccessibilityService.isNotAPlace(to)) return true
+        // Nothing was read but an amount: not a request card.
+        return from.isBlank() && to.isBlank() && !r.optBoolean("pickupKnown") && !r.optBoolean("tripKnown")
     }
 
     private fun scheduleSave() {
@@ -157,6 +177,15 @@ object RequestLog {
             raiseStatus(r, status)
             if (bidValue != null) r.put("bidValue", bidValue)
             if (status == STATUS_ACCEPTED) r.put("acceptedAt", now)
+        }
+        scheduleSave()
+    }
+
+    /** The card was hidden automatically ([reason]: losing / blocked). */
+    fun markDismissed(context: Context, fingerprint: String, reason: String) {
+        synchronized(lock) {
+            val r = findRecent(loaded(context), fingerprint, System.currentTimeMillis()) ?: return
+            r.put("autoDismissed", reason)
         }
         scheduleSave()
     }

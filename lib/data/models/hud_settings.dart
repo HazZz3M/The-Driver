@@ -19,6 +19,9 @@ class HudSettings {
   final bool tripFromHistory; // B: reuse lengths read earlier for the same pickup → destination
   final bool tripFromAddresses; // A: estimate from the two addresses (Geocoder, online)
   final bool tripAutoOpen; // C: open unread requests, read the map, go back
+  final double autoOpenStaySeconds; // C: longest time a request stays open
+  final double autoOpenGapSeconds; // C: pause after closing one before opening the next
+  final bool autoOpenBackWhenRead; // C: go back as soon as the trip length is read
   final String bidChipsMode; // OFF | HIGHLIGHT | AUTO_TAP: circles over the request's bid buttons
 
   const HudSettings({
@@ -40,6 +43,9 @@ class HudSettings {
     this.tripFromHistory = true,
     this.tripFromAddresses = false,
     this.tripAutoOpen = false,
+    this.autoOpenStaySeconds = 7.0,
+    this.autoOpenGapSeconds = 8.0,
+    this.autoOpenBackWhenRead = true,
     this.bidChipsMode = "HIGHLIGHT",
   });
 
@@ -62,6 +68,9 @@ class HudSettings {
     bool? tripFromHistory,
     bool? tripFromAddresses,
     bool? tripAutoOpen,
+    double? autoOpenStaySeconds,
+    double? autoOpenGapSeconds,
+    bool? autoOpenBackWhenRead,
     String? bidChipsMode,
   }) {
     return HudSettings(
@@ -83,6 +92,9 @@ class HudSettings {
       tripFromHistory: tripFromHistory ?? this.tripFromHistory,
       tripFromAddresses: tripFromAddresses ?? this.tripFromAddresses,
       tripAutoOpen: tripAutoOpen ?? this.tripAutoOpen,
+      autoOpenStaySeconds: autoOpenStaySeconds ?? this.autoOpenStaySeconds,
+      autoOpenGapSeconds: autoOpenGapSeconds ?? this.autoOpenGapSeconds,
+      autoOpenBackWhenRead: autoOpenBackWhenRead ?? this.autoOpenBackWhenRead,
       bidChipsMode: bidChipsMode ?? this.bidChipsMode,
     );
   }
@@ -106,6 +118,9 @@ class HudSettings {
         'tripFromHistory': tripFromHistory,
         'tripFromAddresses': tripFromAddresses,
         'tripAutoOpen': tripAutoOpen,
+        'autoOpenStaySeconds': autoOpenStaySeconds,
+        'autoOpenGapSeconds': autoOpenGapSeconds,
+        'autoOpenBackWhenRead': autoOpenBackWhenRead,
         'bidChipsMode': bidChipsMode,
       };
 
@@ -129,6 +144,9 @@ class HudSettings {
       tripFromHistory: json['tripFromHistory'] as bool? ?? fallback.tripFromHistory,
       tripFromAddresses: json['tripFromAddresses'] as bool? ?? fallback.tripFromAddresses,
       tripAutoOpen: json['tripAutoOpen'] as bool? ?? fallback.tripAutoOpen,
+      autoOpenStaySeconds: (json['autoOpenStaySeconds'] as num?)?.toDouble() ?? fallback.autoOpenStaySeconds,
+      autoOpenGapSeconds: (json['autoOpenGapSeconds'] as num?)?.toDouble() ?? fallback.autoOpenGapSeconds,
+      autoOpenBackWhenRead: json['autoOpenBackWhenRead'] as bool? ?? fallback.autoOpenBackWhenRead,
       bidChipsMode: json['bidChipsMode'] as String? ?? fallback.bidChipsMode,
     );
   }

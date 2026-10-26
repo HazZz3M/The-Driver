@@ -32,6 +32,11 @@ data class HudPrefs(
     val tripFromAddresses: Boolean = false,
     /** C: open unread requests automatically, read the map, and go back (taps inside inDrive). */
     val tripAutoOpen: Boolean = false,
+    /** C timings: the longest a request stays open, and the pause after closing before the next one. */
+    val autoOpenStaySeconds: Double = 7.0,
+    val autoOpenGapSeconds: Double = 8.0,
+    /** C: press Back as soon as the trip length is read (otherwise wait the full stay time). */
+    val autoOpenBackWhenRead: Boolean = true,
     /** Circles over the Ride-request counter-bid buttons: OFF | HIGHLIGHT | AUTO_TAP (taps the best). */
     val bidChipsMode: String = "HIGHLIGHT"
 ) {
@@ -54,6 +59,9 @@ data class HudPrefs(
         put("tripFromHistory", tripFromHistory)
         put("tripFromAddresses", tripFromAddresses)
         put("tripAutoOpen", tripAutoOpen)
+        put("autoOpenStaySeconds", autoOpenStaySeconds)
+        put("autoOpenGapSeconds", autoOpenGapSeconds)
+        put("autoOpenBackWhenRead", autoOpenBackWhenRead)
         put("bidChipsMode", bidChipsMode)
     }
 
@@ -79,6 +87,9 @@ data class HudPrefs(
                 tripFromHistory = json.optBoolean("tripFromHistory", fallback.tripFromHistory),
                 tripFromAddresses = json.optBoolean("tripFromAddresses", fallback.tripFromAddresses),
                 tripAutoOpen = json.optBoolean("tripAutoOpen", fallback.tripAutoOpen),
+                autoOpenStaySeconds = json.optDouble("autoOpenStaySeconds", fallback.autoOpenStaySeconds),
+                autoOpenGapSeconds = json.optDouble("autoOpenGapSeconds", fallback.autoOpenGapSeconds),
+                autoOpenBackWhenRead = json.optBoolean("autoOpenBackWhenRead", fallback.autoOpenBackWhenRead),
                 bidChipsMode = json.optString("bidChipsMode", fallback.bidChipsMode)
             )
         }

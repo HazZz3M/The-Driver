@@ -43,6 +43,10 @@ class PreferencesManager {
   static const String keyPickupShortMode = "pickup_short_mode";
   static const String keyAutoAcceptPickBest = "auto_accept_pick_best";
   static const String keyAutoAcceptRankBy = "auto_accept_rank_by";
+  static const String keyAutoDismissLoss = "auto_dismiss_loss";
+  static const String keyAutoDismissBlocked = "auto_dismiss_blocked";
+  static const String keyAutoDismissDirection = "auto_dismiss_direction";
+  static const String keyAutoDismissDelay = "auto_dismiss_delay";
   static const String keyTutorialSeen = "tutorial_seen";
   static const String keyFavoritePassengers = "favorite_passengers";
   static const String keyBlacklistedPassengers = "blacklisted_passengers";
@@ -90,6 +94,10 @@ class PreferencesManager {
       pickupShortMode: prefs.getString(keyPickupShortMode) ?? d.pickupShortMode,
       autoAcceptPickBest: prefs.getBool(keyAutoAcceptPickBest) ?? d.autoAcceptPickBest,
       autoAcceptRankBy: prefs.getString(keyAutoAcceptRankBy) ?? d.autoAcceptRankBy,
+      autoDismissLoss: prefs.getBool(keyAutoDismissLoss) ?? d.autoDismissLoss,
+      autoDismissBlocked: prefs.getBool(keyAutoDismissBlocked) ?? d.autoDismissBlocked,
+      autoDismissDirection: prefs.getString(keyAutoDismissDirection) ?? d.autoDismissDirection,
+      autoDismissDelaySeconds: prefs.getDouble(keyAutoDismissDelay) ?? d.autoDismissDelaySeconds,
       favoritePassengers: prefs.getStringList(keyFavoritePassengers) ?? d.favoritePassengers,
       blacklistedPassengers: prefs.getStringList(keyBlacklistedPassengers) ?? d.blacklistedPassengers,
     );
@@ -125,6 +133,10 @@ class PreferencesManager {
       prefs.setString(keyPickupShortMode, s.pickupShortMode),
       prefs.setBool(keyAutoAcceptPickBest, s.autoAcceptPickBest),
       prefs.setString(keyAutoAcceptRankBy, s.autoAcceptRankBy),
+      prefs.setBool(keyAutoDismissLoss, s.autoDismissLoss),
+      prefs.setBool(keyAutoDismissBlocked, s.autoDismissBlocked),
+      prefs.setString(keyAutoDismissDirection, s.autoDismissDirection),
+      prefs.setDouble(keyAutoDismissDelay, s.autoDismissDelaySeconds),
       prefs.setStringList(keyFavoritePassengers, s.favoritePassengers),
       prefs.setStringList(keyBlacklistedPassengers, s.blacklistedPassengers),
     ]);

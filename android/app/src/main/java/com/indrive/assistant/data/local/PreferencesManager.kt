@@ -85,6 +85,10 @@ class PreferencesManager(context: Context) {
             pickupShortMode = prefs.getString(KEY_PICKUP_SHORT_MODE, d.pickupShortMode) ?: d.pickupShortMode,
             autoAcceptPickBest = prefs.getBoolean(KEY_AUTO_ACCEPT_PICK_BEST, d.autoAcceptPickBest),
             autoAcceptRankBy = prefs.getString(KEY_AUTO_ACCEPT_RANK_BY, d.autoAcceptRankBy) ?: d.autoAcceptRankBy,
+            autoDismissLoss = prefs.getBoolean(KEY_AUTO_DISMISS_LOSS, d.autoDismissLoss),
+            autoDismissBlocked = prefs.getBoolean(KEY_AUTO_DISMISS_BLOCKED, d.autoDismissBlocked),
+            autoDismissDirection = prefs.getString(KEY_AUTO_DISMISS_DIRECTION, d.autoDismissDirection) ?: d.autoDismissDirection,
+            autoDismissDelaySeconds = prefs.getFloat(KEY_AUTO_DISMISS_DELAY, d.autoDismissDelaySeconds.toFloat()).toDouble(),
             favoritePassengers = decodeList(prefs.getString(KEY_FAVORITE_PASSENGERS, null)) ?: d.favoritePassengers,
             blacklistedPassengers = decodeList(prefs.getString(KEY_BLACKLISTED_PASSENGERS, null)) ?: d.blacklistedPassengers
         )
@@ -119,6 +123,10 @@ class PreferencesManager(context: Context) {
             putString(KEY_PICKUP_SHORT_MODE, settings.pickupShortMode)
             putBoolean(KEY_AUTO_ACCEPT_PICK_BEST, settings.autoAcceptPickBest)
             putString(KEY_AUTO_ACCEPT_RANK_BY, settings.autoAcceptRankBy)
+            putBoolean(KEY_AUTO_DISMISS_LOSS, settings.autoDismissLoss)
+            putBoolean(KEY_AUTO_DISMISS_BLOCKED, settings.autoDismissBlocked)
+            putString(KEY_AUTO_DISMISS_DIRECTION, settings.autoDismissDirection)
+            putFloat(KEY_AUTO_DISMISS_DELAY, settings.autoDismissDelaySeconds.toFloat())
             // JSON arrays: a name may contain a comma.
             putString(KEY_FAVORITE_PASSENGERS, JSONArray(settings.favoritePassengers).toString())
             putString(KEY_BLACKLISTED_PASSENGERS, JSONArray(settings.blacklistedPassengers).toString())
@@ -171,6 +179,10 @@ class PreferencesManager(context: Context) {
                 pickupShortMode = json.optString("pickupShortMode", d.pickupShortMode),
                 autoAcceptPickBest = bool("autoAcceptPickBest", d.autoAcceptPickBest),
                 autoAcceptRankBy = json.optString("autoAcceptRankBy", d.autoAcceptRankBy),
+                autoDismissLoss = bool("autoDismissLoss", d.autoDismissLoss),
+                autoDismissBlocked = bool("autoDismissBlocked", d.autoDismissBlocked),
+                autoDismissDirection = json.optString("autoDismissDirection", d.autoDismissDirection),
+                autoDismissDelaySeconds = dbl("autoDismissDelaySeconds", d.autoDismissDelaySeconds),
                 favoritePassengers = list("favoritePassengers", d.favoritePassengers),
                 blacklistedPassengers = list("blacklistedPassengers", d.blacklistedPassengers)
             )
@@ -306,6 +318,10 @@ class PreferencesManager(context: Context) {
         private const val KEY_PICKUP_SHORT_MODE = "pickup_short_mode"
         private const val KEY_AUTO_ACCEPT_PICK_BEST = "auto_accept_pick_best"
         private const val KEY_AUTO_ACCEPT_RANK_BY = "auto_accept_rank_by"
+        private const val KEY_AUTO_DISMISS_LOSS = "auto_dismiss_loss"
+        private const val KEY_AUTO_DISMISS_BLOCKED = "auto_dismiss_blocked"
+        private const val KEY_AUTO_DISMISS_DIRECTION = "auto_dismiss_direction"
+        private const val KEY_AUTO_DISMISS_DELAY = "auto_dismiss_delay"
         private const val KEY_FAVORITE_PASSENGERS = "favorite_passengers"
         private const val KEY_BLACKLISTED_PASSENGERS = "blacklisted_passengers"
 

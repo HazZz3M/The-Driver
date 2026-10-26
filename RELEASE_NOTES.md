@@ -1,10 +1,9 @@
-### The Driver v1.17.0 - Request log, analysis and recommendations
+### The Driver v1.18.0 - Auto-hide, auto-open timings, cleaner log
 
-- **Every request is logged automatically, on your phone.** Each request card that shows in inDrive is saved with its time, price, distances, addresses and passenger. Opening a request also saves a text snapshot of the whole request screen (like the diagnostic capture) and its bid buttons. Tapping Accept or a bid button in inDrive records the outcome.
-- **New "التحليلات" tab:**
-  - summary: requests per day, accepted, average price and profit per km, your average rating;
-  - recommendations: the best hours to work, peak hours, where to wait right now, the most profitable areas, frequent routes, busiest days, and a price check;
-  - charts by hour and by weekday, top pickup and drop-off areas, and frequent routes.
-- **Rate your rides.** After an accepted ride, once you're back on the requests list, a notification asks you to rate it (stars, quick tags, note). Ratings feed the recommendations.
-- **Save and share the log** as an Excel file (CSV) or a full JSON copy, from the Insights tab. You can also clear it there.
-- The log stays on the phone. It contains passenger names and addresses, so be careful who you share it with.
+- **Auto-hide losing or blocked requests (optional).** Settings → القبول التلقائي → الإخفاء التلقائي:
+  - hide losing requests (net profit below zero, only when both distances were read), blocked zones and passengers, or both;
+  - choose the swipe direction (right or left) and the wait before hiding;
+  - list cards are swiped away; a full-screen request is closed with Skip. You're warned before it turns on.
+- **Control the auto-open timings.** When "open requests automatically" is on, you can set how long a request stays open, the pause before opening the next one, and whether to go back as soon as the trip length is read.
+- **Only real requests are logged** (from 1.17.1): other inDrive screens (ride in progress, cancel, rating, balance, income, VAT, top-up, the reply countdown) are no longer saved as rides, and your existing log is cleaned automatically.
+- After updating, if auto-hide doesn't swipe, turn The Driver's screen reading off and on again (it now needs the "perform gestures" ability).

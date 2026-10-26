@@ -319,6 +319,40 @@ class HudSettingsPage extends StatelessWidget {
               change((h) => h.copyWith(tripAutoOpen: v, readMapDistance: v ? true : null));
             },
           ),
+          if (hud.tripAutoOpen) ...[
+            SwitchTile(
+              icon: Icons.keyboard_return,
+              iconColor: AppColors.warningYellow,
+              title: "ارجع أول ما المسافة تتقري",
+              subtitle: "لو مقفول: يفضل الطلب مفتوح لحد نهاية مدة الفتح",
+              value: hud.autoOpenBackWhenRead,
+              onChanged: (v) => change((h) => h.copyWith(autoOpenBackWhenRead: v)),
+            ),
+            NumberStepperTile(
+              icon: Icons.timer_outlined,
+              iconColor: AppColors.warningYellow,
+              title: "مدة فتح الطلب",
+              subtitle: "أقصى وقت قبل الرجوع للقائمة",
+              unit: "ثانية",
+              value: hud.autoOpenStaySeconds,
+              step: 1,
+              min: 1,
+              max: 30,
+              onChanged: (v) => change((h) => h.copyWith(autoOpenStaySeconds: v)),
+            ),
+            NumberStepperTile(
+              icon: Icons.hourglass_bottom,
+              iconColor: AppColors.warningYellow,
+              title: "الانتظار بين طلب والتاني",
+              subtitle: "من لحظة قفل الطلب لحد فتح اللي بعده",
+              unit: "ثانية",
+              value: hud.autoOpenGapSeconds,
+              step: 1,
+              min: 1,
+              max: 120,
+              onChanged: (v) => change((h) => h.copyWith(autoOpenGapSeconds: v)),
+            ),
+          ],
         ]),
 
         const SectionLabel("التنبيهات"),
@@ -376,6 +410,30 @@ class AutoAcceptPage extends StatelessWidget {
       await provider.recordAutoAcceptConsent();
     }
     if (context.mounted) _updateSettings(context, (s) => s.copyWith(autoAcceptEnabled: enable));
+  }
+
+  /// Turning auto-hide on (from all off) asks first: it swipes cards inside inDrive.
+  Future<void> _setDismiss(BuildContext context, {bool? loss, bool? blocked}) async {
+    final provider = context.read<AssistantProvider>();
+    final s = provider.driverSettings;
+    final turningOn = (loss ?? false) || (blocked ?? false);
+    if (turningOn && !s.autoDismissLoss && !s.autoDismissBlocked) {
+      final ok = await confirmAction(
+        context,
+        title: "تحذير: الإخفاء التلقائي",
+        message: "التطبيق هيسحب كارت الطلب في إن درايف بنفسه عشان يخفيه، أو يضغط \"تخطي\" لو الطلب مفتوح.\n\n"
+            "• بيستنى الوقت اللي تختاره، ويعيد قراءة الشاشة قبل السحب، ومش بيخفي طلب اتغيّر.\n"
+            "• الخسارة بتتحسب بس لما مسافتي الوصول والمشوار مقروءين.\n"
+            "• جرّب اتجاه السحب الأول: لو السحب في إن درايف بيعمل حاجة تانية غير الإخفاء، غيّر الاتجاه أو اقفل الخاصية.\n"
+            "• الأتمتة ممكن تخالف شروط إن درايف وتعرّض حسابك للإيقاف. انت المسؤول عن استخدامها.",
+        confirmLabel: "أفهم المخاطر، فعّل",
+        destructive: false,
+      );
+      if (!ok) return;
+    }
+    if (context.mounted) {
+      _updateSettings(context, (x) => x.copyWith(autoDismissLoss: loss, autoDismissBlocked: blocked));
+    }
   }
 
   @override
@@ -438,6 +496,47 @@ class AutoAcceptPage extends StatelessWidget {
             max: 8,
             onChanged: (v) => change((x) => x.copyWith(autoAcceptDelaySeconds: v)),
           ),
+        ]),
+        const SectionLabel("الإخفاء التلقائي"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.money_off,
+            iconColor: AppColors.lossRed,
+            title: "إخفاء الطلبات الخاسرة",
+            subtitle: "صافي الربح أقل من صفر، وبس لما المسافتين مقروءين",
+            value: s.autoDismissLoss,
+            onChanged: (v) => _setDismiss(context, loss: v),
+          ),
+          SwitchTile(
+            icon: Icons.block,
+            iconColor: AppColors.lossRed,
+            title: "إخفاء المناطق والعملاء المحظورين",
+            subtitle: "إلا لو السعر عالي بشكل استثنائي في منطقة محظورة",
+            value: s.autoDismissBlocked,
+            onChanged: (v) => _setDismiss(context, blocked: v),
+          ),
+          if (s.autoDismissLoss || s.autoDismissBlocked) ...[
+            ChoiceTile<String>(
+              title: "اتجاه سحب الكارت",
+              icon: Icons.swipe,
+              iconColor: AppColors.lossRed,
+              value: s.autoDismissDirection,
+              options: const {"RIGHT": "لليمين", "LEFT": "للشمال"},
+              onChanged: (v) => change((x) => x.copyWith(autoDismissDirection: v)),
+            ),
+            NumberStepperTile(
+              icon: Icons.timer_outlined,
+              iconColor: AppColors.lossRed,
+              title: "الانتظار قبل الإخفاء",
+              subtitle: "وقت تشوف فيه الطلب قبل ما يختفي",
+              unit: "ثانية",
+              value: s.autoDismissDelaySeconds,
+              step: 0.5,
+              min: 0.5,
+              max: 10,
+              onChanged: (v) => change((x) => x.copyWith(autoDismissDelaySeconds: v)),
+            ),
+          ],
         ]),
         const SectionLabel("أولوية القبول"),
         SettingsGroup(children: [

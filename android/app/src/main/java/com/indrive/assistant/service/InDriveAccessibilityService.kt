@@ -182,6 +182,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             maybeReadTripFromMap(root, rides)
             maybeAutoOpen(root, rides, onRequestScreen)
             maybeAutoTapBestBid(rides, onRequestScreen)
+            maybeAutoDismiss(rides)
         } catch (e: Exception) {
             Log.e(TAG, "Error while scanning inDrive screen", e)
         } finally {
@@ -294,6 +295,10 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun maybeAutoOpen(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         val now = System.currentTimeMillis()
+        val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
+        // Driver's timings: how long a request stays open at most, and the pause before the next one.
+        val stayMs = (hud.autoOpenStaySeconds * 1000).toLong().coerceIn(1000L, 30_000L)
+        val gapMs = (hud.autoOpenGapSeconds * 1000).toLong().coerceIn(1000L, 120_000L)
         val active = autoOpenKey
         if (active != null) {
             val elapsed = now - autoOpenStartedAt
@@ -302,7 +307,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val card = rides.singleOrNull()
                 if (card == null || rideKey(card) != active) {
                     finishAutoOpen(goBack = false) // the driver opened something else: hands off
-                } else if (card.tripKnown || elapsed > AUTO_OPEN_TIMEOUT_MS) {
+                } else if ((card.tripKnown && hud.autoOpenBackWhenRead) || elapsed > stayMs) {
                     finishAutoOpen(goBack = true)
                 }
             } else if (autoOpenSawRequest || elapsed > AUTO_OPEN_TAP_TIMEOUT_MS) {
@@ -311,10 +316,10 @@ class InDriveAccessibilityService : AccessibilityService() {
             return
         }
 
-        val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
         if (!hud.tripAutoOpen || !hud.readMapDistance || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        if (onRequestScreen || pendingAutoAcceptFingerprint != null) return
-        if (now - lastAutoOpenAt < AUTO_OPEN_COOLDOWN_MS) return
+        if (onRequestScreen || pendingAutoAcceptFingerprint != null || pendingDismiss != null) return
+        // The pause is counted from the moment the previous request was closed.
+        if (now - lastAutoOpenAt < gapMs) return
 
         val candidate = rides.firstOrNull { card ->
             !card.tripKnown && card.screenBounds != null && rideKey(card)?.let { it !in autoOpenTried } == true
@@ -328,8 +333,116 @@ class InDriveAccessibilityService : AccessibilityService() {
             autoOpenStartedAt = now
             autoOpenSawRequest = false
             lastAutoOpenAt = now
-            worker.postDelayed(autoOpenTimeout, AUTO_OPEN_TIMEOUT_MS + 200)
+            worker.postDelayed(autoOpenTimeout, stayMs + 200)
             Log.i(TAG, "Auto-open: opened request to read its trip length")
+        }
+    }
+
+    // =========================================================================
+    // AUTO-HIDE LOSING / BLOCKED REQUESTS (opt-in)
+    // After the driver's delay, re-read the screen; if the card still qualifies, swipe it away in
+    // the chosen direction (list card), or press Skip / Close (full-screen request). One at a time.
+    // =========================================================================
+
+    // Worker thread only.
+    private val dismissedFingerprints = LinkedHashSet<String>()
+    private var pendingDismiss: String? = null
+    private var lastDismissAt = 0L
+
+    /** Why [card] should be hidden under the driver's settings, or null to keep it. */
+    private fun dismissReason(card: ParsedRideData, settings: DriverSettings): String? {
+        if (!settings.autoDismissLoss && !settings.autoDismissBlocked) return null
+        val a = analyze(card, settings)
+        // A blacklisted zone with an exceptionally high price is rated good by the engine: keep it.
+        val blocked = a.isBlacklistedPassenger ||
+            (a.isBlacklistedZone && a.profitabilityLevel == com.indrive.assistant.engine.ProfitabilityLevel.LOSS_DANGER)
+        if (settings.autoDismissBlocked && blocked) return "محظور"
+        // A real money loss, with both distances read (an assumed trip length could be wrong).
+        if (settings.autoDismissLoss && !card.distanceEstimated && a.netProfit < 0) return "خاسر"
+        return null
+    }
+
+    private fun maybeAutoDismiss(rides: List<ParsedRideData>) {
+        if (rides.isEmpty() || pendingDismiss != null || autoOpenKey != null || pendingAutoAcceptFingerprint != null) return
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        if (!settings.autoDismissLoss && !settings.autoDismissBlocked) return
+        if (System.currentTimeMillis() - lastDismissAt < DISMISS_COOLDOWN_MS) return
+        val candidate = rides.firstOrNull { it.fingerprint !in dismissedFingerprints && dismissReason(it, settings) != null } ?: return
+        pendingDismiss = candidate.fingerprint
+        val delayMs = (settings.autoDismissDelaySeconds * 1000).toLong().coerceIn(300L, 10_000L)
+        worker.postDelayed({ executeDismiss(candidate.fingerprint) }, delayMs)
+    }
+
+    private fun executeDismiss(fingerprint: String) {
+        pendingDismiss = null
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        val root = rootInActiveWindow ?: return
+        try {
+            if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
+            val card = resolveTrips(findRideCards(root)).firstOrNull { it.fingerprint == fingerprint } ?: return
+            val reason = dismissReason(card, settings) ?: return
+            dismissedFingerprints.add(fingerprint)
+            while (dismissedFingerprints.size > 200) dismissedFingerprints.remove(dismissedFingerprints.first())
+            lastDismissAt = System.currentTimeMillis()
+            val done = if (lastScanWasRequestScreen) clickSkipButton(root) else swipeCard(card, settings.autoDismissDirection)
+            if (done) {
+                RequestLog.markDismissed(applicationContext, fingerprint, reason)
+                mainHandler.post {
+                    Toast.makeText(applicationContext, "تم إخفاء طلب $reason (${card.fare.toInt()} ج.م)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Auto-hide failed", e)
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /** Swipes the card horizontally across most of its width, like the driver would. */
+    private fun swipeCard(card: ParsedRideData, direction: String): Boolean {
+        val b = card.screenBounds ?: return false
+        if (b.width() < 50 || b.height() < 20) return false
+        val y = b.centerY().toFloat()
+        val (fromX, toX) = if (direction == "LEFT") {
+            b.right - b.width() * 0.15f to b.left + b.width() * 0.05f
+        } else {
+            b.left + b.width() * 0.15f to b.right - b.width() * 0.05f
+        }
+        val path = android.graphics.Path().apply { moveTo(fromX, y); lineTo(toX, y) }
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, DISMISS_SWIPE_MS))
+            .build()
+        return dispatchGesture(gesture, null, null)
+    }
+
+    /** Presses Skip / Skip offer / Close on a full-screen request. */
+    private fun clickSkipButton(root: AccessibilityNodeInfo): Boolean {
+        val seen = mutableListOf<AccessibilityNodeInfo>()
+        var target: AccessibilityNodeInfo? = null
+        fun visit(node: AccessibilityNodeInfo) {
+            if (target != null) return
+            val label = "${node.text ?: node.contentDescription ?: ""}".trim()
+            if (label.isNotEmpty() && SKIP_LABELS.any { label.equals(it, ignoreCase = true) }) {
+                target = node
+                return
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                seen.add(child)
+                visit(child)
+            }
+        }
+        return try {
+            visit(root)
+            var t = target
+            var depth = 0
+            while (t != null && !t.isClickable && depth < 4) {
+                t = t.parent?.also { seen.add(it) }
+                depth++
+            }
+            t != null && t.isClickable && t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        } finally {
+            seen.forEach { it.recycle() }
         }
     }
 
@@ -417,6 +530,7 @@ class InDriveAccessibilityService : AccessibilityService() {
     private fun finishAutoOpen(goBack: Boolean) {
         autoOpenKey = null
         worker.removeCallbacks(autoOpenTimeout)
+        lastAutoOpenAt = System.currentTimeMillis() // the pause before the next open starts now
         if (goBack) performGlobalAction(GLOBAL_ACTION_BACK)
     }
 
@@ -785,9 +899,12 @@ class InDriveAccessibilityService : AccessibilityService() {
         const val DUMP_FILE = "inDrive_screen_dump.txt"
         private const val LEAVE_CHECK_MS = 1000L
         // C (auto-open): give the map time to load, then press Back; at most one card per cooldown.
-        private const val AUTO_OPEN_TIMEOUT_MS = 7000L
+        // Auto-hide: at most one card per cooldown; the swipe takes this long.
+        private const val DISMISS_COOLDOWN_MS = 1500L
+        private const val DISMISS_SWIPE_MS = 300L
+        private val SKIP_LABELS = listOf("Skip", "Skip offer", "Close", "تخطي", "تخطي العرض", "إغلاق", "اغلاق")
+        // (How long a request stays open and the pause between two are the driver's HudPrefs settings.)
         private const val AUTO_OPEN_TAP_TIMEOUT_MS = 3000L
-        private const val AUTO_OPEN_COOLDOWN_MS = 8000L
         /** Labels of buttons on a list card that the auto-open must never press. */
         private val NON_CARD_BUTTONS = listOf("offer", "اقترح", "قدم عرض", "تقديم عرض", "decline", "رفض", "complain", "hide")
 
@@ -852,7 +969,38 @@ class InDriveAccessibilityService : AccessibilityService() {
         private val KM_SUFFIX = Regex("""(?:~|≈)?\s*(\d+(?:[.,]\d+)?)\s*(?:km|كم|ك\.?م|كيلو(?:متر)?)""", RegexOption.IGNORE_CASE)
         private val KM_PREFIX = Regex("""(?:km|كم)\s*(?:~|≈)?\s*(\d+(?:[.,]\d+)?)""", RegexOption.IGNORE_CASE)
         private val METERS = Regex("""(?:~|≈)?\s*(\d+)\s*(?:متر|م|m)(?:\s|$|[^\p{L}\d])""", RegexOption.IGNORE_CASE)
-        private val TIME_ONLY = Regex("""^[~≈]?\s*\d+\s*(?:min|mins|minute|minutes|h|hr|hrs|د|دق|دقيقة|دقائق|ساعة|ساعات)\.?$""", RegexOption.IGNORE_CASE)
+        private val TIME_ONLY = Regex("""^[~≈]?\s*\d+\s*(?:sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hrs|ث|ثانية|ثواني|د|دق|دقيقة|دقائق|ساعة|ساعات)\.?$""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Texts that only appear on inDrive screens that are not ride requests: the ride in
+         * progress, cancel dialogs, rating, balance / income / tier, the "waiting for the
+         * passenger's reply" countdown, notifications, going offline. Found in real request logs.
+         */
+        private val NON_REQUEST_PHRASES = listOf(
+            "wait for the reply", "cancel ride", "cancel this ride", "why do you want to cancel", "waiting time",
+            "buckle up", "today's income", "service payment", "your balance is low", "top up", "your tier",
+            "is the ride completed", "what happened", "describe the issue", "please describe what happened",
+            "do you want to go offline", "reach your daily goal", "new notification",
+            "في انتظار الرد", "انتظر الرد", "إلغاء الرحلة", "الغاء الرحلة", "دخل اليوم", "اشحن", "رصيدك منخفض", "هل انتهت الرحلة"
+        )
+        /** Short labels of those screens, matched as the whole text only. */
+        private val NON_REQUEST_EXACT = setOf("navigate", "vat", "goal:", "excellent", "platinum", "day", "week")
+
+        /** A screen label or a countdown ("31 sec."), never a place: used for addresses and to clean the log. */
+        fun isNotAPlace(text: String): Boolean =
+            hasNonRequestMarker(listOf(text)) || TIME_ONLY.matches(normalizeArabicDigits(text.trim()))
+
+        fun hasNonRequestMarker(texts: List<String>): Boolean = texts.any { t ->
+            val n = t.trim().lowercase()
+            n in NON_REQUEST_EXACT || NON_REQUEST_PHRASES.any { n.contains(it) }
+        }
+
+        /** inDrive's own request ids, or an Accept / Offer button: the screen really shows a request. */
+        private fun hasRequestEvidence(texts: List<String>, ids: Map<String, String>): Boolean =
+            REQUEST_IDS.any { it in ids } || texts.any { t ->
+                val n = normalizeArabicDigits(t)
+                ACCEPT_BUTTON_REGEX.containsMatchIn(n) || n.contains("Offer your fare", ignoreCase = true) || n.contains("اقترح سعرك")
+            }
         private val LETTER = Regex("""\p{L}""")
         private val PICKUP_HINTS = listOf("~", "≈", "away", "to pickup", "to client", "منك", "إليك", "اليك", "للعميل", "للراكب", "وصول")
 
@@ -946,7 +1094,8 @@ class InDriveAccessibilityService : AccessibilityService() {
                     it.equals("Ride request", ignoreCase = true) || it.contains("طلب رحلة")
             }
             lastScanWasRequestScreen = singleRequestScreen
-            lastScreenTexts = if (singleRequestScreen) allScreenTexts.toList() else emptyList()
+            // Map markers and internal ids are noise in the snapshot: keep what the driver can read.
+            lastScreenTexts = if (singleRequestScreen) allScreenTexts.filterNot { isMachineLabel(it) } else emptyList()
 
             val fareNodes = mutableListOf<AccessibilityNodeInfo>()
             findFareNodes(root, fareNodes)
@@ -954,7 +1103,8 @@ class InDriveAccessibilityService : AccessibilityService() {
             val parsedCards = mutableListOf<ParsedRideData>()
             try {
                 if (singleRequestScreen) {
-                    val card = parseCard(allScreenTexts, null, screenIds)
+                    // A request screen never shows in-ride / balance / cancel texts; if it does, it isn't one.
+                    val card = if (hasNonRequestMarker(allScreenTexts)) null else parseCard(allScreenTexts, null, screenIds)
                     if (card != null) {
                         val top = mainFareNodeTop(fareNodes, card.fare) ?: (rootBounds.height() * 0.45).toInt()
                         val bounds = Rect(0, (top - 24).coerceAtLeast(0), rootBounds.width(), rootBounds.bottom)
@@ -971,11 +1121,17 @@ class InDriveAccessibilityService : AccessibilityService() {
                         val texts = mutableListOf<String>()
                         val ids = mutableMapOf<String, String>()
                         collectNodeTexts(item, texts, ids)
-                        parseCard(texts, itemBounds, ids)?.let { parsedCards.add(it) }
+                        // List items that are banners (balance, notifications…) are not requests.
+                        if (hasNonRequestMarker(texts)) continue
+                        val card = parseCard(texts, itemBounds, ids) ?: continue
+                        if (hasRequestEvidence(texts, ids) || card.pickupKnown) parsedCards.add(card)
                     }
-                    // Unknown layout: fall back to one card made of the whole screen.
-                    if (parsedCards.isEmpty()) {
-                        parseCard(allScreenTexts, Rect(0, 320, rootBounds.width(), rootBounds.height()))
+                    // Unknown layout: one card made of the whole screen, but only when it really shows
+                    // a request (inDrive's request ids or an Accept / Offer button) and no in-ride,
+                    // balance or cancel screen texts. Without this, any screen with an amount in
+                    // EGP (income, VAT, top-up, waiting for the passenger's reply…) became a "ride".
+                    if (parsedCards.isEmpty() && hasRequestEvidence(allScreenTexts, screenIds) && !hasNonRequestMarker(allScreenTexts)) {
+                        parseCard(allScreenTexts, Rect(0, 320, rootBounds.width(), rootBounds.height()), screenIds)
                             ?.let { parsedCards.add(it) }
                     }
                 }
@@ -1193,6 +1349,9 @@ class InDriveAccessibilityService : AccessibilityService() {
         // Same fields on the full-screen "Ride request" view use different ids.
         private const val ID_FROM_ADDRESS_REQUEST = "info_textview_pickup"
         private const val ID_TO_ADDRESS_REQUEST = "info_textview_destination"
+        private val REQUEST_IDS = listOf(
+            ID_PRICE, ID_PICKUP_DISTANCE, ID_FROM_ADDRESS, ID_TO_ADDRESS, ID_FROM_ADDRESS_REQUEST, ID_TO_ADDRESS_REQUEST
+        )
 
         /** Map markers / internal ids exposed as content descriptions are never places. */
         private fun isMachineLabel(text: String): Boolean =
@@ -1322,7 +1481,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 if (isMachineLabel(t)) continue
                 if (LETTER.findAll(n).count() < 3) continue
                 if (hasFareText(n)) continue
-                if (RATING.matches(n) || TIME_ONLY.matches(n)) continue
+                if (RATING.matches(n) || TIME_ONLY.matches(n) || hasNonRequestMarker(listOf(t))) continue
                 if (extractDistances(n).isNotEmpty() && n.length < 20) continue
                 val lower = n.lowercase()
                 if (NON_ADDRESS_LABELS.any { lower == it || (lower.length < 25 && lower.contains(it)) }) continue
