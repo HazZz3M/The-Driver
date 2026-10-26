@@ -10,6 +10,14 @@ class HudSettings {
   final bool vibrate;
   final bool vibrateProfitableOnly;
   final bool speakVerdict; // say the verdict aloud for each new request
+  final String vibrateLevels; // comma list of EXCELLENT, GOOD, POOR, LOSS, UNKNOWN that vibrate
+  final String speakLevels; // same, for the voice
+  final String vibrationStrength; // LIGHT | NORMAL | STRONG
+  final String speakDetail; // VERDICT | NET | NET_KM
+  final double speechRate; // 0.5 - 2.0
+  final bool speakStopWhenGone; // stop talking when the request leaves the screen
+  final bool alertOncePerRequest; // one alert per request, even when it shows again
+  final bool muteDuringAutomation; // quiet for requests the automation opens
   final bool showFareComparison;
   final bool showProfit;
   final bool showDistance;
@@ -35,6 +43,14 @@ class HudSettings {
     this.vibrate = true,
     this.vibrateProfitableOnly = false,
     this.speakVerdict = false,
+    this.vibrateLevels = allLevels,
+    this.speakLevels = allLevels,
+    this.vibrationStrength = "NORMAL",
+    this.speakDetail = "NET",
+    this.speechRate = 1.0,
+    this.speakStopWhenGone = true,
+    this.alertOncePerRequest = true,
+    this.muteDuringAutomation = true,
     this.showFareComparison = true,
     this.showProfit = true,
     this.showDistance = true,
@@ -61,6 +77,14 @@ class HudSettings {
     bool? vibrate,
     bool? vibrateProfitableOnly,
     bool? speakVerdict,
+    String? vibrateLevels,
+    String? speakLevels,
+    String? vibrationStrength,
+    String? speakDetail,
+    double? speechRate,
+    bool? speakStopWhenGone,
+    bool? alertOncePerRequest,
+    bool? muteDuringAutomation,
     bool? showFareComparison,
     bool? showProfit,
     bool? showDistance,
@@ -86,6 +110,14 @@ class HudSettings {
       vibrate: vibrate ?? this.vibrate,
       vibrateProfitableOnly: vibrateProfitableOnly ?? this.vibrateProfitableOnly,
       speakVerdict: speakVerdict ?? this.speakVerdict,
+      vibrateLevels: vibrateLevels ?? this.vibrateLevels,
+      speakLevels: speakLevels ?? this.speakLevels,
+      vibrationStrength: vibrationStrength ?? this.vibrationStrength,
+      speakDetail: speakDetail ?? this.speakDetail,
+      speechRate: speechRate ?? this.speechRate,
+      speakStopWhenGone: speakStopWhenGone ?? this.speakStopWhenGone,
+      alertOncePerRequest: alertOncePerRequest ?? this.alertOncePerRequest,
+      muteDuringAutomation: muteDuringAutomation ?? this.muteDuringAutomation,
       showFareComparison: showFareComparison ?? this.showFareComparison,
       showProfit: showProfit ?? this.showProfit,
       showDistance: showDistance ?? this.showDistance,
@@ -113,6 +145,14 @@ class HudSettings {
         'vibrate': vibrate,
         'vibrateProfitableOnly': vibrateProfitableOnly,
         'speakVerdict': speakVerdict,
+        'vibrateLevels': vibrateLevels,
+        'speakLevels': speakLevels,
+        'vibrationStrength': vibrationStrength,
+        'speakDetail': speakDetail,
+        'speechRate': speechRate,
+        'speakStopWhenGone': speakStopWhenGone,
+        'alertOncePerRequest': alertOncePerRequest,
+        'muteDuringAutomation': muteDuringAutomation,
         'showFareComparison': showFareComparison,
         'showProfit': showProfit,
         'showDistance': showDistance,
@@ -130,6 +170,8 @@ class HudSettings {
       };
 
   factory HudSettings.fromJson(Map<String, dynamic> json, {HudSettings fallback = const HudSettings()}) {
+    // Before 1.20 there was one "profitable only" switch for both vibration and voice.
+    final legacyLevels = json['vibrateProfitableOnly'] == true ? "EXCELLENT,GOOD" : null;
     return HudSettings(
       style: json['style'] as String? ?? fallback.style,
       size: json['size'] as String? ?? fallback.size,
@@ -140,6 +182,14 @@ class HudSettings {
       vibrate: json['vibrate'] as bool? ?? fallback.vibrate,
       vibrateProfitableOnly: json['vibrateProfitableOnly'] as bool? ?? fallback.vibrateProfitableOnly,
       speakVerdict: json['speakVerdict'] as bool? ?? fallback.speakVerdict,
+      vibrateLevels: json['vibrateLevels'] as String? ?? legacyLevels ?? fallback.vibrateLevels,
+      speakLevels: json['speakLevels'] as String? ?? legacyLevels ?? fallback.speakLevels,
+      vibrationStrength: json['vibrationStrength'] as String? ?? fallback.vibrationStrength,
+      speakDetail: json['speakDetail'] as String? ?? fallback.speakDetail,
+      speechRate: ((json['speechRate'] as num?)?.toDouble() ?? fallback.speechRate).clamp(0.5, 2.0),
+      speakStopWhenGone: json['speakStopWhenGone'] as bool? ?? fallback.speakStopWhenGone,
+      alertOncePerRequest: json['alertOncePerRequest'] as bool? ?? fallback.alertOncePerRequest,
+      muteDuringAutomation: json['muteDuringAutomation'] as bool? ?? fallback.muteDuringAutomation,
       showFareComparison: json['showFareComparison'] as bool? ?? fallback.showFareComparison,
       showProfit: json['showProfit'] as bool? ?? fallback.showProfit,
       showDistance: json['showDistance'] as bool? ?? fallback.showDistance,
@@ -156,6 +206,25 @@ class HudSettings {
       bidChipsMode: json['bidChipsMode'] as String? ?? fallback.bidChipsMode,
     );
   }
+
+  static const String allLevels = "EXCELLENT,GOOD,POOR,LOSS,UNKNOWN";
+
+  /// Verdicts the driver can pick for vibration / voice, in display order.
+  static const Map<String, String> levelLabels = {
+    "EXCELLENT": "ممتاز",
+    "GOOD": "رابح",
+    "POOR": "هامش ضعيف",
+    "LOSS": "خسارة أو محظور",
+    "UNKNOWN": "المسافة مش مقروءة",
+  };
+
+  static const Map<String, String> strengthLabels = {"LIGHT": "خفيفة", "NORMAL": "عادية", "STRONG": "قوية"};
+
+  static const Map<String, String> speakDetailLabels = {
+    "VERDICT": "الحكم بس",
+    "NET": "الحكم والصافي",
+    "NET_KM": "الحكم والصافي والمسافة",
+  };
 
   static const Map<String, String> styleLabels = {
     "COMPACT_CIRCLE": "دائرة",

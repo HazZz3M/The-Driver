@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../data/models/analysis_prefs.dart';
 import '../data/models/driver_settings.dart';
 import 'dart:async';
 import '../data/models/expense.dart';
@@ -18,6 +19,7 @@ class AssistantProvider extends ChangeNotifier {
   late List<VehicleProfile> vehicleProfiles;
   late String activeVehicleId;
   late HudSettings hud;
+  late AnalysisPrefs analysis;
 
   // Calculator inputs
   double pickupDistanceKm = 2.0;
@@ -46,6 +48,7 @@ class AssistantProvider extends ChangeNotifier {
     vehicleProfiles = repository.getVehicleProfiles();
     activeVehicleId = repository.getActiveVehicleId();
     hud = repository.getHudSettings();
+    analysis = repository.getAnalysisPrefs();
     _restoreCalculatorInputs();
     isShiftActive = repository.isShiftActive;
     shiftStartTime = repository.shiftStartTime;
@@ -481,6 +484,13 @@ class AssistantProvider extends ChangeNotifier {
     if (path == null) return false;
     return NativeBridgeService.shareFile(path,
         mime: csv ? "text/csv" : "application/json", title: "سجل طلبات The Driver");
+  }
+
+  /// How the Insights tab reads the log (area names, merges, which requests count).
+  Future<void> updateAnalysis(AnalysisPrefs a) async {
+    analysis = a;
+    notifyListeners();
+    await repository.saveAnalysisPrefs(a);
   }
 
   bool get tutorialSeen => repository.tutorialSeen;

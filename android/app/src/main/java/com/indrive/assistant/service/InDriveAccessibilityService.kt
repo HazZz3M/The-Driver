@@ -334,6 +334,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
         if (clickCardBody(root, candidate.screenBounds!!)) {
             autoOpenKey = key
+            autoOpenActive = true
             autoOpenStartedAt = now
             autoOpenSawRequest = false
             lastAutoOpenAt = now
@@ -541,6 +542,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun finishAutoOpen(goBack: Boolean) {
         autoOpenKey = null
+        autoOpenActive = false
         worker.removeCallbacks(autoOpenTimeout)
         lastAutoOpenAt = System.currentTimeMillis() // the pause before the next open starts now
         if (goBack) performGlobalAction(GLOBAL_ACTION_BACK)
@@ -895,6 +897,7 @@ class InDriveAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        autoOpenActive = false
         if (::workerThread.isInitialized) {
             worker.removeCallbacksAndMessages(null)
             workerThread.quitSafely()
@@ -913,6 +916,9 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val AUTO_ACCEPT_COOLDOWN_MS = 5000L
         private const val MAX_DUMP_NODES = 900
         const val DUMP_FILE = "inDrive_screen_dump.txt"
+        /** True while auto-open has a request open (the HUD stays quiet about screens it opened). */
+        @Volatile var autoOpenActive = false
+            private set
         private const val LEAVE_CHECK_MS = 1000L
         // C (auto-open): give the map time to load, then press Back; at most one card per cooldown.
         // Auto-hide: at most one card per cooldown; the swipe takes this long.

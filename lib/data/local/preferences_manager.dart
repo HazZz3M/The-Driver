@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/analysis_prefs.dart';
 import '../models/driver_settings.dart';
 import '../models/hud_settings.dart';
 import '../models/vehicle_profile.dart';
@@ -48,6 +49,7 @@ class PreferencesManager {
   static const String keyAutoDismissDirection = "auto_dismiss_direction";
   static const String keyAutoDismissDelay = "auto_dismiss_delay";
   static const String keyTutorialSeen = "tutorial_seen";
+  static const String keyAnalysisPrefs = "analysis_prefs";
   static const String keyFavoritePassengers = "favorite_passengers";
   static const String keyBlacklistedPassengers = "blacklisted_passengers";
 
@@ -180,6 +182,20 @@ class PreferencesManager {
   Future<void> setAutoAcceptConsentGiven() async => await prefs.setBool(keyAutoAcceptConsentGiven, true);
 
   /// The walkthrough was finished or skipped once (shown automatically only on first launch).
+  // Insights: area names and which requests count (Flutter only)
+  AnalysisPrefs loadAnalysisPrefs() {
+    final raw = prefs.getString(keyAnalysisPrefs);
+    if (raw == null || raw.isEmpty) return const AnalysisPrefs();
+    try {
+      return AnalysisPrefs.fromJson(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+    } catch (e) {
+      debugPrint("Corrupted analysis prefs, using defaults: $e");
+      return const AnalysisPrefs();
+    }
+  }
+
+  Future<void> saveAnalysisPrefs(AnalysisPrefs a) async => await prefs.setString(keyAnalysisPrefs, jsonEncode(a.toJson()));
+
   bool get tutorialSeen => prefs.getBool(keyTutorialSeen) ?? false;
   Future<void> setTutorialSeen() async => await prefs.setBool(keyTutorialSeen, true);
 

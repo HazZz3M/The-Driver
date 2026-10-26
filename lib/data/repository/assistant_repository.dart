@@ -1,5 +1,6 @@
 import '../local/database_service.dart';
 import '../local/preferences_manager.dart';
+import '../models/analysis_prefs.dart';
 import '../models/driver_settings.dart';
 import '../models/expense.dart';
 import '../models/hud_settings.dart';
@@ -28,6 +29,9 @@ class AssistantRepository {
   // Floating HUD
   HudSettings getHudSettings() => preferencesManager.loadHudSettings();
   Future<void> saveHudSettings(HudSettings hud) => preferencesManager.saveHudSettings(hud);
+
+  AnalysisPrefs getAnalysisPrefs() => preferencesManager.loadAnalysisPrefs();
+  Future<void> saveAnalysisPrefs(AnalysisPrefs a) => preferencesManager.saveAnalysisPrefs(a);
 
   // Calculator inputs
   Map<String, double> getCalculatorInputs() => preferencesManager.loadCalculatorInputs();

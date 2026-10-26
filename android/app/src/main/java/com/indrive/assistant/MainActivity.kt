@@ -62,6 +62,12 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isFloatingServiceRunning" -> result.success(FloatingHudService.isRunning())
+                "testAlert" -> result.success(
+                    FloatingHudService.testAlert(
+                        call.argument<String>("level") ?: "GOOD",
+                        call.argument<Boolean>("voice") ?: false
+                    )
+                )
                 "syncSettings" -> {
                     val json = call.argument<String>("json")
                     if (json == null) {

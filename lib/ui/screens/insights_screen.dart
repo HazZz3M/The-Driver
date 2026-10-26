@@ -5,6 +5,7 @@ import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
 import '../components/dialogs.dart';
 import '../components/ui_kit.dart';
+import 'areas_screen.dart';
 import 'request_log_screen.dart';
 
 /// Analysis of every request seen in inDrive (accepted or not) and recommendations:
@@ -61,7 +62,14 @@ class _InsightsScreenState extends State<InsightsScreen> with WidgetsBindingObse
     final s = provider.driverSettings;
     final c = s.currency;
     final since = _periodDays == 0 ? null : DateTime.now().subtract(Duration(days: _periodDays));
-    final ins = RequestInsights.from(provider.requestLog, zones: [...s.favoriteZones, ...s.blacklistedZones], since: since);
+    final ins = RequestInsights.from(provider.requestLog,
+        zones: [...s.favoriteZones, ...s.blacklistedZones], since: since, prefs: provider.analysis);
+    void openAreas() => Navigator.push(context, MaterialPageRoute(builder: (_) => const AreasPage()));
+    final areasAction = TextButton.icon(
+      icon: const Icon(Icons.edit_location_alt_outlined, size: 18),
+      label: const Text("تعديل المناطق"),
+      onPressed: openAreas,
+    );
     final recs = ins.recommendations(now: DateTime.now(), currency: c);
 
     return Scaffold(
@@ -71,7 +79,15 @@ class _InsightsScreenState extends State<InsightsScreen> with WidgetsBindingObse
           child: ListView(
             padding: const EdgeInsets.fromLTRB(Insets.lg, 0, Insets.lg, Insets.xl),
             children: [
-              const PageHeader(title: "التحليلات والتوصيات", subtitle: "من كل الطلبات اللي ظهرتلك في إن درايف"),
+              PageHeader(
+                title: "التحليلات والتوصيات",
+                subtitle: "من كل الطلبات اللي ظهرتلك في إن درايف",
+                trailing: IconButton(
+                  tooltip: "طريقة التحليل",
+                  icon: Badge(isLabelVisible: !provider.analysis.isDefault, child: const Icon(Icons.tune)),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AnalysisSettingsPage())),
+                ),
+              ),
               SegmentedButton<int>(
                 showSelectedIcon: false,
                 segments: const [
@@ -148,7 +164,7 @@ class _InsightsScreenState extends State<InsightsScreen> with WidgetsBindingObse
               ),
 
               // Areas & routes
-              const SectionLabel("أكتر مناطق بيبدأ منها الطلب"),
+              SectionLabel("أكتر مناطق بيبدأ منها الطلب", action: areasAction),
               _AreaList(items: ins.top(ins.pickupAreas), currency: c),
               const SectionLabel("أكتر مناطق الوصول"),
               _AreaList(items: ins.top(ins.dropoffAreas), currency: c),

@@ -357,28 +357,12 @@ class HudSettingsPage extends StatelessWidget {
 
         const SectionLabel("التنبيهات"),
         SettingsGroup(children: [
-          SwitchTile(
-            icon: Icons.vibration,
-            title: "اهتزاز عند ظهور طلب جديد",
-            subtitle: "هزة قصيرة = رابح • هزتين = هامش ضعيف • هزة طويلة = خسارة",
-            value: hud.vibrate,
-            onChanged: (v) => change((h) => h.copyWith(vibrate: v)),
+          NavTile(
+            icon: Icons.notifications_active_outlined,
+            title: "الاهتزاز والصوت",
+            subtitle: AlertsPage.summary(hud),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AlertsPage())),
           ),
-          SwitchTile(
-            icon: Icons.record_voice_over_outlined,
-            title: "نطق الحكم بالصوت",
-            subtitle: "يقول مثلاً «رابح، صافي 42» أو «خسارة» من غير ما تبص على الشاشة. محتاج صوت عربي في إعدادات تحويل النص لكلام",
-            value: hud.speakVerdict,
-            onChanged: (v) => change((h) => h.copyWith(speakVerdict: v)),
-          ),
-          if (hud.vibrate || hud.speakVerdict)
-            SwitchTile(
-              icon: Icons.filter_alt_outlined,
-              title: "للطلبات الرابحة فقط",
-              subtitle: "مفيش اهتزاز ولا صوت للخاسرة أو اللي مسافتها تقريبية",
-              value: hud.vibrateProfitableOnly,
-              onChanged: (v) => change((h) => h.copyWith(vibrateProfitableOnly: v)),
-            ),
         ]),
 
         const SizedBox(height: Insets.lg),
@@ -390,6 +374,184 @@ class HudSettingsPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// =============================================================================
+// ALERTS (vibration & voice)
+// =============================================================================
+
+class AlertsPage extends StatelessWidget {
+  const AlertsPage({super.key});
+
+  /// One line for the Settings tile, e.g. "اهتزاز: كل الطلبات • صوت: متوقف".
+  static String summary(HudSettings h) {
+    String part(bool on, String levels) {
+      if (!on) return "متوقف";
+      final n = levels.split(',').where(HudSettings.levelLabels.containsKey).length;
+      if (n == 0) return "متوقف";
+      return n == HudSettings.levelLabels.length ? "كل الطلبات" : "$n من ${HudSettings.levelLabels.length}";
+    }
+
+    return "اهتزاز: ${part(h.vibrate, h.vibrateLevels)} • صوت: ${part(h.speakVerdict, h.speakLevels)}";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hud = context.watch<AssistantProvider>().hud;
+    void change(HudSettings Function(HudSettings h) change) => _updateHud(context, change);
+
+    Future<void> test(String level, {required bool voice}) async {
+      final ok = await NativeBridgeService.testAlert(level, voice: voice);
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("شغّل المساعد العائم الأول عشان تجرب")),
+        );
+      }
+    }
+
+    return _SubPage(
+      title: "الاهتزاز والصوت",
+      children: [
+        const SectionLabel("الاهتزاز"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.vibration,
+            title: "اهتزاز عند ظهور طلب جديد",
+            subtitle: "هزة قصيرة = رابح • هزتين = هامش ضعيف • هزة طويلة = خسارة",
+            value: hud.vibrate,
+            onChanged: (v) => change((h) => h.copyWith(vibrate: v)),
+          ),
+          if (hud.vibrate) ...[
+            _LevelPicker(
+              title: "يهتز لـ",
+              levels: hud.vibrateLevels,
+              onChanged: (v) => change((h) => h.copyWith(vibrateLevels: v)),
+              onTest: (level) => test(level, voice: false),
+            ),
+            ChoiceTile<String>(
+              icon: Icons.graphic_eq,
+              title: "قوة الاهتزاز",
+              value: hud.vibrationStrength,
+              options: HudSettings.strengthLabels,
+              onChanged: (v) => change((h) => h.copyWith(vibrationStrength: v)),
+            ),
+          ],
+        ]),
+
+        const SectionLabel("نطق الحكم بالصوت"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.record_voice_over_outlined,
+            title: "نطق الحكم بالصوت",
+            subtitle: "يقول مثلاً «رابح، صافي 42» من غير ما تبص على الشاشة. محتاج صوت عربي في إعدادات تحويل النص لكلام",
+            value: hud.speakVerdict,
+            onChanged: (v) => change((h) => h.copyWith(speakVerdict: v)),
+          ),
+          if (hud.speakVerdict) ...[
+            _LevelPicker(
+              title: "ينطق لـ",
+              levels: hud.speakLevels,
+              onChanged: (v) => change((h) => h.copyWith(speakLevels: v)),
+              onTest: (level) => test(level, voice: true),
+            ),
+            ChoiceTile<String>(
+              icon: Icons.short_text,
+              title: "يقول إيه",
+              value: hud.speakDetail,
+              options: HudSettings.speakDetailLabels,
+              onChanged: (v) => change((h) => h.copyWith(speakDetail: v)),
+            ),
+            NumberStepperTile(
+              icon: Icons.speed,
+              title: "سرعة الكلام",
+              unit: "×",
+              value: hud.speechRate,
+              step: 0.25,
+              min: 0.5,
+              max: 2.0,
+              onChanged: (v) => change((h) => h.copyWith(speechRate: v)),
+            ),
+            SwitchTile(
+              icon: Icons.voice_over_off_outlined,
+              title: "اسكت لما الطلب يختفي",
+              subtitle: "لو الطلب اتقفل أو اتشال من القائمة وهو بيتكلم، الكلام يقف على طول",
+              value: hud.speakStopWhenGone,
+              onChanged: (v) => change((h) => h.copyWith(speakStopWhenGone: v)),
+            ),
+          ],
+        ]),
+
+        const SectionLabel("إمتى ينبّه"),
+        SettingsGroup(children: [
+          SwitchTile(
+            icon: Icons.looks_one_outlined,
+            title: "مرة واحدة بس لكل طلب",
+            subtitle: "لو فتحت الطلب أو رجعت للقائمة ولقيته تاني، مش هينبّه تاني",
+            value: hud.alertOncePerRequest,
+            onChanged: (v) => change((h) => h.copyWith(alertOncePerRequest: v)),
+          ),
+          SwitchTile(
+            icon: Icons.smart_toy_outlined,
+            iconColor: AppColors.warningYellow,
+            title: "سكوت أثناء الأتمتة",
+            subtitle: "مفيش اهتزاز ولا صوت للطلبات اللي التطبيق بيفتحها بنفسه عشان يقرا المسافة",
+            value: hud.muteDuringAutomation,
+            onChanged: (v) => change((h) => h.copyWith(muteDuringAutomation: v)),
+          ),
+        ]),
+      ],
+    );
+  }
+}
+
+/// Chips for the verdicts an alert fires for, with a "try" button for each.
+class _LevelPicker extends StatelessWidget {
+  final String title;
+  final String levels;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onTest;
+
+  const _LevelPicker({required this.title, required this.levels, required this.onChanged, required this.onTest});
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = levels.split(',').toSet();
+    return Padding(
+      padding: const EdgeInsets.all(Insets.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: Insets.sm),
+          for (final e in HudSettings.levelLabels.entries)
+            Row(
+              children: [
+                Expanded(
+                  child: CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(e.value),
+                    value: selected.contains(e.key),
+                    onChanged: (on) {
+                      final next = HudSettings.levelLabels.keys
+                          .where((k) => k == e.key ? on == true : selected.contains(k))
+                          .join(',');
+                      onChanged(next);
+                    },
+                  ),
+                ),
+                IconButton(
+                  tooltip: "جرّب",
+                  icon: const Icon(Icons.play_circle_outline),
+                  onPressed: () => onTest(e.key),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
