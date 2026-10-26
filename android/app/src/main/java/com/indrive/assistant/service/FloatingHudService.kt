@@ -29,6 +29,7 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.MainActivity
+import com.indrive.assistant.data.local.AutomationLog
 import com.indrive.assistant.data.model.HudPrefs
 import com.indrive.assistant.data.model.ParsedRideData
 import com.indrive.assistant.engine.BidAdvisor
@@ -95,6 +96,13 @@ class FloatingHudService : Service() {
             }
             return START_STICKY
         }
+        if (intent?.action == ACTION_TOGGLE_AUTOMATION) {
+            val paused = !AutomationLog.isPaused(this)
+            AutomationLog.setPaused(this, paused)
+            toast(if (paused) "تم إيقاف كل الأتمتة (قبول، إخفاء، فتح، مزايدة)" else "تم تشغيل الأتمتة حسب إعداداتك")
+            onScreenReadingChanged()
+            return START_STICKY
+        }
         if (intent?.action == ACTION_CAPTURE) {
             InDriveAccessibilityService.captureRequested = true
             toast("أغلق الإشعارات وافتح شاشة الطلبات في إن درايف: سيتم الالتقاط تلقائياً")
@@ -124,6 +132,7 @@ class FloatingHudService : Service() {
 
         // Screen reading on: pause it here. Off: only the driver can switch it on, in Settings.
         val reading = InDriveAccessibilityService.isRunning()
+        val automationPaused = AutomationLog.isPaused(this)
         val readingAction = if (reading) {
             NotificationCompat.Action(
                 android.R.drawable.ic_media_pause,
@@ -146,20 +155,24 @@ class FloatingHudService : Service() {
         return NotificationCompat.Builder(this, InDriveAssistantApp.CHANNEL_ID)
             .setContentTitle("The Driver")
             .setContentText(
-                if (reading) "المساعد العائم يعمل ويحلل عروض إن درايف"
-                else "قراءة الشاشة متوقفة: لن تظهر العلامات حتى تشغّلها"
+                when {
+                    !reading -> "قراءة الشاشة متوقفة: لن تظهر العلامات حتى تشغّلها"
+                    automationPaused -> "المساعد يعمل • الأتمتة متوقفة"
+                    else -> "المساعد العائم يعمل ويحلل عروض إن درايف"
+                }
             )
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(openIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "إيقاف", stopIntent)
             .addAction(readingAction)
+            // Master switch for every automated tap / swipe (diagnostic capture is in the app).
             .addAction(
-                android.R.drawable.ic_menu_camera,
-                "التقاط للتشخيص",
+                if (automationPaused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause,
+                if (automationPaused) "تشغيل الأتمتة" else "إيقاف الأتمتة",
                 PendingIntent.getService(
                     this,
                     2,
-                    Intent(this, FloatingHudService::class.java).setAction(ACTION_CAPTURE),
+                    Intent(this, FloatingHudService::class.java).setAction(ACTION_TOGGLE_AUTOMATION),
                     PendingIntent.FLAG_IMMUTABLE
                 )
             )
@@ -203,7 +216,7 @@ class FloatingHudService : Service() {
                     renderPopupIfChanged(existing)
                 } else {
                     createAndAttachPopup(card, analysis)
-                    vibrateSingleShotOnce(card, analysis)
+                    alertNewRequest(card, analysis)
                 }
             }
 
@@ -810,6 +823,8 @@ class FloatingHudService : Service() {
 
         val hud = hudPrefs()
         cardRoot.addView(topRow)
+        // "ليه؟": the reason behind the colour, in one line.
+        cardRoot.addView(infoRow("ليه؟ ${whyText(card, analysis)}", "#E2E8F0", density, bold = false))
         if (hud.showFareComparison) cardRoot.addView(fareRow)
         if (hud.showProfit) cardRoot.addView(profitRow)
         if (hud.showDistance) cardRoot.addView(distRow)
@@ -847,6 +862,30 @@ class FloatingHudService : Service() {
         }
 
         holder.container.addView(cardRoot)
+    }
+
+    /** Plain-language reason for the verdict, e.g. "التكلفة 31 أكبر من السعر 25". */
+    private fun whyText(card: ParsedRideData, a: FareAnalysisResult): String {
+        fun n(v: Double) = String.format(Locale.US, "%.1f", v)
+        val main = when {
+            card.distanceUnknown -> "المسافة مش مقروءة من الكارت، فالربح مش محسوب"
+            a.isBlacklistedPassenger -> "العميل ده في قائمتك المحظورة"
+            a.isBlacklistedZone && a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER ->
+                "منطقة محظورة (${a.matchedBlacklistZone}) والسعر مش عالي كفاية"
+            a.netProfit < 0 -> "التكلفة ${a.totalOperatingCost.roundToInt()} ج.م (بنزين + عمولة + استهلاك) أكبر من السعر ${card.fare.roundToInt()}"
+            a.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN ->
+                "ربحك ${n(a.profitPerKm)} ج.م/كم أقل من هدفك ${n(a.targetProfitPerKm)}"
+            a.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT ->
+                "ربحك ${n(a.profitPerKm)} ج.م/كم، أكتر من مرة ونص هدفك ${n(a.targetProfitPerKm)}"
+            else -> "ربحك ${n(a.profitPerKm)} ج.م/كم، وهدفك ${n(a.targetProfitPerKm)}"
+        }
+        val notes = buildList {
+            if (card.pickupKnown && card.tripKnown && card.pickupDistanceKm > card.tripDistanceKm) add("الوصول أطول من المشوار")
+            if (card.distanceEstimated && !card.distanceUnknown) add("طول المشوار مفترض (≈)")
+            if (a.isFavoritePassenger) add("عميل مميز ★")
+            else if (a.isFavoriteZone) add("منطقة مفضلة ★")
+        }
+        return if (notes.isEmpty()) main else main + " • " + notes.joinToString(" • ")
     }
 
     private fun metricBox(label: String, value: String, valueColor: String, density: Float, marginStart: Int): View {
@@ -1217,11 +1256,12 @@ class FloatingHudService : Service() {
     }
 
     // =========================================================================
-    // SINGLE-SHOT HAPTIC ALERT
+    // NEW-REQUEST ALERT: a vibration per verdict, and (optionally) the verdict spoken aloud,
+    // so the driver doesn't have to look at the screen.
     // =========================================================================
-    private fun vibrateSingleShotOnce(card: ParsedRideData, analysis: FareAnalysisResult) {
+    private fun alertNewRequest(card: ParsedRideData, analysis: FareAnalysisResult) {
         val hud = hudPrefs()
-        if (!hud.vibrate) return
+        if (!hud.vibrate && !hud.speakVerdict) return
         if (hud.vibrateProfitableOnly) {
             val profitable = !card.distanceEstimated &&
                 (analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT ||
@@ -1235,26 +1275,75 @@ class FloatingHudService : Service() {
         lastVibratedFingerprint = card.fingerprint
         lastVibrateTimestamp = now
 
+        if (hud.vibrate) vibrateFor(card, analysis)
+        if (hud.speakVerdict) speak(verdictSpeech(card, analysis))
+    }
+
+    /** One short buzz = profitable, two = thin margin, one long = loss, a tap = distance not read. */
+    private fun vibrateFor(card: ParsedRideData, analysis: FareAnalysisResult) {
+        val pattern = when {
+            card.distanceUnknown -> longArrayOf(0, 35)
+            analysis.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER -> longArrayOf(0, 450)
+            analysis.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> longArrayOf(0, 60, 120, 60)
+            else -> longArrayOf(0, 70)
+        }
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vibratorManager?.defaultVibrator?.vibrate(
-                    VibrationEffect.createOneShot(70, VibrationEffect.DEFAULT_AMPLITUDE)
-                )
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
             } else {
                 @Suppress("DEPRECATION")
-                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                @Suppress("DEPRECATION")
-                vibrator?.vibrate(70)
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
+            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
         } catch (e: Exception) {
             Log.w(TAG, "Vibration failed", e)
         }
     }
 
+    /** Short Arabic phrase for the verdict, e.g. "رابح، صافي 42". */
+    private fun verdictSpeech(card: ParsedRideData, a: FareAnalysisResult): String {
+        val net = a.netProfit.roundToInt()
+        val approx = if (card.distanceEstimated) "تقريباً " else ""
+        return when {
+            card.distanceUnknown -> "طلب جديد، المسافة مش مقروءة"
+            a.isBlacklistedPassenger -> "عميل محظور"
+            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER && a.isBlacklistedZone -> "منطقة محظورة"
+            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER -> "خسارة ${approx}${abs(net)}"
+            a.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> "هامش ضعيف، صافي ${approx}$net"
+            a.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT -> "ممتاز، صافي ${approx}$net"
+            else -> "رابح، صافي ${approx}$net"
+        }
+    }
+
+    // Text-to-speech, created on first use (main thread).
+    private var tts: android.speech.tts.TextToSpeech? = null
+    private var ttsReady = false
+    private var pendingSpeech: String? = null
+
+    private fun speak(text: String) {
+        val engine = tts
+        if (engine == null) {
+            pendingSpeech = text
+            tts = android.speech.tts.TextToSpeech(applicationContext) { status ->
+                ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS
+                if (ttsReady) {
+                    tts?.language = Locale("ar")
+                    pendingSpeech?.let { tts?.speak(it, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict") }
+                } else {
+                    Log.w(TAG, "Text-to-speech unavailable (status $status)")
+                }
+                pendingSpeech = null
+            }
+            return
+        }
+        if (ttsReady) engine.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict")
+    }
+
     override fun onDestroy() {
         if (activeInstance == this) activeInstance = null
         clearAllCardPopups()
+        try { tts?.shutdown() } catch (_: Exception) {}
+        tts = null
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -1267,6 +1356,7 @@ class FloatingHudService : Service() {
         const val ACTION_STOP = "com.indrive.assistant.action.STOP_HUD"
         const val ACTION_CAPTURE = "com.indrive.assistant.action.CAPTURE_SCREEN"
         const val ACTION_PAUSE_READING = "com.indrive.assistant.action.PAUSE_SCREEN_READING"
+        const val ACTION_TOGGLE_AUTOMATION = "com.indrive.assistant.action.TOGGLE_AUTOMATION"
 
         // Money colours only mean money; "excellent" is the strongest (solid fill), favourites use
         // the brand indigo so they can't be confused with the amber "thin margin".

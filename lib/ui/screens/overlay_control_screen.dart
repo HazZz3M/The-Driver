@@ -8,6 +8,7 @@ import '../../theme/app_colors.dart';
 import '../components/dialogs.dart';
 import '../components/hud_preview.dart';
 import '../components/ui_kit.dart';
+import 'automation_screen.dart';
 import 'settings_pages.dart';
 
 class OverlayControlScreen extends StatefulWidget {
@@ -281,6 +282,13 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
               // Quick customisation
               const SectionLabel("التخصيص"),
               SettingsGroup(children: [
+                NavTile(
+                  icon: Icons.smart_toy_outlined,
+                  color: AppColors.warningYellow,
+                  title: "الأتمتة",
+                  subtitle: "إيقاف كل الأتمتة، وسجل اللي عملته",
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AutomationScreen())),
+                ),
                 NavTile(
                   icon: Icons.palette_outlined,
                   title: "شكل ومحتوى العلامة",

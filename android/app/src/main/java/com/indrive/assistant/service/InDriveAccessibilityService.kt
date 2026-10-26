@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.indrive.assistant.MainActivity
+import com.indrive.assistant.data.local.AutomationLog
 import com.indrive.assistant.data.local.RequestLog
 import android.graphics.Bitmap
 import android.graphics.Rect
@@ -257,6 +258,9 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** The driver's master switch (app or notification): no automated tap or swipe while paused. */
+    private fun automationPaused(): Boolean = AutomationLog.isPaused(applicationContext)
+
     /** Fills unknown trip lengths from history (B) and/or the addresses (A), per the driver's settings. */
     private fun resolveTrips(rides: List<ParsedRideData>): List<ParsedRideData> {
         val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
@@ -316,7 +320,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (!hud.tripAutoOpen || !hud.readMapDistance || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (!hud.tripAutoOpen || !hud.readMapDistance || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || automationPaused()) return
         if (onRequestScreen || pendingAutoAcceptFingerprint != null || pendingDismiss != null) return
         // The pause is counted from the moment the previous request was closed.
         if (now - lastAutoOpenAt < gapMs) return
@@ -335,6 +339,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             lastAutoOpenAt = now
             worker.postDelayed(autoOpenTimeout, stayMs + 200)
             Log.i(TAG, "Auto-open: opened request to read its trip length")
+            AutomationLog.add(applicationContext, AutomationLog.OPEN, candidate.fare, "فتح الطلب لقراءة طول المشوار")
         }
     }
 
@@ -366,6 +371,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         if (rides.isEmpty() || pendingDismiss != null || autoOpenKey != null || pendingAutoAcceptFingerprint != null) return
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
         if (!settings.autoDismissLoss && !settings.autoDismissBlocked) return
+        if (automationPaused()) return
         if (System.currentTimeMillis() - lastDismissAt < DISMISS_COOLDOWN_MS) return
         val candidate = rides.firstOrNull { it.fingerprint !in dismissedFingerprints && dismissReason(it, settings) != null } ?: return
         pendingDismiss = candidate.fingerprint
@@ -375,6 +381,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun executeDismiss(fingerprint: String) {
         pendingDismiss = null
+        if (automationPaused()) return
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
         val root = rootInActiveWindow ?: return
         try {
@@ -387,6 +394,10 @@ class InDriveAccessibilityService : AccessibilityService() {
             val done = if (lastScanWasRequestScreen) clickSkipButton(root) else swipeCard(card, settings.autoDismissDirection)
             if (done) {
                 RequestLog.markDismissed(applicationContext, fingerprint, reason)
+                AutomationLog.add(
+                    applicationContext, AutomationLog.HIDE, card.fare,
+                    "طلب $reason" + (if (card.dropoffAddress.isNotBlank()) " إلى ${card.dropoffAddress}" else "")
+                )
                 mainHandler.post {
                     Toast.makeText(applicationContext, "تم إخفاء طلب $reason (${card.fare.toInt()} ج.م)", Toast.LENGTH_SHORT).show()
                 }
@@ -458,7 +469,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun maybeAutoTapBestBid(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         if (!onRequestScreen || pendingBidTap != null || autoOpenKey != null) return
-        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP") return
+        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP" || automationPaused()) return
         val card = rides.singleOrNull() ?: return
         if (card.bidChips.isEmpty()) return
         val key = rideKey(card) ?: card.fingerprint
@@ -475,7 +486,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun executeBidTap(key: String, value: Int) {
         pendingBidTap = null
-        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP") return
+        if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP" || automationPaused()) return
         val root = rootInActiveWindow ?: return
         try {
             if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
@@ -486,6 +497,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 mainHandler.post {
                     Toast.makeText(applicationContext, "تم اختيار أفضل مزايدة: $value ج.م", Toast.LENGTH_SHORT).show()
                 }
+                AutomationLog.add(applicationContext, AutomationLog.BID, value.toDouble(), "ضغط على أفضل مزايدة (عرض الراكب ${card.fare.toInt()})")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Bid auto-tap failed", e)
@@ -735,7 +747,7 @@ class InDriveAccessibilityService : AccessibilityService() {
     private fun maybeScheduleAutoAccept(rides: List<ParsedRideData>) {
         if (rides.isEmpty()) return
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-        if (!settings.autoAcceptEnabled) return
+        if (!settings.autoAcceptEnabled || automationPaused()) return
         if (pendingAutoAcceptFingerprint != null) return
         if (System.currentTimeMillis() - lastAutoAcceptTimestamp < AUTO_ACCEPT_COOLDOWN_MS) return
 
@@ -760,7 +772,7 @@ class InDriveAccessibilityService : AccessibilityService() {
     private fun executeAutoAccept(fingerprint: String) {
         pendingAutoAcceptFingerprint = null
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-        if (!settings.autoAcceptEnabled) return
+        if (!settings.autoAcceptEnabled || automationPaused()) return
 
         val root = rootInActiveWindow ?: return
         try {
@@ -784,6 +796,10 @@ class InDriveAccessibilityService : AccessibilityService() {
                 lastAutoAcceptedFingerprint = fingerprint
                 lastAutoAcceptTimestamp = System.currentTimeMillis()
                 val analysis = analyze(card, settings)
+                AutomationLog.add(
+                    applicationContext, AutomationLog.ACCEPT, card.fare,
+                    "صافي ${analysis.netProfit.toInt()} ج.م • ${String.format(java.util.Locale.US, "%.1f", analysis.profitPerKm)} ج.م/كم"
+                )
                 mainHandler.post {
                     Toast.makeText(
                         applicationContext,

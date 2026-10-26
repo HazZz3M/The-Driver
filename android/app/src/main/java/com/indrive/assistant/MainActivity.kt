@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.indrive.assistant.data.local.AutomationLog
 import com.indrive.assistant.data.local.RequestLog
 import com.indrive.assistant.service.FloatingHudService
 import com.indrive.assistant.service.InDriveAccessibilityService
@@ -87,6 +88,18 @@ class MainActivity : FlutterActivity() {
                 "getAppVersion" -> {
                     val info = packageManager.getPackageInfo(packageName, 0)
                     result.success(info.versionName ?: "")
+                }
+                // ---- Automation master switch & activity log ----
+                "getAutomationPaused" -> result.success(AutomationLog.isPaused(this))
+                "setAutomationPaused" -> {
+                    AutomationLog.setPaused(this, call.argument<Boolean>("paused") ?: false)
+                    FloatingHudService.onScreenReadingChanged() // refresh the notification's switch
+                    result.success(true)
+                }
+                "getAutomationLog" -> result.success(AutomationLog.asJson(this))
+                "clearAutomationLog" -> {
+                    AutomationLog.clear(this)
+                    result.success(true)
                 }
                 // ---- Request log (analysis & recommendations) ----
                 "getRequestLog" -> result.success(RequestLog.asJson(this))
