@@ -155,6 +155,45 @@ class NativeBridgeService {
     }
   }
 
+  // ---- Automation master switch & activity log (AutomationLog.kt) ----
+
+  static Future<bool> getAutomationPaused() async {
+    try {
+      return await _channel.invokeMethod<bool>('getAutomationPaused') ?? false;
+    } catch (e) {
+      debugPrint("getAutomationPaused failed: $e");
+      return false;
+    }
+  }
+
+  static Future<void> setAutomationPaused(bool paused) async {
+    try {
+      await _channel.invokeMethod('setAutomationPaused', {'paused': paused});
+    } catch (e) {
+      debugPrint("setAutomationPaused failed: $e");
+    }
+  }
+
+  /// What the automation did (oldest first): {t, action: ACCEPT|HIDE|OPEN|BID, fare, detail}.
+  static Future<List<Map<String, dynamic>>> getAutomationLog() async {
+    try {
+      final raw = await _channel.invokeMethod<String>('getAutomationLog');
+      if (raw == null || raw.isEmpty) return const [];
+      return (jsonDecode(raw) as List).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    } catch (e) {
+      debugPrint("getAutomationLog failed: $e");
+      return const [];
+    }
+  }
+
+  static Future<void> clearAutomationLog() async {
+    try {
+      await _channel.invokeMethod('clearAutomationLog');
+    } catch (e) {
+      debugPrint("clearAutomationLog failed: $e");
+    }
+  }
+
   // ---- Request log (lib/data/models/request_record.dart) ----
 
   /// Every request seen in inDrive, oldest first, as raw JSON maps. Empty on failure.

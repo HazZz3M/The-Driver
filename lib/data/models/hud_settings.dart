@@ -9,6 +9,7 @@ class HudSettings {
   final bool showLossBadges;
   final bool vibrate;
   final bool vibrateProfitableOnly;
+  final bool speakVerdict; // say the verdict aloud for each new request
   final bool showFareComparison;
   final bool showProfit;
   final bool showDistance;
@@ -33,6 +34,7 @@ class HudSettings {
     this.showLossBadges = true,
     this.vibrate = true,
     this.vibrateProfitableOnly = false,
+    this.speakVerdict = false,
     this.showFareComparison = true,
     this.showProfit = true,
     this.showDistance = true,
@@ -58,6 +60,7 @@ class HudSettings {
     bool? showLossBadges,
     bool? vibrate,
     bool? vibrateProfitableOnly,
+    bool? speakVerdict,
     bool? showFareComparison,
     bool? showProfit,
     bool? showDistance,
@@ -82,6 +85,7 @@ class HudSettings {
       showLossBadges: showLossBadges ?? this.showLossBadges,
       vibrate: vibrate ?? this.vibrate,
       vibrateProfitableOnly: vibrateProfitableOnly ?? this.vibrateProfitableOnly,
+      speakVerdict: speakVerdict ?? this.speakVerdict,
       showFareComparison: showFareComparison ?? this.showFareComparison,
       showProfit: showProfit ?? this.showProfit,
       showDistance: showDistance ?? this.showDistance,
@@ -108,6 +112,7 @@ class HudSettings {
         'showLossBadges': showLossBadges,
         'vibrate': vibrate,
         'vibrateProfitableOnly': vibrateProfitableOnly,
+        'speakVerdict': speakVerdict,
         'showFareComparison': showFareComparison,
         'showProfit': showProfit,
         'showDistance': showDistance,
@@ -134,6 +139,7 @@ class HudSettings {
       showLossBadges: json['showLossBadges'] as bool? ?? fallback.showLossBadges,
       vibrate: json['vibrate'] as bool? ?? fallback.vibrate,
       vibrateProfitableOnly: json['vibrateProfitableOnly'] as bool? ?? fallback.vibrateProfitableOnly,
+      speakVerdict: json['speakVerdict'] as bool? ?? fallback.speakVerdict,
       showFareComparison: json['showFareComparison'] as bool? ?? fallback.showFareComparison,
       showProfit: json['showProfit'] as bool? ?? fallback.showProfit,
       showDistance: json['showDistance'] as bool? ?? fallback.showDistance,

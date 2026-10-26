@@ -105,15 +105,70 @@ class RequestInsights {
     return ins;
   }
 
-  /// The area part of an inDrive address: a matching zone of the driver, else the last
-  /// comma/dash-separated part ("شارع 9، المعادي" → "المعادي").
+  /// The neighbourhood of an inDrive address, used to group requests by area.
+  ///
+  /// inDrive (Google) addresses look like "Place (street, neighbourhood, police district, city,
+  /// country)", e.g. "التجنيد (الحمراء الثانية، قسم أول أسيوط، مصر)" → "الحمراء الثانية".
+  /// The country, police districts (قسم / مركز / أول / ثان), the city and plus codes are never
+  /// areas; streets are used only when nothing better is left. A matching zone of the driver wins.
   static String areaOf(String address, List<String> zones) {
     final a = address.trim();
     if (a.isEmpty) return "";
     final zone = FareCalculatorEngine.matchZone(a, zones);
     if (zone != null) return zone;
-    final parts = a.split(RegExp(r'[،,\-–|/]')).map((p) => p.trim()).where((p) => p.length >= 2).toList();
-    return parts.isEmpty ? a : parts.last;
+
+    final clean = a.replaceAll(_plusCode, " ");
+    final open = clean.indexOf('(');
+    final outer = (open >= 0 ? clean.substring(0, open) : clean).trim();
+    final inner = open >= 0 ? clean.substring(open + 1) : "";
+    // Inside the parentheses, the parts read from specific to general; without them, a comma
+    // list does too ("شارع 9، المعادي"). A dash is part of names ("طريق القاهرة - أسوان"), not a separator.
+    final parts = (open >= 0 ? inner : clean)
+        .split(RegExp(r'[(),،]'))
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (open < 0 && parts.length <= 1) {
+      final only = parts.isEmpty ? outer : parts.first;
+      return _isGeneric(only) ? a : only;
+    }
+
+    final useful = parts.where((p) => !_isGeneric(p)).toList();
+    final notStreet = useful.where((p) => !_isStreet(p)).toList();
+    if (notStreet.isNotEmpty) return notStreet.last;
+    if (outer.isNotEmpty && !_isGeneric(outer)) return outer;
+    if (useful.isNotEmpty) return useful.last;
+    return outer.isNotEmpty ? outer : a;
+  }
+
+  static final _plusCode = RegExp(r'\b[0-9A-Z]{4}\+[0-9A-Z]{2,3}\b');
+  static final _hasLetters = RegExp(r'\p{L}{2,}', unicode: true);
+  static const _countries = {"مصر", "egypt", "جمهورية مصر العربية"};
+  static const _districtPrefixes = [
+    "قسم ", "مركز ", "محافظة ", "حي ", "حى ", "اول ", "أول ", "ثان ", "ثاني ", "qism ", "kism ", "markaz ",
+  ];
+  static const _cities = {
+    "القاهرة", "cairo", "الجيزة", "giza", "الإسكندرية", "الاسكندرية", "alexandria", "أسيوط", "اسيوط", "asyut",
+    "assiut", "asyout", "سوهاج", "sohag", "المنيا", "minya", "قنا", "qena", "الأقصر", "الاقصر", "luxor", "أسوان",
+    "اسوان", "aswan", "بني سويف", "beni suef", "الفيوم", "faiyum", "fayoum", "طنطا", "tanta", "المنصورة", "mansoura",
+    "الزقازيق", "zagazig", "بورسعيد", "port said", "السويس", "suez", "الإسماعيلية", "الاسماعيلية", "ismailia",
+    "دمياط", "damietta",
+  };
+
+  /// Country, police district, city ("Asyut 2" too), digits only, or too short: not an area.
+  static bool _isGeneric(String part) {
+    final p = part.trim().toLowerCase();
+    if (p.length < 3 || !_hasLetters.hasMatch(p)) return true;
+    if (_countries.contains(p)) return true;
+    if (_districtPrefixes.any((prefix) => p.startsWith(prefix))) return true;
+    final cityPart = p.replaceAll(RegExp(r'\s*\d+$'), '');
+    return _cities.contains(cityPart);
+  }
+
+  static bool _isStreet(String part) {
+    final p = part.trim().toLowerCase();
+    return p.startsWith("شارع") || p.startsWith("طريق") || p.endsWith(" street") || p.endsWith(" st") ||
+        p.endsWith(" rd") || p.endsWith(" road") || p == "st";
   }
 
   double get acceptanceRate => opened == 0 ? 0 : total.accepted / opened;

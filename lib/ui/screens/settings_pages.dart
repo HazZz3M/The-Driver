@@ -360,14 +360,22 @@ class HudSettingsPage extends StatelessWidget {
           SwitchTile(
             icon: Icons.vibration,
             title: "اهتزاز عند ظهور طلب جديد",
+            subtitle: "هزة قصيرة = رابح • هزتين = هامش ضعيف • هزة طويلة = خسارة",
             value: hud.vibrate,
             onChanged: (v) => change((h) => h.copyWith(vibrate: v)),
           ),
-          if (hud.vibrate)
+          SwitchTile(
+            icon: Icons.record_voice_over_outlined,
+            title: "نطق الحكم بالصوت",
+            subtitle: "يقول مثلاً «رابح، صافي 42» أو «خسارة» من غير ما تبص على الشاشة. محتاج صوت عربي في إعدادات تحويل النص لكلام",
+            value: hud.speakVerdict,
+            onChanged: (v) => change((h) => h.copyWith(speakVerdict: v)),
+          ),
+          if (hud.vibrate || hud.speakVerdict)
             SwitchTile(
               icon: Icons.filter_alt_outlined,
               title: "للطلبات الرابحة فقط",
-              subtitle: "لا اهتزاز للخاسرة أو ذات المسافة التقريبية",
+              subtitle: "مفيش اهتزاز ولا صوت للخاسرة أو اللي مسافتها تقريبية",
               value: hud.vibrateProfitableOnly,
               onChanged: (v) => change((h) => h.copyWith(vibrateProfitableOnly: v)),
             ),

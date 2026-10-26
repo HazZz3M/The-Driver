@@ -17,6 +17,8 @@ data class HudPrefs(
     val showLossBadges: Boolean = true,
     val vibrate: Boolean = true,
     val vibrateProfitableOnly: Boolean = false,
+    /** Say the verdict aloud for each new request ("رابح، صافي 42"). */
+    val speakVerdict: Boolean = false,
     val showFareComparison: Boolean = true,
     val showProfit: Boolean = true,
     val showDistance: Boolean = true,
@@ -49,6 +51,7 @@ data class HudPrefs(
         put("showLossBadges", showLossBadges)
         put("vibrate", vibrate)
         put("vibrateProfitableOnly", vibrateProfitableOnly)
+        put("speakVerdict", speakVerdict)
         put("showFareComparison", showFareComparison)
         put("showProfit", showProfit)
         put("showDistance", showDistance)
@@ -77,6 +80,7 @@ data class HudPrefs(
                 showLossBadges = json.optBoolean("showLossBadges", fallback.showLossBadges),
                 vibrate = json.optBoolean("vibrate", fallback.vibrate),
                 vibrateProfitableOnly = json.optBoolean("vibrateProfitableOnly", fallback.vibrateProfitableOnly),
+                speakVerdict = json.optBoolean("speakVerdict", fallback.speakVerdict),
                 showFareComparison = json.optBoolean("showFareComparison", fallback.showFareComparison),
                 showProfit = json.optBoolean("showProfit", fallback.showProfit),
                 showDistance = json.optBoolean("showDistance", fallback.showDistance),

@@ -1,9 +1,8 @@
-### The Driver v1.18.0 - Auto-hide, auto-open timings, cleaner log
+### The Driver v1.19.0 - Safer while driving, clearer automation
 
-- **Auto-hide losing or blocked requests (optional).** Settings → القبول التلقائي → الإخفاء التلقائي:
-  - hide losing requests (net profit below zero, only when both distances were read), blocked zones and passengers, or both;
-  - choose the swipe direction (right or left) and the wait before hiding;
-  - list cards are swiped away; a full-screen request is closed with Skip. You're warned before it turns on.
-- **Control the auto-open timings.** When "open requests automatically" is on, you can set how long a request stays open, the pause before opening the next one, and whether to go back as soon as the trip length is read.
-- **Only real requests are logged** (from 1.17.1): other inDrive screens (ride in progress, cancel, rating, balance, income, VAT, top-up, the reply countdown) are no longer saved as rides, and your existing log is cleaned automatically.
-- After updating, if auto-hide doesn't swipe, turn The Driver's screen reading off and on again (it now needs the "perform gestures" ability).
+- **Hear the verdict (optional).** Each new request can be spoken aloud: "رابح، صافي 42", "هامش ضعيف…", "خسارة…", "منطقة محظورة". Settings → العلامة العائمة → التنبيهات → "نطق الحكم بالصوت". Needs an Arabic voice in the phone's text-to-speech settings.
+- **A different vibration per verdict:** one short buzz = profitable, two = thin margin, one long = loss.
+- **"ليه؟" on every detailed card:** one line explaining the colour, e.g. "التكلفة 31 ج.م أكبر من السعر 25", "ربحك 3.2 ج.م/كم أقل من هدفك 6.0", "منطقة محظورة…", plus notes (pickup longer than the trip, assumed trip length, favourite).
+- **New "الأتمتة" page:** one master switch that pauses every automated tap and swipe (accept, hide, open, bid), what is switched on, and today's log of what the automation did, with the reason.
+- **Pause automation from the notification:** the assistant's notification now has "إيقاف الأتمتة" / "تشغيل الأتمتة" (the diagnostic capture stays in the app, Assistant tab).
+- **Correct areas in the analysis** (from 1.18.1): the neighbourhood, never "مصر)" or the city.

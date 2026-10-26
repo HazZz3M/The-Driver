@@ -5,6 +5,7 @@ import '../../providers/assistant_provider.dart';
 import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
 import '../components/ui_kit.dart';
+import 'automation_screen.dart';
 import 'settings_pages.dart';
 import 'tutorial_screen.dart';
 
@@ -29,6 +30,13 @@ class SettingsScreen extends StatelessWidget {
 
             const SectionLabel("المساعد العائم"),
             SettingsGroup(children: [
+              NavTile(
+                icon: Icons.smart_toy_outlined,
+                color: AppColors.warningYellow,
+                title: "الأتمتة",
+                subtitle: "مفتاح واحد لكل الأتمتة، وسجل اللي عملته",
+                onTap: () => _open(context, const AutomationScreen()),
+              ),
               NavTile(
                 icon: Icons.palette_outlined,
                 title: "العلامة العائمة",

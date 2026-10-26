@@ -59,7 +59,10 @@ data class FareAnalysisResult(
 
     // Passenger lists
     val isFavoritePassenger: Boolean = false,
-    val isBlacklistedPassenger: Boolean = false
+    val isBlacklistedPassenger: Boolean = false,
+
+    /** Profit per km the ride was judged against (what the fair price leaves per km). */
+    val targetProfitPerKm: Double = 0.0
 )
 
 object FareCalculatorEngine {
@@ -247,7 +250,8 @@ object FareCalculatorEngine {
             isBlacklistedZone = (matchedBlacklist != null),
             matchedBlacklistZone = matchedBlacklist,
             isFavoritePassenger = favoritePassenger != null,
-            isBlacklistedPassenger = blockedPassenger != null
+            isBlacklistedPassenger = blockedPassenger != null,
+            targetProfitPerKm = targetProfitPerKm
         )
     }
 
