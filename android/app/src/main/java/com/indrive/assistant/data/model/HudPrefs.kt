@@ -19,6 +19,20 @@ data class HudPrefs(
     val vibrateProfitableOnly: Boolean = false,
     /** Say the verdict aloud for each new request ("رابح، صافي 42"). */
     val speakVerdict: Boolean = false,
+    /** Which verdicts vibrate / are spoken: comma list of EXCELLENT, GOOD, POOR, LOSS, UNKNOWN. */
+    val vibrateLevels: String = ALL_LEVELS,
+    val speakLevels: String = ALL_LEVELS,
+    /** LIGHT | NORMAL | STRONG */
+    val vibrationStrength: String = "NORMAL",
+    /** VERDICT | NET | NET_KM: how much the voice says. */
+    val speakDetail: String = "NET",
+    val speechRate: Double = 1.0,
+    /** Stop talking as soon as the request leaves the screen. */
+    val speakStopWhenGone: Boolean = true,
+    /** A request alerts once, even when it shows again (list ↔ request screen). */
+    val alertOncePerRequest: Boolean = true,
+    /** No alerts for requests the automation opens by itself. */
+    val muteDuringAutomation: Boolean = true,
     val showFareComparison: Boolean = true,
     val showProfit: Boolean = true,
     val showDistance: Boolean = true,
@@ -52,6 +66,14 @@ data class HudPrefs(
         put("vibrate", vibrate)
         put("vibrateProfitableOnly", vibrateProfitableOnly)
         put("speakVerdict", speakVerdict)
+        put("vibrateLevels", vibrateLevels)
+        put("speakLevels", speakLevels)
+        put("vibrationStrength", vibrationStrength)
+        put("speakDetail", speakDetail)
+        put("speechRate", speechRate)
+        put("speakStopWhenGone", speakStopWhenGone)
+        put("alertOncePerRequest", alertOncePerRequest)
+        put("muteDuringAutomation", muteDuringAutomation)
         put("showFareComparison", showFareComparison)
         put("showProfit", showProfit)
         put("showDistance", showDistance)
@@ -69,6 +91,8 @@ data class HudPrefs(
     }
 
     companion object {
+        const val ALL_LEVELS = "EXCELLENT,GOOD,POOR,LOSS,UNKNOWN"
+
         fun fromJson(json: JSONObject?, fallback: HudPrefs = HudPrefs()): HudPrefs {
             if (json == null) return fallback
             return HudPrefs(
@@ -81,6 +105,14 @@ data class HudPrefs(
                 vibrate = json.optBoolean("vibrate", fallback.vibrate),
                 vibrateProfitableOnly = json.optBoolean("vibrateProfitableOnly", fallback.vibrateProfitableOnly),
                 speakVerdict = json.optBoolean("speakVerdict", fallback.speakVerdict),
+                vibrateLevels = json.optString("vibrateLevels", fallback.vibrateLevels),
+                speakLevels = json.optString("speakLevels", fallback.speakLevels),
+                vibrationStrength = json.optString("vibrationStrength", fallback.vibrationStrength),
+                speakDetail = json.optString("speakDetail", fallback.speakDetail),
+                speechRate = json.optDouble("speechRate", fallback.speechRate).coerceIn(0.5, 2.0),
+                speakStopWhenGone = json.optBoolean("speakStopWhenGone", fallback.speakStopWhenGone),
+                alertOncePerRequest = json.optBoolean("alertOncePerRequest", fallback.alertOncePerRequest),
+                muteDuringAutomation = json.optBoolean("muteDuringAutomation", fallback.muteDuringAutomation),
                 showFareComparison = json.optBoolean("showFareComparison", fallback.showFareComparison),
                 showProfit = json.optBoolean("showProfit", fallback.showProfit),
                 showDistance = json.optBoolean("showDistance", fallback.showDistance),

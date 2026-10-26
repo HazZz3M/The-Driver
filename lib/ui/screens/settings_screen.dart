@@ -44,6 +44,12 @@ class SettingsScreen extends StatelessWidget {
                 onTap: () => _open(context, const HudSettingsPage()),
               ),
               NavTile(
+                icon: Icons.notifications_active_outlined,
+                title: "الاهتزاز والصوت",
+                subtitle: AlertsPage.summary(hud),
+                onTap: () => _open(context, const AlertsPage()),
+              ),
+              NavTile(
                 icon: Icons.bolt_outlined,
                 color: AppColors.warningYellow,
                 title: "القبول التلقائي",

@@ -100,6 +100,16 @@ class NativeBridgeService {
     }
   }
 
+  /// Plays a sample vibration (or voice line) for a verdict level. False when the assistant isn't running.
+  static Future<bool> testAlert(String level, {required bool voice}) async {
+    try {
+      return await _channel.invokeMethod<bool>('testAlert', {'level': level, 'voice': voice}) ?? false;
+    } catch (e) {
+      debugPrint("testAlert failed: $e");
+      return false;
+    }
+  }
+
   /// Pushes the full settings snapshot to the native HUD / accessibility layer.
   static Future<void> syncSettings(Map<String, dynamic> snapshot) async {
     try {

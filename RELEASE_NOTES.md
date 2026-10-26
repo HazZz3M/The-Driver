@@ -1,8 +1,18 @@
-### The Driver v1.19.0 - Safer while driving, clearer automation
+### The Driver v1.20.0 - Full control of vibration, voice and the analysis
 
-- **Hear the verdict (optional).** Each new request can be spoken aloud: "رابح، صافي 42", "هامش ضعيف…", "خسارة…", "منطقة محظورة". Settings → العلامة العائمة → التنبيهات → "نطق الحكم بالصوت". Needs an Arabic voice in the phone's text-to-speech settings.
-- **A different vibration per verdict:** one short buzz = profitable, two = thin margin, one long = loss.
-- **"ليه؟" on every detailed card:** one line explaining the colour, e.g. "التكلفة 31 ج.م أكبر من السعر 25", "ربحك 3.2 ج.م/كم أقل من هدفك 6.0", "منطقة محظورة…", plus notes (pickup longer than the trip, assumed trip length, favourite).
-- **New "الأتمتة" page:** one master switch that pauses every automated tap and swipe (accept, hide, open, bid), what is switched on, and today's log of what the automation did, with the reason.
-- **Pause automation from the notification:** the assistant's notification now has "إيقاف الأتمتة" / "تشغيل الأتمتة" (the diagnostic capture stays in the app, Assistant tab).
-- **Correct areas in the analysis** (from 1.18.1): the neighbourhood, never "مصر)" or the city.
+- **New "الاهتزاز والصوت" page** (Settings, right under "الأتمتة"). Turn vibration and voice on or off, and pick exactly which verdicts trigger each one: excellent, profitable, thin margin, loss/blocked, distance not read. Each verdict has a ▶ button to try it.
+- **Vibration strength:** light, normal or strong.
+- **Voice:** choose what it says (verdict only / + net / + net and distance) and how fast it speaks.
+- **The voice no longer talks about closed requests:**
+  - it stops as soon as the request leaves the screen (switchable);
+  - each request alerts once, even when you open it and come back to the list (switchable);
+  - requests the automation opens by itself to read the distance stay silent (switchable).
+- **Areas in the analysis are yours to edit** (Insights → "تعديل المناطق"):
+  - rename an area;
+  - merge several names of the same place, such as "الحمراء الثانية" and "Al Hamraa Ath Thaneyah";
+  - hide misleading names.
+  - The app also suggests names that look like the same place in Arabic and English, merged with one tap. All of this applies to old and new requests without changing the log.
+- **"طريقة التحليل"** (the ⚙ on the Insights tab):
+  - where the area comes from: the neighbourhood, the place name, or only your own zones;
+  - count only the requests you opened;
+  - leave out requests whose distance was not read.

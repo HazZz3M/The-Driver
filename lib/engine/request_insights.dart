@@ -1,3 +1,4 @@
+import '../data/models/analysis_prefs.dart';
 import '../data/models/request_record.dart';
 import 'fare_calculator_engine.dart';
 
@@ -77,11 +78,30 @@ class RequestInsights {
 
   RequestInsights._(this.records, this.days);
 
+  /// Requests per area name as read (before the driver's renames and hiding), pickups and
+  /// drop-offs together: what the Areas page lists.
+  final Map<String, int> rawAreaCounts = {};
+
   /// [zones] (the driver's favourite + blacklisted zones) are used as area names when they match.
-  factory RequestInsights.from(List<RequestRecord> all, {List<String> zones = const [], DateTime? since}) {
-    final list = since == null ? all : all.where((r) => !r.firstSeen.isBefore(since)).toList();
+  /// [prefs]: the driver's area names, hidden areas, area source and which requests count.
+  factory RequestInsights.from(List<RequestRecord> all,
+      {List<String> zones = const [], DateTime? since, AnalysisPrefs prefs = const AnalysisPrefs()}) {
+    final list = all.where((r) {
+      if (since != null && r.firstSeen.isBefore(since)) return false;
+      if (prefs.onlyOpened && !r.opened) return false;
+      if (prefs.excludeEstimated && !r.distancesKnown) return false;
+      return true;
+    }).toList();
     final days = list.map((r) => DateTime(r.firstSeen.year, r.firstSeen.month, r.firstSeen.day)).toSet().length;
     final ins = RequestInsights._(list, days == 0 ? 1 : days);
+    String area(String address) {
+      final raw = rawArea(address, zones, prefs.areaSource);
+      if (raw.isEmpty) return "";
+      ins.rawAreaCounts[raw] = (ins.rawAreaCounts[raw] ?? 0) + 1;
+      final name = prefs.rename(raw);
+      return prefs.isHidden(name) ? "" : name;
+    }
+
     for (final r in list) {
       ins.total.add(r);
       if (r.opened) ins.opened++;
@@ -89,8 +109,8 @@ class RequestInsights {
       final h = r.firstSeen.hour;
       ins.byHour[h].add(r);
       ins.byWeekday[r.firstSeen.weekday - 1].add(r);
-      final from = areaOf(r.pickupAddress, zones);
-      final to = areaOf(r.dropoffAddress, zones);
+      final from = area(r.pickupAddress);
+      final to = area(r.dropoffAddress);
       if (from.isNotEmpty) {
         ins.pickupAreas.putIfAbsent(from, Bucket.new).add(r);
         final m = ins.areaByHour.putIfAbsent(h, () => {});
@@ -103,6 +123,23 @@ class RequestInsights {
       }
     }
     return ins;
+  }
+
+  /// The area of [address] for the driver's chosen [source] (see AnalysisPrefs.areaSource).
+  static String rawArea(String address, List<String> zones, String source) {
+    switch (source) {
+      case "ZONES_ONLY":
+        return FareCalculatorEngine.matchZone(address, zones) ?? "";
+      case "PLACE":
+        final zone = FareCalculatorEngine.matchZone(address, zones);
+        if (zone != null) return zone;
+        final clean = address.replaceAll(_plusCode, " ").trim();
+        final open = clean.indexOf('(');
+        final outer = (open >= 0 ? clean.substring(0, open) : clean.split(RegExp(r'[,،]')).first).trim();
+        return outer.isEmpty || _isGeneric(outer) ? areaOf(address, zones) : outer;
+      default:
+        return areaOf(address, zones);
+    }
   }
 
   /// The neighbourhood of an inDrive address, used to group requests by area.

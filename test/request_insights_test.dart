@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:indrive_assistant/data/models/analysis_prefs.dart';
 import 'package:indrive_assistant/data/models/request_record.dart';
 import 'package:indrive_assistant/engine/request_insights.dart';
 
@@ -74,6 +75,58 @@ void main() {
     expect(ins.opened, 1);
     expect(ins.acceptanceRate, 1.0);
     expect(ins.bestAreasAt(18).first.name, "المعادي");
+  });
+
+  group('analysis prefs (area names)', () {
+    test('Arabic and English spellings of a place share a skeleton', () {
+      expect(AnalysisPrefs.skeleton("الحمراء الثانية"), AnalysisPrefs.skeleton("Al Hamraa Ath Thaneyah"));
+      expect(AnalysisPrefs.skeleton("الجمهورية"), AnalysisPrefs.skeleton("El-Gomhoreya"));
+      expect(AnalysisPrefs.skeleton("الحمراء الثانيه"), AnalysisPrefs.skeleton("الحمرا الثانية"));
+      expect(AnalysisPrefs.skeleton("المعادي"), isNot(AnalysisPrefs.skeleton("الدقي")));
+    });
+
+    test('suggestMerges groups same-place names, most requests first', () {
+      final s = AnalysisPrefs.suggestMerges({"Al Hamraa Ath Thaneyah": 2, "الحمراء الثانية": 9, "المعادي": 4});
+      expect(s, [
+        ["الحمراء الثانية", "Al Hamraa Ath Thaneyah"]
+      ]);
+      expect(AnalysisPrefs.suggestMerges({"Al Hamraa Ath Thaneyah": 2, "الحمراء الثانية": 9},
+          ignore: {AnalysisPrefs.skeleton("الحمراء الثانية")}), isEmpty);
+    });
+
+    test('merge, rename chains and unmerge', () {
+      var a = const AnalysisPrefs().merge(["Al Hamraa Ath Thaneyah", "الحمراء الثانية"], "الحمراء الثانية");
+      expect(a.rename("Al Hamraa Ath Thaneyah"), "الحمراء الثانية");
+      a = a.merge(["الحمراء الثانية"], "الحمرا");
+      expect(a.rename("Al Hamraa Ath Thaneyah"), "الحمرا");
+      expect(a.rename("الحمراء الثانية"), "الحمرا");
+      expect(a.unmerge("الحمرا").aliases, isEmpty);
+    });
+
+    test('insights apply merges, hiding, area source and filters', () {
+      final d = DateTime(2026, 10, 20, 18);
+      final list = [
+        rec(d, from: "x (الحمراء الثانية، قسم أول أسيوط، مصر)", to: "y (المعادي، مصر)", status: "OPENED"),
+        rec(d.add(const Duration(minutes: 1)), from: "z (Al Hamraa Ath Thaneyah, Asyut 1)", to: "w (الدقي، مصر)"),
+      ];
+      final merged = const AnalysisPrefs().merge(["Al Hamraa Ath Thaneyah"], "الحمراء الثانية");
+      var ins = RequestInsights.from(list, prefs: merged);
+      expect(ins.pickupAreas.keys, ["الحمراء الثانية"]);
+      expect(ins.pickupAreas["الحمراء الثانية"]!.count, 2);
+      expect(ins.rawAreaCounts.length, 4);
+
+      ins = RequestInsights.from(list, prefs: merged.copyWith(hidden: {"الدقي"}));
+      expect(ins.dropoffAreas.keys, ["المعادي"]);
+
+      ins = RequestInsights.from(list, prefs: const AnalysisPrefs(areaSource: "PLACE"));
+      expect(ins.pickupAreas.keys.toSet(), {"الحمراء الثانية", "Al Hamraa Ath Thaneyah"}); // x / z are too short
+
+      ins = RequestInsights.from(list, prefs: const AnalysisPrefs(areaSource: "ZONES_ONLY"), zones: const ["المعادي"]);
+      expect(ins.pickupAreas, isEmpty);
+      expect(ins.dropoffAreas.keys, ["المعادي"]);
+
+      expect(RequestInsights.from(list, prefs: const AnalysisPrefs(onlyOpened: true)).total.count, 1);
+    });
   });
 
   test('few records give the "not enough data" recommendation', () {

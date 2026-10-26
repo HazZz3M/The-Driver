@@ -189,8 +189,10 @@ class FloatingHudService : Service() {
 
             if (cards.isEmpty()) {
                 clearAllCardPopups()
+                stopSpeechIfGone(emptySet())
                 return@launch
             }
+            stopSpeechIfGone(cards.map { alertKey(it) }.toSet())
 
             val hud = hudPrefs()
 
@@ -1259,34 +1261,79 @@ class FloatingHudService : Service() {
     // NEW-REQUEST ALERT: a vibration per verdict, and (optionally) the verdict spoken aloud,
     // so the driver doesn't have to look at the screen.
     // =========================================================================
+    /** A request's identity for alerts: the same ride on the list and on its Ride-request screen. */
+    private fun alertKey(card: ParsedRideData): String =
+        FareCalculatorEngine.normalizeArabicText(card.pickupAddress) + "|" +
+            FareCalculatorEngine.normalizeArabicText(card.dropoffAddress) + "|" + card.fare.roundToInt()
+
+    /** EXCELLENT | GOOD | POOR | LOSS | UNKNOWN: the driver picks which ones vibrate / are spoken. */
+    private fun levelKey(card: ParsedRideData, a: FareAnalysisResult): String = when {
+        card.distanceUnknown -> "UNKNOWN"
+        a.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT -> "EXCELLENT"
+        a.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT -> "GOOD"
+        a.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> "POOR"
+        else -> "LOSS"
+    }
+
+    // Main thread only.
+    private val alertedKeys = LinkedHashSet<String>()
+    private var spokenKey: String? = null
+
     private fun alertNewRequest(card: ParsedRideData, analysis: FareAnalysisResult) {
         val hud = hudPrefs()
-        if (!hud.vibrate && !hud.speakVerdict) return
-        if (hud.vibrateProfitableOnly) {
-            val profitable = !card.distanceEstimated &&
-                (analysis.profitabilityLevel == ProfitabilityLevel.GOOD_PROFIT ||
-                    analysis.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT)
-            if (!profitable) return
-        }
-        val now = System.currentTimeMillis()
-        if (card.fingerprint == lastVibratedFingerprint && (now - lastVibrateTimestamp) < 15000L) return
-        if (now - lastVibrateTimestamp < 3500L) return
+        val level = levelKey(card, analysis)
+        val wantVibrate = hud.vibrate && level in hud.vibrateLevels.split(',')
+        val wantSpeak = hud.speakVerdict && level in hud.speakLevels.split(',')
+        if (!wantVibrate && !wantSpeak) return
+        // Screens the automation opens (to read the map) are not the driver's: stay quiet.
+        if (hud.muteDuringAutomation && InDriveAccessibilityService.autoOpenActive) return
 
-        lastVibratedFingerprint = card.fingerprint
+        val key = alertKey(card)
+        val now = System.currentTimeMillis()
+        if (hud.alertOncePerRequest) {
+            // A request alerts once, even when it comes back (list → request screen → list).
+            if (key in alertedKeys) return
+        } else if (key == lastVibratedFingerprint && now - lastVibrateTimestamp < 15000L) {
+            return
+        }
+        if (now - lastVibrateTimestamp < 1500L) return // several cards at once: one alert
+
+        alertedKeys.add(key)
+        while (alertedKeys.size > 300) alertedKeys.remove(alertedKeys.first())
+        lastVibratedFingerprint = key
         lastVibrateTimestamp = now
 
-        if (hud.vibrate) vibrateFor(card, analysis)
-        if (hud.speakVerdict) speak(verdictSpeech(card, analysis))
+        if (wantVibrate) vibrate(level, hud.vibrationStrength)
+        if (wantSpeak) {
+            spokenKey = key
+            speak(verdictSpeech(card, analysis, hud.speakDetail), hud.speechRate)
+        }
+    }
+
+    /** Stops the voice when the request it is about is no longer on screen (driver's option). */
+    private fun stopSpeechIfGone(currentKeys: Set<String>) {
+        val key = spokenKey ?: return
+        if (key in currentKeys || !hudPrefs().speakStopWhenGone) return
+        spokenKey = null
+        pendingSpeech = null
+        try { tts?.stop() } catch (_: Exception) {}
     }
 
     /** One short buzz = profitable, two = thin margin, one long = loss, a tap = distance not read. */
-    private fun vibrateFor(card: ParsedRideData, analysis: FareAnalysisResult) {
-        val pattern = when {
-            card.distanceUnknown -> longArrayOf(0, 35)
-            analysis.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER -> longArrayOf(0, 450)
-            analysis.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> longArrayOf(0, 60, 120, 60)
+    private fun vibrate(level: String, strength: String) {
+        val timings = when (level) {
+            "UNKNOWN" -> longArrayOf(0, 35)
+            "LOSS" -> longArrayOf(0, 450)
+            "POOR" -> longArrayOf(0, 60, 120, 60)
             else -> longArrayOf(0, 70)
         }
+        val amp = when (strength) {
+            "LIGHT" -> 70
+            "STRONG" -> 255
+            else -> VibrationEffect.DEFAULT_AMPLITUDE
+        }
+        // Pauses (odd positions in "wait, buzz, wait, buzz…") have amplitude 0.
+        val amplitudes = IntArray(timings.size) { i -> if (i % 2 == 0) 0 else amp }
         try {
             val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
@@ -1294,41 +1341,57 @@ class FloatingHudService : Service() {
                 @Suppress("DEPRECATION")
                 getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
             }
-            vibrator?.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            if (vibrator?.hasAmplitudeControl() == true) {
+                vibrator?.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
+            } else {
+                vibrator?.vibrate(VibrationEffect.createWaveform(timings, -1))
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Vibration failed", e)
         }
     }
 
-    /** Short Arabic phrase for the verdict, e.g. "رابح، صافي 42". */
-    private fun verdictSpeech(card: ParsedRideData, a: FareAnalysisResult): String {
+    /**
+     * Arabic phrase for the verdict. [detail]: VERDICT ("رابح"), NET ("رابح، صافي 42"),
+     * NET_KM ("رابح، صافي 42، المشوار 6 كيلو").
+     */
+    private fun verdictSpeech(card: ParsedRideData, a: FareAnalysisResult, detail: String): String {
         val net = a.netProfit.roundToInt()
         val approx = if (card.distanceEstimated) "تقريباً " else ""
-        return when {
-            card.distanceUnknown -> "طلب جديد، المسافة مش مقروءة"
-            a.isBlacklistedPassenger -> "عميل محظور"
-            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER && a.isBlacklistedZone -> "منطقة محظورة"
-            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER -> "خسارة ${approx}${abs(net)}"
-            a.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> "هامش ضعيف، صافي ${approx}$net"
-            a.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT -> "ممتاز، صافي ${approx}$net"
-            else -> "رابح، صافي ${approx}$net"
+        val verdict = when {
+            card.distanceUnknown -> return "طلب جديد، المسافة مش مقروءة"
+            a.isBlacklistedPassenger -> return "عميل محظور"
+            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER && a.isBlacklistedZone -> return "منطقة محظورة"
+            a.profitabilityLevel == ProfitabilityLevel.LOSS_DANGER -> "خسارة"
+            a.profitabilityLevel == ProfitabilityLevel.POOR_MARGIN -> "هامش ضعيف"
+            a.profitabilityLevel == ProfitabilityLevel.EXCELLENT_PROFIT -> "ممتاز"
+            else -> "رابح"
         }
+        if (detail == "VERDICT") return verdict
+        val money = if (net < 0) "، ${approx}${abs(net)} جنيه" else "، صافي ${approx}$net"
+        if (detail == "NET") return verdict + money
+        return verdict + money + "، المشوار ${card.tripDistanceKm.roundToInt()} كيلو"
     }
 
     // Text-to-speech, created on first use (main thread).
     private var tts: android.speech.tts.TextToSpeech? = null
     private var ttsReady = false
     private var pendingSpeech: String? = null
+    private var pendingRate = 1.0f
 
-    private fun speak(text: String) {
+    private fun speak(text: String, rate: Double) {
         val engine = tts
         if (engine == null) {
             pendingSpeech = text
+            pendingRate = rate.toFloat()
             tts = android.speech.tts.TextToSpeech(applicationContext) { status ->
                 ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS
                 if (ttsReady) {
                     tts?.language = Locale("ar")
-                    pendingSpeech?.let { tts?.speak(it, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict") }
+                    pendingSpeech?.let {
+                        tts?.setSpeechRate(pendingRate)
+                        tts?.speak(it, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict")
+                    }
                 } else {
                     Log.w(TAG, "Text-to-speech unavailable (status $status)")
                 }
@@ -1336,7 +1399,26 @@ class FloatingHudService : Service() {
             }
             return
         }
-        if (ttsReady) engine.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict")
+        if (ttsReady) {
+            engine.setSpeechRate(rate.toFloat().coerceIn(0.5f, 2.0f))
+            engine.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "verdict")
+        }
+    }
+
+    /** "Try it" from the alerts settings page; false when the assistant isn't running. */
+    private fun testAlert(level: String, voice: Boolean) {
+        val hud = hudPrefs()
+        if (voice) {
+            val text = when (level) {
+                "LOSS" -> "خسارة، 12 جنيه"
+                "POOR" -> "هامش ضعيف، صافي 18"
+                "UNKNOWN" -> "طلب جديد، المسافة مش مقروءة"
+                else -> "رابح، صافي 42"
+            }
+            speak(text, hud.speechRate)
+        } else {
+            vibrate(level, hud.vibrationStrength)
+        }
     }
 
     override fun onDestroy() {
@@ -1377,6 +1459,13 @@ class FloatingHudService : Service() {
         }
 
         fun isRunning(): Boolean = activeInstance != null
+
+        /** Plays a sample vibration or voice line for [level]. False when the assistant isn't running. */
+        fun testAlert(level: String, voice: Boolean): Boolean {
+            val service = activeInstance ?: return false
+            service.serviceScope.launch { service.testAlert(level, voice) }
+            return true
+        }
 
         /** Rebuilds the notification so its screen-reading action matches the service state. */
         fun onScreenReadingChanged() {
