@@ -20,11 +20,43 @@ RequestRecord rec(DateTime at, {String from = "", String to = "", String status 
     );
 
 void main() {
-  test('areaOf takes the last part of the address, or a matching zone', () {
-    expect(RequestInsights.areaOf("شارع 9، المعادي", const []), "المعادي");
-    expect(RequestInsights.areaOf("التجمع الخامس - شارع التسعين", const []), "شارع التسعين");
-    expect(RequestInsights.areaOf("كورنيش المعادى", const ["المعادي"]), "المعادي");
-    expect(RequestInsights.areaOf("", const []), "");
+  group('areaOf (real inDrive addresses)', () {
+    String area(String a, [List<String> zones = const []]) => RequestInsights.areaOf(a, zones);
+
+    test('the neighbourhood inside the parentheses, never the country', () {
+      expect(area("التجنيد (الحمراء الثانية، قسم أول أسيوط، مصر)"), "الحمراء الثانية");
+      expect(area("مستشفى سانت ماريا (الحكمدار، حى شرق، مركز أسيوط، مصر)"), "الحكمدار");
+      expect(area("House Cafe (شارع تقسيم الطرابيشي، الوليدية القبلية، قسم ثان أسيوط، مصر)"), "الوليدية القبلية");
+      expect(area("ابراج التوحيد القديمة (يسري راغب، الحمراء الثانية، اول السادات، مصر)"), "الحمراء الثانية");
+      expect(area("Gisr Al Soltan (Al Hamraa Ath Thaneyah, Asyut 1)"), "Al Hamraa Ath Thaneyah");
+      expect(area("Vodafone (El-Gomhoreya, st, Asyut 2)"), "El-Gomhoreya");
+      expect(area("التكية (مول داون تاون، مدينة اسيوط الجديدة، مصر)"), "مدينة اسيوط الجديدة");
+    });
+
+    test('only country / city in the parentheses: the place before them', () {
+      expect(area("الوليدية (مصر)"), "الوليدية");
+      expect(area("الإبراهيمية (مركز أسيوط)"), "الإبراهيمية");
+      expect(area("Al Ibrahimeya (Asyut)"), "Al Ibrahimeya");
+      expect(area("اسيوط الجديدة (Egypt)"), "اسيوط الجديدة");
+    });
+
+    test('no parentheses: last comma part, dashes kept, plus codes dropped', () {
+      expect(area("شارع 9، المعادي"), "المعادي");
+      expect(area("طريق القاهرة - أسوان الصحراوي الشرقي"), "طريق القاهرة - أسوان الصحراوي الشرقي");
+      expect(area("مدينة مبارك"), "مدينة مبارك");
+      expect(area("55PG+444، الهلالي"), "الهلالي");
+    });
+
+    test('a matching zone wins; empty stays empty', () {
+      expect(area("كورنيش المعادى", const ["المعادي"]), "المعادي");
+      expect(area(""), "");
+    });
+
+    test('never returns the country', () {
+      for (final a in ["(دوار العمدة (آل علي (بني مر، الفتح، مصر)", "أسيوط (مصر)", "2070122 (قسم أول أسيوط، مصر)"]) {
+        expect(area(a), isNot(anyOf("مصر", "مصر)", "Egypt")), reason: a);
+      }
+    });
   });
 
   test('peak hours, areas, routes and acceptance are counted', () {

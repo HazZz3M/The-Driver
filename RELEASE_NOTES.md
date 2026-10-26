@@ -1,9 +1,5 @@
-### The Driver v1.18.0 - Auto-hide, auto-open timings, cleaner log
+### The Driver v1.18.1 - Correct areas in the analysis
 
-- **Auto-hide losing or blocked requests (optional).** Settings → القبول التلقائي → الإخفاء التلقائي:
-  - hide losing requests (net profit below zero, only when both distances were read), blocked zones and passengers, or both;
-  - choose the swipe direction (right or left) and the wait before hiding;
-  - list cards are swiped away; a full-screen request is closed with Skip. You're warned before it turns on.
-- **Control the auto-open timings.** When "open requests automatically" is on, you can set how long a request stays open, the pause before opening the next one, and whether to go back as soon as the trip length is read.
-- **Only real requests are logged** (from 1.17.1): other inDrive screens (ride in progress, cancel, rating, balance, income, VAT, top-up, the reply countdown) are no longer saved as rides, and your existing log is cleaned automatically.
-- After updating, if auto-hide doesn't swipe, turn The Driver's screen reading off and on again (it now needs the "perform gestures" ability).
+- **Areas are now the real neighbourhood.** inDrive addresses look like "Place (street, neighbourhood, police district, city, country)". The analysis used the last part, so "مصر)" (the country) was counted as an area. It now takes the neighbourhood, e.g. "التجنيد (الحمراء الثانية، قسم أول أسيوط، مصر)" → "الحمراء الثانية".
+  - The country, police districts (قسم / مركز / أول / ثان), the city ("Asyut 2") and plus codes are never used as an area; streets only when nothing better is left.
+  - Applies to your whole existing log at once (areas are worked out when the analysis is shown).
