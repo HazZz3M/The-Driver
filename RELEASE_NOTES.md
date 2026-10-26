@@ -1,10 +1,7 @@
-### The Driver v1.17.0 - Request log, analysis and recommendations
+### The Driver v1.17.1 - Cleaner request log
 
-- **Every request is logged automatically, on your phone.** Each request card that shows in inDrive is saved with its time, price, distances, addresses and passenger. Opening a request also saves a text snapshot of the whole request screen (like the diagnostic capture) and its bid buttons. Tapping Accept or a bid button in inDrive records the outcome.
-- **New "التحليلات" tab:**
-  - summary: requests per day, accepted, average price and profit per km, your average rating;
-  - recommendations: the best hours to work, peak hours, where to wait right now, the most profitable areas, frequent routes, busiest days, and a price check;
-  - charts by hour and by weekday, top pickup and drop-off areas, and frequent routes.
-- **Rate your rides.** After an accepted ride, once you're back on the requests list, a notification asks you to rate it (stars, quick tags, note). Ratings feed the recommendations.
-- **Save and share the log** as an Excel file (CSV) or a full JSON copy, from the Insights tab. You can also clear it there.
-- The log stays on the phone. It contains passenger names and addresses, so be careful who you share it with.
+- **Only real requests are logged now.** Other inDrive screens were being saved as rides: the ride in progress ("Cancel ride", "Navigate", "Waiting time"), cancel and rating dialogs, balance / income / VAT / top-up / tier screens, notifications, and the "Wait for the reply" countdown. A screen is now treated as a request only when it really shows one (inDrive's request fields, or an Accept / Offer button).
+- **The countdown is no longer taken as an address** ("31 sec."), so one request no longer becomes a new record every second.
+- **Your existing log is cleaned automatically** the first time the app reads it after the update, so the analysis and recommendations reflect real requests only.
+- Text snapshots of request screens no longer include map markers and internal ids.
+- The floating badge no longer appears on those other screens either.
