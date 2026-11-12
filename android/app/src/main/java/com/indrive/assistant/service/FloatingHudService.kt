@@ -1430,7 +1430,7 @@ class FloatingHudService : Service() {
 
     // Main thread only.
     private var mapWindow: LinearLayout? = null
-    private var mapView: RequestBoardView? = null
+    private var mapView: LiveMapView? = null
     private var mapParams: WindowManager.LayoutParams? = null
     private var mapBubble: TextView? = null
     private var mapBubbleParams: WindowManager.LayoutParams? = null
@@ -1481,7 +1481,7 @@ class FloatingHudService : Service() {
         val density = resources.displayMetrics.density
         fun dp(v: Float) = (v * density).toInt()
 
-        val view = RequestBoardView(this, compact = true)
+        val view = LiveMapView(this, compact = true)
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1489,7 +1489,7 @@ class FloatingHudService : Service() {
             setBackgroundColor(Color.parseColor(COLOR_INK))
         }
         header.addView(TextView(this).apply {
-            text = "⠿  لوحة الطلبات"
+            text = "⠿  خريطة الطلبات"
             setTextColor(Color.WHITE)
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
@@ -1596,7 +1596,7 @@ class FloatingHudService : Service() {
     private fun updateBubbleCount() {
         val bubble = mapBubble ?: return
         val n = LiveRequests.snapshot(hudPrefs().liveMapKeepSeconds * 1000L).count { it.onScreen }
-        bubble.text = if (n > 0) "📋\n$n" else "📋"
+        bubble.text = if (n > 0) "🗺\n$n" else "🗺"
     }
 
     /** Drags [target]'s window by [handle]; a tap without movement runs [onTap]. */

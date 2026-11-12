@@ -199,13 +199,15 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     private fun feedLiveMap(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         if (!InDriveAssistantApp.instance.repository.getHudPrefs().liveMapEnabled) return
+        // The driver's position ties inDrive's map to the real one (needs the location permission).
+        if (DriverLocation.last == null) mainHandler.post { DriverLocation.start(applicationContext) }
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
         LiveRequests.update(rides.map { it to analyze(it, settings) }, onRequestScreen)
     }
 
     /** The driver's action from the board, being carried out. Worker thread only. */
     private class PendingBoard(val key: String, val action: String, val value: Int, val until: Long) {
-        /** CUSTOM price: 0 = press "Offer your fare", 1 = type the price, 2 = press the send button. */
+        /** Sideways scrolls of the price buttons tried while looking for the chosen price. */
         var stage = 0
         var stageAt = 0L
         var opens = 0
@@ -306,20 +308,14 @@ class InDriveAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Moves the pending board action one step on the current screen: open the request (going
-     * back first if another one is open), then accept / press the bid / type the price.
+     * Moves the pending action one step on the current screen: open the request (going back
+     * first if another one is open), then accept / press the price button.
      */
     private fun continueBoardAction(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         val p = pendingBoard ?: return
         val now = System.currentTimeMillis()
         if (now > p.until) {
-            if (p.action == MAP_CUSTOM) {
-                // Unknown layout of the offer screen: the next screen read is saved for diagnosis.
-                captureRequested = true
-                failBoardAction(p, "معرفتش أبعت السعر. اتسجلت لقطة تشخيص في التطبيق، ابعتها للمطور")
-            } else {
-                failBoardAction(p, "معرفتش أكمّل: الطلب ممكن يكون اختفى")
-            }
+            failBoardAction(p, "معرفتش أكمّل: الطلب ممكن يكون اختفى")
             return
         }
         val card = rides.firstOrNull { LiveRequests.keyOf(it) == p.key }
@@ -345,71 +341,46 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
         val screen = Rect().also { root.getBoundsInScreen(it) }
         when (p.action) {
+            MAP_OPEN -> {
+                pendingBoard = null
+                LiveRequests.setStatus(p.key, LiveRequests.STATUS_LIVE)
+            }
             MAP_ACCEPT -> {
                 pendingBoard = null
                 if (clickAcceptButtonInside(root, screen)) onBoardAccepted(card)
                 else failBoardAction(p, "مش لاقي زرار القبول في الطلب")
             }
             MAP_BID -> {
-                val chip = card.bidChips.firstOrNull { it.value == p.value }
+                // Read the buttons on screen now (the list kept by the map may include hidden ones).
+                val chip = findBidChips(root, card.fare).firstOrNull { it.value == p.value }
                 if (chip == null) {
-                    // The bid buttons may still be drawing: wait a little, then give up.
-                    if (now - p.stageAt > 1500 && p.stageAt != 0L) failBoardAction(p, "العرض ${p.value} مش موجود في الطلب")
-                    else {
-                        if (p.stageAt == 0L) p.stageAt = now
-                        worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+                    // inDrive's price buttons scroll sideways: bring the others into view, then give up.
+                    if (now - p.stageAt > BOARD_RETRY_MS) {
+                        p.stage++
+                        p.stageAt = now
+                        if (p.stage > 4 || !scrollPriceButtons(root, forward = p.stage <= 2)) {
+                            failBoardAction(p, "السعر ${p.value} مش موجود في أزرار إن درايف")
+                            return
+                        }
                     }
+                    worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
                     return
                 }
                 pendingBoard = null
                 if (clickNodeAt(root, chip.bounds)) onBoardBidSent(card, p.value)
-                else failBoardAction(p, "معرفتش أضغط على العرض")
+                else failBoardAction(p, "معرفتش أضغط على السعر")
             }
-            MAP_CUSTOM -> continueCustomPrice(root, card, p, now)
         }
     }
 
-    /** "Offer your fare" → type the price → send. Each step waits for the screen to react. */
-    private fun continueCustomPrice(root: AccessibilityNodeInfo, card: ParsedRideData, p: PendingBoard, now: Long) {
-        if (now - p.stageAt < BOARD_STEP_MS) {
-            worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
-            return
-        }
-        val text = p.value.toString()
-        when (p.stage) {
-            0 -> {
-                // The price field may already be on screen; otherwise press "Offer your fare".
-                if (setTextInEditable(root, text)) {
-                    p.stage = 2
-                } else if (clickFirst(root) { label -> OFFER_FIELD_LABELS.any { label.contains(it) } }) {
-                    p.stage = 1
-                }
-            }
-            1 -> if (setTextInEditable(root, text)) p.stage = 2
-            2 -> {
-                val sent = clickFirst(root) { label ->
-                    label in SEND_OFFER_LABELS || (label.startsWith("offer") && label.contains(text)) ||
-                        (label.startsWith("اقترح") && label.contains(text))
-                }
-                if (sent) {
-                    pendingBoard = null
-                    onBoardBidSent(card, p.value)
-                    return
-                }
-            }
-        }
-        p.stageAt = now
-        worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
-    }
-
-    /** Types [text] into the first visible editable field. */
-    private fun setTextInEditable(root: AccessibilityNodeInfo, text: String): Boolean {
+    /** Scrolls inDrive's row of price buttons sideways. False when there is no such row. */
+    private fun scrollPriceButtons(root: AccessibilityNodeInfo, forward: Boolean): Boolean {
         val seen = mutableListOf<AccessibilityNodeInfo>()
-        var field: AccessibilityNodeInfo? = null
+        var row: AccessibilityNodeInfo? = null
         fun visit(node: AccessibilityNodeInfo) {
-            if (field != null) return
-            if (node.isEditable && node.isVisibleToUser && node.isEnabled) {
-                field = node
+            if (row != null) return
+            if (node.viewIdResourceName?.endsWith(":id/common_layout_buttons_scroll_view") == true) {
+                row = node
                 return
             }
             for (i in 0 until node.childCount) {
@@ -420,43 +391,9 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
         return try {
             visit(root)
-            val f = field ?: return false
-            f.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val args = android.os.Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            f.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        } finally {
-            seen.forEach { it.recycle() }
-        }
-    }
-
-    /** Clicks the first visible node whose label (lower case, digits normalised) matches. */
-    private fun clickFirst(root: AccessibilityNodeInfo, matches: (String) -> Boolean): Boolean {
-        val seen = mutableListOf<AccessibilityNodeInfo>()
-        var target: AccessibilityNodeInfo? = null
-        fun visit(node: AccessibilityNodeInfo) {
-            if (target != null) return
-            val label = normalizeArabicDigits("${node.text ?: node.contentDescription ?: ""}".trim()).lowercase()
-            if (label.isNotEmpty() && node.isVisibleToUser && matches(label)) {
-                target = node
-                return
-            }
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                seen.add(child)
-                visit(child)
-            }
-        }
-        return try {
-            visit(root)
-            var t = target
-            var depth = 0
-            while (t != null && !t.isClickable && depth < 4) {
-                t = t.parent?.also { seen.add(it) }
-                depth++
-            }
-            t != null && t.isClickable && t.isEnabled && t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            row?.performAction(
+                if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            ) ?: false
         } finally {
             seen.forEach { it.recycle() }
         }
@@ -493,19 +430,24 @@ class InDriveAccessibilityService : AccessibilityService() {
         if (st.attempts >= MAX_SNAP_ATTEMPTS) return false
 
         val screen = Rect().also { root.getBoundsInScreen(it) }
-        val mapBottom = card.screenBounds?.top ?: (screen.top + screen.height() / 2)
-        val map = Rect(screen.left, screen.top, screen.right, mapBottom)
-        if (map.height() < 200) return false
         val markers = findMapMarkers(root)
         val a = markers.pointA
         val b = markers.pointB
+        // The map's visible part ends where the request's sheet starts.
+        val mapBottom = markers.mapBottom ?: card.screenBounds?.top ?: (screen.top + screen.height() / 2)
+        val map = Rect(screen.left, screen.top, screen.right, mapBottom)
+        if (map.height() < 200) return false
 
         // Give the map a moment to draw the route once its markers are there.
         if (a == null && b == null && now - st.openedAt < SNAP_NO_MARKERS_WAIT_MS) {
             worker.postDelayed({ requestRescan() }, 150)
             return false
         }
-        if (st.markersAt == 0L) st.markersAt = now
+        if (st.markersAt == 0L) {
+            st.markersAt = now
+            // Opened by the app: show inDrive's hidden price buttons too (read while the map settles).
+            if (autoOpenKey != null && autoOpenKey == rideKey(card)) scrollPriceButtons(root, forward = true)
+        }
         val settleUntil = maxOf(st.markersAt + SNAP_SETTLE_MS, st.zoomAt + SNAP_ZOOM_SETTLE_MS)
         if (now < settleUntil) {
             worker.postDelayed({ requestRescan() }, settleUntil - now + 20)
@@ -514,7 +456,7 @@ class InDriveAccessibilityService : AccessibilityService() {
 
         // Long trip: A or B outside the visible map (or under the sheet): zoom out and look again.
         val inner = Rect(map).apply { inset(map.width() / 14, map.height() / 14) }
-        val cut = a == null || b == null || listOf(a, b).any { !inner.contains(it.centerX(), it.centerY()) }
+        val cut = a == null || b == null || listOfNotNull(a, b, markers.car).any { !inner.contains(it.centerX(), it.centerY()) }
         if (cut && st.zooms < MAX_SNAP_ZOOMS && pinchOut(map)) {
             st.zooms++
             st.zoomAt = now
@@ -534,7 +476,13 @@ class InDriveAccessibilityService : AccessibilityService() {
         if (ocrRegion != null && ocrKey != null) ocrAttempts[ocrKey] = (ocrAttempts[ocrKey] ?: 0) + 1
         st.attempts++
         ocrInFlight = true
-        captureRequest(key, region, ocrKey, ocrRegion)
+        val job = CaptureJob(
+            key, region, map, markers.car, a, b,
+            exclude = markers.infoWindows + listOfNotNull(a, b, markers.car),
+            pickupKm = card.pickupDistanceKm.takeIf { card.pickupKnown },
+            tripKm = card.tripDistanceKm.takeIf { card.tripKnown }
+        )
+        captureRequest(job, ocrKey, ocrRegion)
         return true
     }
 
@@ -1072,26 +1020,42 @@ class InDriveAccessibilityService : AccessibilityService() {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun captureAndRead(key: String, region: Rect) = captureRequest(null, null, key, region)
+    private fun captureAndRead(key: String, region: Rect) = captureRequest(null, key, region)
 
     /**
-     * One screenshot for both: the board's snapshot of the trip map ([snapRegion], stored for
-     * [snapKey]) and the trip-length OCR ([ocrRegion], learned for [ocrKey]). Either may be null.
+     * What one Ride-request screenshot is used for on the live map: the picture of inDrive's map
+     * ([snapRegion]) and placing the request on the real map (markers, route colours, distances).
+     */
+    private class CaptureJob(
+        val key: String,
+        val snapRegion: Rect,
+        val map: Rect,
+        val car: Rect?,
+        val a: Rect?,
+        val b: Rect?,
+        val exclude: List<Rect>,
+        val pickupKm: Double?,
+        val tripKm: Double?
+    )
+
+    /**
+     * One screenshot for the live map [job] and/or the trip-length OCR ([ocrRegion], learned for
+     * [ocrKey]). Either may be null.
      */
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun captureRequest(snapKey: String?, snapRegion: Rect?, ocrKey: String?, ocrRegion: Rect?) {
-        // Our own windows (the floating board, badges) would cover inDrive's map in the picture:
+    private fun captureRequest(job: CaptureJob?, ocrKey: String?, ocrRegion: Rect?) {
+        // Our own windows (the floating map, badges) would cover inDrive's map in the picture:
         // hide them for a moment, take the shot once they're gone from the screen, show them again.
         if (FloatingHudService.isRunning()) {
             FloatingHudService.setOverlaysHidden(true)
-            worker.postDelayed({ takeRequestShot(snapKey, snapRegion, ocrKey, ocrRegion) }, OVERLAY_HIDE_MS)
+            worker.postDelayed({ takeRequestShot(job, ocrKey, ocrRegion) }, OVERLAY_HIDE_MS)
         } else {
-            takeRequestShot(snapKey, snapRegion, ocrKey, ocrRegion)
+            takeRequestShot(job, ocrKey, ocrRegion)
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun takeRequestShot(snapKey: String?, snapRegion: Rect?, ocrKey: String?, ocrRegion: Rect?) {
+    private fun takeRequestShot(job: CaptureJob?, ocrKey: String?, ocrRegion: Rect?) {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, workerExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
@@ -1109,16 +1073,16 @@ class InDriveAccessibilityService : AccessibilityService() {
                         ocrInFlight = false
                         return
                     }
-                    if (snapKey != null && snapRegion != null) {
-                        cropSafely(full, snapRegion)?.let { LiveRequests.setSnapshot(snapKey, scaleForBoard(it)) }
-                        requestRescan() // auto-open can go back now
-                    }
+                    if (job != null) cropSafely(full, job.snapRegion)?.let { LiveRequests.setSnapshot(job.key, scaleForBoard(it)) }
                     val crop = if (ocrKey != null && ocrRegion != null) cropSafely(full, ocrRegion) else null
                     if (crop == null || ocrKey == null || ocrRegion == null) {
+                        if (job != null) placeOnMap(job, full, job.tripKm)
                         ocrInFlight = false
+                        requestRescan() // auto-open can go back now
                         return
                     }
-                    readTripLength(ocrKey, ocrRegion, crop)
+                    // The trip length read now also gives the map's scale.
+                    readTripLength(ocrKey, ocrRegion, crop) { km -> if (job != null) placeOnMap(job, full, km ?: job.tripKm) }
                 }
 
                 override fun onFailure(errorCode: Int) {
@@ -1126,7 +1090,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                     FloatingHudService.setOverlaysHidden(false)
                     lastOcrLog = "screenshot failed: code=$errorCode"
                     ocrInFlight = false
-                    if (snapKey != null) worker.postDelayed({ requestRescan() }, 400)
+                    if (job != null) worker.postDelayed({ requestRescan() }, 400)
                 }
             })
         } catch (e: Exception) {
@@ -1136,12 +1100,30 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** Pickup, destination and routes in real coordinates (needs the driver's GPS position). */
+    private fun placeOnMap(job: CaptureJob, full: Bitmap, tripKm: Double?) {
+        val me = DriverLocation.recent()
+        if (me == null || job.car == null || job.a == null || job.b == null) {
+            lastGeoLog = "not placed: gps=${me != null} car=${job.car != null} A=${job.a != null} B=${job.b != null}"
+            return
+        }
+        try {
+            val geo = RouteLocator.locate(full, job.map, job.car, job.a, job.b, job.exclude, me, job.pickupKm, tripKm)
+            if (geo != null) LiveRequests.setGeo(job.key, geo)
+            lastGeoLog = if (geo == null) "not placed: no scale" else
+                "placed: ${"%.2f".format(java.util.Locale.US, geo.metersPerPixel)} m/px, trip pts=${geo.trip.size}, approach pts=${geo.approach.size}"
+            Log.i(TAG, "Live map: $lastGeoLog")
+        } catch (e: Exception) {
+            Log.w(TAG, "Placing the request failed", e)
+        }
+    }
+
     private fun scaleForBoard(src: Bitmap): Bitmap {
         if (src.width <= SNAP_WIDTH) return src
         return Bitmap.createScaledBitmap(src, SNAP_WIDTH, (src.height.toLong() * SNAP_WIDTH / src.width).toInt().coerceAtLeast(1), true)
     }
 
-    private fun readTripLength(key: String, region: Rect, crop: Bitmap) {
+    private fun readTripLength(key: String, region: Rect, crop: Bitmap, then: ((Double?) -> Unit)? = null) {
         textRecognizer.process(InputImage.fromBitmap(crop, 0))
             .addOnSuccessListener(workerExecutor) { visionText ->
                 val raw = visionText.text.replace('\n', ' ')
@@ -1154,17 +1136,20 @@ class InDriveAccessibilityService : AccessibilityService() {
                     if (InDriveAssistantApp.instance.repository.getHudPrefs().tripFromHistory) {
                         TripDistanceResolver.learn(applicationContext, key, km)
                     }
-                    // Re-parse now so the badge switches from "≈" to the real value.
-                    if (!scanScheduled) {
-                        scanScheduled = true
-                        worker.post(scanRunnable)
-                    }
                 }
+                then?.invoke(km)
                 ocrInFlight = false
+                // Re-parse now so the badge switches from "≈" to the real value (and auto-open can go back).
+                if (!scanScheduled) {
+                    scanScheduled = true
+                    worker.post(scanRunnable)
+                }
             }
             .addOnFailureListener(workerExecutor) { e ->
                 lastOcrLog = "region=${region.toShortString()} OCR failed: ${e.message}"
+                then?.invoke(null)
                 ocrInFlight = false
+                requestRescan()
             }
     }
 
@@ -1197,6 +1182,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 .append('\n')
         }
         sb.append("== MAP OCR ==\n").append(lastOcrLog).append('\n')
+        sb.append("== LIVE MAP ==\n").append(lastGeoLog).append('\n')
         sb.append("== NODE TREE ==\n")
         val count = intArrayOf(0)
         dumpNode(root, 0, sb, count)
@@ -1452,18 +1438,14 @@ class InDriveAccessibilityService : AccessibilityService() {
         const val MAP_ACCEPT = "ACCEPT"
         const val MAP_HIDE = "HIDE"
         const val MAP_BID = "BID"
-        /** The driver's own price, typed into inDrive's "Offer your fare" field. */
-        const val MAP_CUSTOM = "CUSTOM"
+        /** Just open the request in inDrive (its price buttons then show on the map). */
+        const val MAP_OPEN = "OPEN"
         /** A board action gives up after this long (request gone, unknown screen). */
         private const val BOARD_ACTION_TIMEOUT_MS = 9000L
         /** Pause between two steps of a board action (the screen needs to react). */
         private const val BOARD_STEP_MS = 280L
         /** A tap that didn't open / close a screen is retried after this long. */
         private const val BOARD_RETRY_MS = 900L
-        /** "Offer your fare" button on the request screen (lower case, contains). */
-        private val OFFER_FIELD_LABELS = listOf("offer your fare", "offer your price", "your offer", "اقترح سعرك", "اعرض سعرك", "اقترح سعر", "سعرك")
-        /** The button that sends the typed price (lower case, whole label). */
-        private val SEND_OFFER_LABELS = setOf("offer", "send", "send offer", "done", "ok", "confirm", "اقترح", "إرسال", "ارسال", "تم", "تأكيد", "تاكيد", "اعرض")
 
         // Board snapshots: wait for the route to draw, zoom out for long trips (a few times at most).
         private const val SNAP_SETTLE_MS = 350L
@@ -1481,7 +1463,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val BOARD_OPEN_GAP_MS = 400L
 
         /**
-         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_BID] or [MAP_CUSTOM] with
+         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_OPEN] or [MAP_BID] with
          * [value]) for the request [key] (LiveRequests.keyOf). False when screen reading is off.
          */
         fun mapAction(key: String, action: String, value: Int = 0): Boolean {
@@ -1765,12 +1747,28 @@ class InDriveAccessibilityService : AccessibilityService() {
         @Volatile
         var lastOcrLog: String = "no OCR attempt yet"
 
-        private class MapMarkers(val infoWindows: List<Rect>, val pointA: Rect?, val pointB: Rect?)
+        /** Last attempt to place a request on the live map, included in the diagnostic dump. */
+        @Volatile
+        var lastGeoLog: String = "no request placed yet"
+
+        /**
+         * [car] is the driver's car marker; [mapBottom] the top of the sheet covering the map's
+         * lower part (null when not found).
+         */
+        private class MapMarkers(
+            val infoWindows: List<Rect>,
+            val pointA: Rect?,
+            val pointB: Rect?,
+            val car: Rect? = null,
+            val mapBottom: Int? = null
+        )
 
         private fun findMapMarkers(root: AccessibilityNodeInfo): MapMarkers {
             val windows = mutableListOf<Rect>()
             var a: Rect? = null
             var b: Rect? = null
+            var car: Rect? = null
+            var sheetTop: Int? = null
             fun visit(node: AccessibilityNodeInfo) {
                 val desc = node.contentDescription?.toString() ?: ""
                 if (desc.isNotEmpty()) {
@@ -1780,7 +1778,11 @@ class InDriveAccessibilityService : AccessibilityService() {
                         desc.contains("_info_window_") -> if (r.width() > 0 && r.height() > 0) windows.add(r)
                         desc.endsWith("_PointA") -> a = r
                         desc.endsWith("_PointB") -> b = r
+                        desc.endsWith("_CarIcon") -> car = r
                     }
+                }
+                if (sheetTop == null && node.viewIdResourceName?.endsWith(":id/order_container_info") == true) {
+                    sheetTop = Rect().also { node.getBoundsInScreen(it) }.top
                 }
                 for (i in 0 until node.childCount) {
                     val child = node.getChild(i) ?: continue
@@ -1789,7 +1791,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 }
             }
             visit(root)
-            return MapMarkers(windows, a, b)
+            return MapMarkers(windows, a, b, car, sheetTop)
         }
 
         private fun distanceSq(r1: Rect, r2: Rect): Long {

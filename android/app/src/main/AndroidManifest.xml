@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Live map: the driver's position ties inDrive's map to the real one (asked only when used) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Package Visibility for URL Launcher and External Browsers -->
     <queries>
@@ -62,11 +66,11 @@
                 android:resource="@style/Theme.InDriveAssistant" />
         </activity>
 
-        <!-- Requests board (full screen, or next to inDrive in split screen) -->
+        <!-- Live requests map (full screen, or next to inDrive in split screen) -->
         <activity
             android:name=".LiveMapActivity"
             android:exported="false"
-            android:label="لوحة الطلبات"
+            android:label="خريطة الطلبات"
             android:resizeableActivity="true"
             android:launchMode="singleTask"
             android:taskAffinity="com.indrive.assistant.livemap"

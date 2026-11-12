@@ -72,6 +72,16 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(true)
                 }
+                "hasLocationPermission" -> result.success(com.indrive.assistant.service.DriverLocation.hasPermission(this))
+                "requestLocationPermission" -> {
+                    if (!com.indrive.assistant.service.DriverLocation.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        requestPermissions(
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                            REQUEST_LOCATION
+                        )
+                    }
+                    result.success(true)
+                }
                 "clearLiveMap" -> {
                     com.indrive.assistant.service.LiveRequests.clear()
                     result.success(true)
@@ -198,5 +208,6 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val REQUEST_NOTIFICATIONS = 4001
+        private const val REQUEST_LOCATION = 4002
     }
 }

@@ -32,9 +32,9 @@ class SettingsScreen extends StatelessWidget {
             const SectionLabel("المساعد العائم"),
             SettingsGroup(children: [
               NavTile(
-                icon: Icons.view_agenda_outlined,
+                icon: Icons.map_outlined,
                 color: AppColors.accentCyan,
-                title: "لوحة الطلبات",
+                title: "خريطة الطلبات",
                 subtitle: LiveMapPage.summary(hud),
                 onTap: () => _open(context, const LiveMapPage()),
               ),

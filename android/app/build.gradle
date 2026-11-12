@@ -111,4 +111,7 @@ dependencies {
     // On-device text recognition (bundled Latin model, no Google Play services needed):
     // reads the trip length inDrive draws on the "Ride request" map.
     implementation "com.google.mlkit:text-recognition:16.0.1"
+
+    // Live requests map: OpenStreetMap tiles, no API key.
+    implementation "org.osmdroid:osmdroid-android:6.1.20"
 }

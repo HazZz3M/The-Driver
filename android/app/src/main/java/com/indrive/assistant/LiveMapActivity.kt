@@ -12,9 +12,10 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.indrive.assistant.service.DriverLocation
 import com.indrive.assistant.service.FloatingHudService
 import com.indrive.assistant.service.InDriveAccessibilityService
-import com.indrive.assistant.service.RequestBoardView
+import com.indrive.assistant.service.LiveMapView
 
 /**
  * The requests board as a screen of its own: next to inDrive in split screen ([EXTRA_SPLIT]),
@@ -23,11 +24,11 @@ import com.indrive.assistant.service.RequestBoardView
  */
 class LiveMapActivity : Activity() {
 
-    private lateinit var board: RequestBoardView
+    private lateinit var board: LiveMapView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        board = RequestBoardView(this, compact = false)
+        board = LiveMapView(this, compact = false)
 
         val density = resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
@@ -49,7 +50,7 @@ class LiveMapActivity : Activity() {
             setBackgroundColor(Color.parseColor("#0B0F17"))
             setPadding(dp(8), dp(8), dp(8), dp(8))
             addView(TextView(context).apply {
-                text = "لوحة الطلبات"
+                text = "خريطة الطلبات"
                 setTextColor(Color.WHITE)
                 textSize = 16f
                 typeface = Typeface.DEFAULT_BOLD
@@ -69,6 +70,13 @@ class LiveMapActivity : Activity() {
         if (!InDriveAccessibilityService.isRunning()) {
             Toast.makeText(this, "قراءة الشاشة متوقفة: الطلبات مش هتظهر هنا", Toast.LENGTH_LONG).show()
         }
+        // The driver's position places the requests on the map.
+        if (!DriverLocation.hasPermission(this) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
+                REQUEST_LOCATION
+            )
+        }
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SPLIT, false)) openInDrive(adjacent = true)
     }
 
@@ -86,6 +94,11 @@ class LiveMapActivity : Activity() {
         isShowing = false
         board.stop()
         FloatingHudService.refreshFloatingMap()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_LOCATION) DriverLocation.start(this)
     }
 
     override fun onDestroy() {
@@ -123,6 +136,7 @@ class LiveMapActivity : Activity() {
 
     companion object {
         const val EXTRA_SPLIT = "split"
+        private const val REQUEST_LOCATION = 41
 
         /** True while the board screen is in front (the floating board steps aside then). */
         @Volatile

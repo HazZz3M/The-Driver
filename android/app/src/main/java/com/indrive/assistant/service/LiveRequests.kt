@@ -80,8 +80,10 @@ object LiveRequests {
                 if (e == null) {
                     entries[key] = Entry(key, card, analysis, now, now, true)
                 } else {
-                    // The Ride-request screen knows more (bid buttons, the trip length): keep it.
-                    e.card = if (!onRequestScreen && e.card.bidChips.isNotEmpty()) card.copy(bidChips = e.card.bidChips) else card
+                    // The Ride-request screen knows more (bid buttons, the trip length): keep it. Its
+                    // price buttons scroll sideways, so all the ones seen so far are kept.
+                    val chips = (card.bidChips + e.card.bidChips).distinctBy { it.value }.sortedBy { it.value }
+                    e.card = card.copy(bidChips = chips)
                     e.analysis = analysis
                     e.lastSeen = now
                     e.onScreen = true
@@ -121,6 +123,20 @@ object LiveRequests {
         changed()
     }
 
+    /** Where each request is on the real map (from inDrive's own map), by key. Guarded by this. */
+    private val geos = LinkedHashMap<String, RouteLocator.Geo>()
+
+    fun setGeo(key: String, geo: RouteLocator.Geo) {
+        synchronized(this) {
+            geos.remove(key)
+            geos[key] = geo
+            while (geos.size > MAX_SNAPSHOTS) geos.remove(geos.keys.first())
+        }
+        changed()
+    }
+
+    fun geoOf(key: String): RouteLocator.Geo? = synchronized(this) { geos[key] }
+
     fun hasSnapshot(key: String): Boolean = synchronized(this) { snapshots.containsKey(key) }
 
     fun snapshotOf(key: String): Bitmap? = synchronized(this) { snapshots[key] }
@@ -138,6 +154,7 @@ object LiveRequests {
         synchronized(this) {
             entries.clear()
             snapshots.clear()
+            geos.clear()
         }
         changed()
     }

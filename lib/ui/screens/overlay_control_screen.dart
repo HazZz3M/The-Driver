@@ -284,10 +284,10 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
               const SectionLabel("التخصيص"),
               SettingsGroup(children: [
                 NavTile(
-                  icon: Icons.view_agenda_outlined,
+                  icon: Icons.map_outlined,
                   color: AppColors.accentCyan,
-                  title: "لوحة الطلبات",
-                  subtitle: "كل الطلبات بصورة مسارها، واقبل أو اعرض سعرك منها",
+                  title: "خريطة الطلبات",
+                  subtitle: "الركاب ورايحين فين على خريطة، واقبل أو اعرض سعر منها",
                   trailingText: LiveMapPage.summary(hud),
                   onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LiveMapPage())),
                 ),
