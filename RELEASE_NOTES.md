@@ -20,4 +20,6 @@
   - **split screen next to inDrive, both live** (tested on a real phone);
   - full screen.
 - **Needs the location permission:** "While using the app" is enough, since the assistant's service now keeps the location while inDrive is in front.
-- **Note:** inDrive has no field for typing your own price. You can only offer from its own price buttons, and the map shows all of them.
+- **Your own price from the map:**
+  - Tap "سعر تاني", set the price with −10 / −5 / +5 / +10 (the net shows live), then tap "ابعت".
+  - The app opens inDrive's ✎ price sheet, types the price and presses Offer.

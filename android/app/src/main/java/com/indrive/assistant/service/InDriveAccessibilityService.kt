@@ -318,6 +318,15 @@ class InDriveAccessibilityService : AccessibilityService() {
             failBoardAction(p, "معرفتش أكمّل: الطلب ممكن يكون اختفى")
             return
         }
+        // The own-price sheet is a window of its own (no request on it): carry on typing there.
+        if (p.action == MAP_CUSTOM) {
+            val sheet = findById(root, ID_PRICE_FIELD)
+            if (sheet != null) {
+                sheet.recycle()
+                continueCustomPrice(root, p, now)
+                return
+            }
+        }
         val card = rides.firstOrNull { LiveRequests.keyOf(it) == p.key }
         if (!onRequestScreen) {
             // On the list: open the request (again if a tap didn't take).
@@ -370,7 +379,106 @@ class InDriveAccessibilityService : AccessibilityService() {
                 if (clickNodeAt(root, chip.bounds)) onBoardBidSent(card, p.value)
                 else failBoardAction(p, "معرفتش أضغط على السعر")
             }
+            MAP_CUSTOM -> continueCustomPrice(root, p, now)
         }
+    }
+
+    /**
+     * The driver's own price: inDrive's ✎ button (last of the price buttons) opens a sheet with a
+     * price field and "Offer". Types the price there and presses Offer.
+     */
+    private fun continueCustomPrice(root: AccessibilityNodeInfo, p: PendingBoard, now: Long) {
+        if (now - p.stageAt < BOARD_STEP_MS) {
+            worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+            return
+        }
+        p.stageAt = now
+        val field = findById(root, ID_PRICE_FIELD)
+        if (field != null) {
+            val typed = try {
+                field.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                val args = android.os.Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, p.value.toString())
+                }
+                field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            } finally {
+                field.recycle()
+            }
+            if (!typed) return failBoardAction(p, "معرفتش أكتب السعر")
+            // Press Offer once the field shows the price.
+            worker.postDelayed({ pressOffer(p) }, BOARD_STEP_MS)
+            return
+        }
+        // The ✎ button: a price button without a price; it may be scrolled out of view.
+        val pencil = findPencil(root)
+        if (pencil != null) {
+            pencil.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            pencil.recycle()
+        } else if (p.stage < 3) {
+            p.stage++
+            scrollPriceButtons(root, forward = true)
+        } else {
+            return failBoardAction(p, "مش لاقي زرار السعر بتاعك في إن درايف")
+        }
+        worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+    }
+
+    private fun pressOffer(p: PendingBoard) {
+        if (pendingBoard !== p) return
+        val root = inDriveRoot() ?: return failBoardAction(p, "إن درايف اختفى")
+        try {
+            val button = findById(root, ID_SET_OFFER)
+            if (button == null) return failBoardAction(p, "مش لاقي زرار Offer")
+            val ok = try {
+                button.isEnabled && button.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            } finally {
+                button.recycle()
+            }
+            pendingBoard = null
+            val card = lastRides.firstOrNull { LiveRequests.keyOf(it) == p.key }
+            if (ok && card != null) onBoardBidSent(card, p.value)
+            else if (ok) {
+                LiveRequests.setStatus(p.key, LiveRequests.STATUS_BID_SENT, "عرضت ${p.value}")
+                toast("تم إرسال عرض ${p.value} ج.م")
+            } else failBoardAction(p, "معرفتش أضغط Offer")
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /** First node with resource id ending in ":id/[id]" (the caller recycles it), or null. */
+    private fun findById(root: AccessibilityNodeInfo, id: String): AccessibilityNodeInfo? {
+        val found = root.findAccessibilityNodeInfosByViewId("$INDRIVE_ID_PREFIX$id")
+        if (!found.isNullOrEmpty()) {
+            found.drop(1).forEach { it.recycle() }
+            return found[0]
+        }
+        // Another inDrive package name: match the id's end.
+        var hit: AccessibilityNodeInfo? = null
+        fun visit(node: AccessibilityNodeInfo) {
+            if (hit != null) return
+            if (node.viewIdResourceName?.endsWith(":id/$id") == true) {
+                hit = AccessibilityNodeInfo.obtain(node)
+                return
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                visit(child)
+                child.recycle()
+            }
+        }
+        visit(root)
+        return hit
+    }
+
+    /** inDrive's ✎ (own price) button: a price button with no price on it. */
+    private fun findPencil(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val all = root.findAccessibilityNodeInfosByViewId("$INDRIVE_ID_PREFIX$ID_PRICE_BUTTON") ?: return null
+        var pencil: AccessibilityNodeInfo? = null
+        for (n in all) {
+            if (pencil == null && n.text.isNullOrBlank() && n.isVisibleToUser && n.isClickable) pencil = n else n.recycle()
+        }
+        return pencil
     }
 
     /** Scrolls inDrive's row of price buttons sideways. False when there is no such row. */
@@ -1440,6 +1548,12 @@ class InDriveAccessibilityService : AccessibilityService() {
         const val MAP_BID = "BID"
         /** Just open the request in inDrive (its price buttons then show on the map). */
         const val MAP_OPEN = "OPEN"
+        /** The driver's own price, typed into inDrive's ✎ price sheet. */
+        const val MAP_CUSTOM = "CUSTOM"
+        private const val INDRIVE_ID_PREFIX = "sinet.startup.inDriver:id/"
+        private const val ID_PRICE_BUTTON = "bid_btn_price_highlighted"
+        private const val ID_PRICE_FIELD = "set_price_edittext"
+        private const val ID_SET_OFFER = "set_offer_button"
         /** A board action gives up after this long (request gone, unknown screen). */
         private const val BOARD_ACTION_TIMEOUT_MS = 9000L
         /** Pause between two steps of a board action (the screen needs to react). */
@@ -1463,7 +1577,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val BOARD_OPEN_GAP_MS = 400L
 
         /**
-         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_OPEN] or [MAP_BID] with
+         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_OPEN], [MAP_BID] or [MAP_CUSTOM] with
          * [value]) for the request [key] (LiveRequests.keyOf). False when screen reading is off.
          */
         fun mapAction(key: String, action: String, value: Int = 0): Boolean {

@@ -24,6 +24,7 @@ import android.widget.TextView
 import com.indrive.assistant.InDriveAssistantApp
 import com.indrive.assistant.data.model.HudPrefs
 import com.indrive.assistant.engine.BidAdvisor
+import com.indrive.assistant.engine.FareCalculatorEngine
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -59,6 +60,9 @@ class LiveMapView(context: Context, private val compact: Boolean) : FrameLayout(
     private var selectedKey: String? = null
     private var confirmKey: String? = null
     private var confirmUntil = 0L
+    /** The request whose own-price controls are open, and the price chosen there. */
+    private var customKey: String? = null
+    private var customValue = 0
     private var fittedOnce = false
     private var running = false
     private var lastSig = ""
@@ -188,7 +192,7 @@ class LiveMapView(context: Context, private val compact: Boolean) : FrameLayout(
             "${it.key}|${it.status}|${it.onScreen}|${System.identityHashCode(LiveRequests.geoOf(it.key))}|${it.card.fare}|${it.level}|" +
                 "${it.card.bidChips.map { b -> b.value }}|${it.analysis.netProfit.roundToInt()}|" +
                 "${System.identityHashCode(LiveRequests.snapshotOf(it.key))}"
-        } + "#$selectedKey#$confirmKey#${LiveRequests.openKey}#${prefs().boardShowApproach}"
+        } + "#$selectedKey#$confirmKey#$customKey:$customValue#${LiveRequests.openKey}#${prefs().boardShowApproach}"
         if (sig == lastSig) return
         lastSig = sig
 
@@ -345,8 +349,58 @@ class LiveMapView(context: Context, private val compact: Boolean) : FrameLayout(
                     }, weighted())
                 }
                 panel.addView(bids)
-            } else if (LiveRequests.openKey == e.key) {
-                panel.addView(text("مفيش أزرار عرض سعر في الطلب ده", 11.5f, Color.parseColor("#94A3B8")))
+            }
+
+            // The driver's own price (typed into inDrive's ✎ price sheet).
+            val customOpen = customKey == e.key
+            if (!customOpen) {
+                panel.addView(LinearLayout(context).apply {
+                    setPadding(0, dp(6), 0, 0)
+                    addView(button("سعر تاني (اكتب سعرك)", COLOR_OPEN) {
+                        customKey = e.key
+                        customValue = startPrice(e)
+                        lastSig = ""
+                        refresh()
+                    }, weighted())
+                })
+            } else {
+                val net = FareCalculatorEngine.analyze(
+                    pickupDistanceKm = c.pickupDistanceKm,
+                    tripDistanceKm = c.tripDistanceKm,
+                    estimatedMinutes = FareCalculatorEngine.estimateMinutes(c.totalDistanceKm),
+                    offeredFare = customValue.toDouble(),
+                    settings = InDriveAssistantApp.instance.repository.getDriverSettings(),
+                    pickupAddress = c.pickupAddress,
+                    dropoffAddress = c.dropoffAddress,
+                    passengerName = c.passengerName
+                ).netProfit.roundToInt()
+                fun step(d: Int) = button(if (d > 0) "+$d" else "$d", COLOR_BID) {
+                    customValue = (customValue + d).coerceIn(5, 5000)
+                    lastSig = ""
+                    refresh()
+                }
+                panel.addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(6), 0, 0)
+                    addView(step(-10), weighted())
+                    addView(step(-5), weighted())
+                    addView(text("$customValue\nصافي $net", 14f, Color.WHITE, bold = true).apply { gravity = Gravity.CENTER }, weighted())
+                    addView(step(5), weighted())
+                    addView(step(10), weighted())
+                })
+                panel.addView(LinearLayout(context).apply {
+                    setPadding(0, dp(6), 0, 0)
+                    addView(button("ابعت $customValue ج.م", COLOR_ACCEPT) {
+                        customKey = null
+                        act(e.key, InDriveAccessibilityService.MAP_CUSTOM, customValue)
+                    }, weighted())
+                    addView(button("إلغاء", COLOR_BID) {
+                        customKey = null
+                        lastSig = ""
+                        refresh()
+                    }, weighted())
+                })
             }
         }
     }
@@ -360,6 +414,12 @@ class LiveMapView(context: Context, private val compact: Boolean) : FrameLayout(
         confirmKey = null
         if (center && key != null) LiveRequests.geoOf(key)?.pickup?.let { map.controller.animateTo(GeoPoint(it[0], it[1])) }
         refresh()
+    }
+
+    /** Where the driver's own price starts: the passenger's fare, or the target price if higher, rounded up to 5. */
+    private fun startPrice(e: LiveRequests.Entry): Int {
+        val target = maxOf(e.card.fare, e.analysis.recommendedFare)
+        return (kotlin.math.ceil(target / 5.0) * 5).toInt().coerceIn(5, 5000)
     }
 
     private fun accept(key: String) {
