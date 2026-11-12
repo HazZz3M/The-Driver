@@ -34,6 +34,11 @@ object RouteLocator {
     /** Roads are longer than the straight line: fallback when a route can't be measured. */
     private const val ROAD_FACTOR = 1.3
     private const val MAX_POINTS = 500
+    /** A measured scale further than this factor from the rough one is a misreading. */
+    private const val MAX_SCALE_GAP = 1.8
+
+    /** How the last scale was chosen (for the diagnostic dump and the log). */
+    @Volatile var lastDebug = ""
 
     /**
      * [shot] is the full screenshot (screen pixels). [map] is the visible part of inDrive's map;
@@ -78,20 +83,25 @@ object RouteLocator {
         val tripPx = routeLengthPx(mask, w, h, 1)
         val approachPx = routeLengthPx(mask, w, h, 2)
 
-        // Metres per pixel from the trip (A and B are kept on screen, so it is drawn whole); the
-        // way to the pickup often runs off the map's edge, so it is only a fallback, and the
-        // straight line the last resort.
-        val estimates = mutableListOf<Double>()
-        if (tripKm != null && tripKm > 0.1 && tripPx > 60) estimates.add(tripKm * 1000 / tripPx)
-        else if (pickupKm != null && pickupKm > 0.1 && approachPx > 60) estimates.add(pickupKm * 1000 / approachPx)
-        if (estimates.isEmpty()) {
-            val straightA = hypot((a.centerX() - car.centerX()).toDouble(), (a.centerY() - car.centerY()).toDouble())
-            val straightAB = hypot((b.centerX() - a.centerX()).toDouble(), (b.centerY() - a.centerY()).toDouble())
-            if (pickupKm != null && straightA > 30) estimates.add(pickupKm * 1000 / ROAD_FACTOR / straightA)
-            else if (tripKm != null && straightAB > 30) estimates.add(tripKm * 1000 / ROAD_FACTOR / straightAB)
+        // Metres per pixel. Measured routes are the most precise (the trip first: A and B are kept
+        // on screen, so it is drawn whole; the way to the pickup often runs off the map's edge).
+        // The straight line car → A against the pickup distance is rough (roads aren't straight)
+        // but never wildly off, so it vets them: a misread length or a mostly hidden route gives
+        // a scale several times too big or small.
+        val straightA = hypot((a.centerX() - car.centerX()).toDouble(), (a.centerY() - car.centerY()).toDouble())
+        val straightAB = hypot((b.centerX() - a.centerX()).toDouble(), (b.centerY() - a.centerY()).toDouble())
+        val rough = when {
+            pickupKm != null && pickupKm > 0.1 && straightA > 30 -> pickupKm * 1000 / ROAD_FACTOR / straightA
+            tripKm != null && tripKm > 0.1 && straightAB > 30 -> tripKm * 1000 / ROAD_FACTOR / straightAB
+            else -> null
         }
-        if (estimates.isEmpty()) return null
-        val mpp = estimates.average()
+        val measured = listOfNotNull(
+            if (tripKm != null && tripKm > 0.1 && tripPx > 60) tripKm * 1000 / tripPx else null,
+            if (pickupKm != null && pickupKm > 0.1 && approachPx > 60) pickupKm * 1000 / approachPx else null
+        )
+        val mpp = measured.firstOrNull { rough == null || it in rough / MAX_SCALE_GAP..rough * MAX_SCALE_GAP } ?: rough ?: return null
+        lastDebug = "tripKm=$tripKm tripPx=${tripPx.toInt()} pickupKm=$pickupKm approachPx=${approachPx.toInt()} " +
+            "carA=${straightA.toInt()}px rough=${rough?.let { "%.2f".format(java.util.Locale.US, it) }} → ${"%.2f".format(java.util.Locale.US, mpp)} m/px"
 
         fun toGeo(x: Int, y: Int): DoubleArray {
             val dy = (y - car.centerY()) * mpp

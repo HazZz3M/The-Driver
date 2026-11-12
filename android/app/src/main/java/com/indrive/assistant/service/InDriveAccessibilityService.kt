@@ -1219,7 +1219,7 @@ class InDriveAccessibilityService : AccessibilityService() {
             val geo = RouteLocator.locate(full, job.map, job.car, job.a, job.b, job.exclude, me, job.pickupKm, tripKm)
             if (geo != null) LiveRequests.setGeo(job.key, geo)
             lastGeoLog = if (geo == null) "not placed: no scale" else
-                "placed: ${"%.2f".format(java.util.Locale.US, geo.metersPerPixel)} m/px, trip pts=${geo.trip.size}, approach pts=${geo.approach.size}"
+                "placed: trip pts=${geo.trip.size}, approach pts=${geo.approach.size} | ${RouteLocator.lastDebug}"
             Log.i(TAG, "Live map: $lastGeoLog")
         } catch (e: Exception) {
             Log.w(TAG, "Placing the request failed", e)
