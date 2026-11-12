@@ -441,7 +441,7 @@ class LiveMapView(context: Context, private val compact: Boolean) : FrameLayout(
         val w = paint.measureText(label) + padH * 2
         val h = paint.textSize + padV * 2
         val tip = 6 * density
-        val stroke = (if (selected) 3 else 1.5f) * density
+        val stroke = (if (selected) 3f else 1.5f) * density
         val bmp = Bitmap.createBitmap((w + stroke * 2).roundToInt(), (h + tip + stroke * 2).roundToInt(), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; alpha = if (faded) 120 else 255 }
