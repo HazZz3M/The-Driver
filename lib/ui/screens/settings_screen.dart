@@ -6,6 +6,7 @@ import '../../theme/app_colors.dart';
 import '../../utils/number_parsing.dart';
 import '../components/ui_kit.dart';
 import 'automation_screen.dart';
+import 'live_map_screen.dart';
 import 'settings_pages.dart';
 import 'tutorial_screen.dart';
 
@@ -30,6 +31,13 @@ class SettingsScreen extends StatelessWidget {
 
             const SectionLabel("المساعد العائم"),
             SettingsGroup(children: [
+              NavTile(
+                icon: Icons.map_outlined,
+                color: AppColors.accentCyan,
+                title: "خريطة الطلبات",
+                subtitle: LiveMapPage.summary(hud),
+                onTap: () => _open(context, const LiveMapPage()),
+              ),
               NavTile(
                 icon: Icons.smart_toy_outlined,
                 color: AppColors.warningYellow,

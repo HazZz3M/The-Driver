@@ -25,6 +25,7 @@ import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import com.google.mlkit.vision.common.InputImage
@@ -96,19 +97,73 @@ class InDriveAccessibilityService : AccessibilityService() {
      * them once it is not (events from other apps no longer reach this service).
      */
     private val leaveCheckRunnable: Runnable = Runnable {
-        if (!popupsShown) return@Runnable
-        val root = rootInActiveWindow
-        val pkg = root?.packageName?.toString()
+        if (!popupsShown && !inDriveShown) return@Runnable
+        val root = inDriveRoot()
         root?.recycle()
-        val inDriveInFront = pkg != null && isTargetPackage(pkg, packageName)
-        val transient = pkg != null && isTransientPackage(pkg, packageName)
-        // An unreadable window twice in a row (another app, a lock screen) counts as leaving.
-        missedLeaveChecks = if (pkg == null) missedLeaveChecks + 1 else 0
-        if (!inDriveInFront && !transient && (pkg != null || missedLeaveChecks >= 2)) {
+        val other = if (root == null) otherAppInFront() else false
+        // An unreadable screen twice in a row (a lock screen…) counts as leaving.
+        missedLeaveChecks = if (other == null) missedLeaveChecks + 1 else 0
+        if (root == null && (other == true || missedLeaveChecks >= 2)) {
             hidePopups()
         } else {
             worker.postDelayed(leaveCheckRunnable, LEAVE_CHECK_MS)
         }
+    }
+
+    /** inDrive is on screen (alone, or next to another app in split screen). Worker thread. */
+    private var inDriveShown = false
+
+    private fun markInDriveShown() {
+        if (inDriveShown) return
+        inDriveShown = true
+        inDriveOnScreen = true
+        FloatingHudService.onInDriveVisible(true)
+        if (!popupsShown) {
+            missedLeaveChecks = 0
+            worker.removeCallbacks(leaveCheckRunnable)
+            worker.postDelayed(leaveCheckRunnable, LEAVE_CHECK_MS)
+        }
+    }
+
+    /**
+     * inDrive's window, also when another window has the focus (split screen with the live map,
+     * the map's own activity…). Null when inDrive isn't on screen. The caller recycles it.
+     */
+    private fun inDriveRoot(): AccessibilityNodeInfo? {
+        val active = rootInActiveWindow
+        if (active != null) {
+            if (isTargetPackage(active.packageName?.toString() ?: "", packageName)) return active
+            active.recycle()
+        }
+        try {
+            for (w in windows) {
+                if (w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                val r = w.root ?: continue
+                if (isTargetPackage(r.packageName?.toString() ?: "", packageName)) return r
+                r.recycle()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not list windows", e)
+        }
+        return null
+    }
+
+    /**
+     * With inDrive not on screen: true when another app is (our own map activity included),
+     * false for a transient window (keyboard, notification shade, our overlays), null when
+     * nothing can be read at all (lock screen, screen off).
+     */
+    private fun otherAppInFront(): Boolean? {
+        val apps = try {
+            windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        } catch (e: Exception) {
+            null
+        }
+        if (apps != null) return if (apps.isEmpty()) null else true
+        val root = rootInActiveWindow ?: return null
+        val pkg = root.packageName?.toString()
+        root.recycle()
+        return pkg != null && !isTransientPackage(pkg, packageName)
     }
 
     /** Runs on the worker thread. */
@@ -116,7 +171,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         FloatingHudService.onCardsSync(rides)
         val wasShown = popupsShown
         popupsShown = rides.isNotEmpty()
-        if (popupsShown && !wasShown) {
+        if (popupsShown && !wasShown && !inDriveShown) {
             missedLeaveChecks = 0
             worker.postDelayed(leaveCheckRunnable, LEAVE_CHECK_MS)
         }
@@ -128,6 +183,127 @@ class InDriveAccessibilityService : AccessibilityService() {
         popupsShown = false
         pendingAutoAcceptFingerprint = null
         FloatingHudService.onCardsSync(emptyList())
+        if (inDriveShown) {
+            inDriveShown = false
+            inDriveOnScreen = false
+            FloatingHudService.onInDriveVisible(false)
+            LiveRequests.inDriveGone()
+        }
+    }
+
+    // =========================================================================
+    // LIVE MAP: requests on a map, and the driver's taps on it (accept, hide, open, bid)
+    // =========================================================================
+
+    private fun feedLiveMap(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        if (!InDriveAssistantApp.instance.repository.getHudPrefs().liveMapEnabled) return
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        LiveRequests.update(applicationContext, rides.map { it to analyze(it, settings) }, onRequestScreen)
+    }
+
+    // Worker thread only: a bid chosen on the map for a request that first had to be opened.
+    private var mapBidKey: String? = null
+    private var mapBidValue = 0
+    private var mapBidUntil = 0L
+
+    private fun continueMapBid(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        val key = mapBidKey ?: return
+        if (System.currentTimeMillis() > mapBidUntil) {
+            mapBidKey = null
+            return
+        }
+        if (!onRequestScreen) return
+        val card = rides.singleOrNull()?.takeIf { LiveRequests.keyOf(it) == key } ?: return
+        val chip = card.bidChips.firstOrNull { it.value == mapBidValue } ?: return
+        mapBidKey = null
+        if (clickNodeAt(root, chip.bounds)) onMapBidSent(card, chip.value)
+    }
+
+    private fun onMapBidSent(card: ParsedRideData, value: Int) {
+        RequestLog.recordOutcome(applicationContext, card.fingerprint, RequestLog.STATUS_BID_SENT, value)
+        LiveRequests.setStatus(LiveRequests.keyOf(card), LiveRequests.STATUS_BID_SENT, "عرضت $value")
+        AutomationLog.add(applicationContext, AutomationLog.BID, value.toDouble(), "من الخريطة: عرض $value (عرض الراكب ${card.fare.toInt()})")
+        toast("تم إرسال عرض $value ج.م")
+    }
+
+    private fun toast(text: String) {
+        mainHandler.post { Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show() }
+    }
+
+    private fun postMapAction(key: String, action: String, value: Int): Boolean {
+        if (!::worker.isInitialized) return false
+        worker.post { executeMapAction(key, action, value) }
+        return true
+    }
+
+    /** The driver tapped Accept / Hide / Open / a bid on the map. Worker thread. */
+    private fun executeMapAction(key: String, action: String, value: Int) {
+        val root = inDriveRoot()
+        if (root == null) {
+            toast("افتح إن درايف الأول (أو قسّم الشاشة معاه)")
+            return
+        }
+        try {
+            val rides = resolveTrips(findRideCards(root))
+            val onRequestScreen = lastScanWasRequestScreen
+            val card = rides.firstOrNull { LiveRequests.keyOf(it) == key }
+            if (card == null) {
+                toast("الطلب ده مش ظاهر في إن درايف دلوقتي")
+                return
+            }
+            // On the Ride-request screen the whole window is the request.
+            val area = if (onRequestScreen) Rect().also { root.getBoundsInScreen(it) } else card.screenBounds ?: card.anchorBounds
+            when (action) {
+                MAP_ACCEPT -> {
+                    if (area != null && clickAcceptButtonInside(root, area)) {
+                        markAccepted(card)
+                        LiveRequests.setStatus(key, LiveRequests.STATUS_ACCEPTED, "اتقبل")
+                        AutomationLog.add(applicationContext, AutomationLog.ACCEPT, card.fare, "من الخريطة")
+                        toast("تم قبول الطلب (${card.fare.toInt()} ج.م)")
+                    } else {
+                        toast("مش لاقي زرار القبول: افتح الطلب واقبله من إن درايف")
+                    }
+                }
+                MAP_HIDE -> {
+                    val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+                    val done = if (onRequestScreen) clickSkipButton(root) else swipeCard(card, settings.autoDismissDirection)
+                    if (done) {
+                        dismissedFingerprints.add(card.fingerprint)
+                        RequestLog.markDismissed(applicationContext, card.fingerprint, "من الخريطة")
+                        LiveRequests.setStatus(key, LiveRequests.STATUS_HIDDEN, "اتخفى")
+                        AutomationLog.add(applicationContext, AutomationLog.HIDE, card.fare, "من الخريطة")
+                    } else {
+                        toast("معرفتش أخفي الطلب")
+                    }
+                }
+                MAP_OPEN -> {
+                    if (!onRequestScreen) {
+                        val b = card.screenBounds
+                        if (b == null || !clickCardBody(root, b)) toast("معرفتش أفتح الطلب")
+                    }
+                }
+                MAP_BID -> {
+                    val chip = if (onRequestScreen) card.bidChips.firstOrNull { it.value == value } else null
+                    if (chip != null) {
+                        if (clickNodeAt(root, chip.bounds)) onMapBidSent(card, value) else toast("معرفتش أضغط على العرض")
+                    } else {
+                        // Open the request first; the bid is pressed when its screen shows (within a few seconds).
+                        val b = card.screenBounds
+                        if (!onRequestScreen && b != null && clickCardBody(root, b)) {
+                            mapBidKey = key
+                            mapBidValue = value
+                            mapBidUntil = System.currentTimeMillis() + MAP_BID_WAIT_MS
+                        } else {
+                            toast("العرض ده مش موجود في الطلب")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Map action $action failed", e)
+        } finally {
+            root.recycle()
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -163,20 +339,23 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     /** Runs on the worker thread. */
     private fun scanActiveWindow() {
-        val root = rootInActiveWindow ?: return // transient: keep current popups
+        val root = inDriveRoot()
+        if (root == null) {
+            if (otherAppInFront() == true) hidePopups()
+            return // transient (keyboard, notification shade…): keep current popups
+        }
         try {
             val pkg = root.packageName?.toString() ?: return
-            if (!isTargetPackage(pkg, packageName)) {
-                if (!isTransientPackage(pkg, packageName)) hidePopups()
-                return
-            }
             val rides = resolveTrips(findRideCards(root))
             val onRequestScreen = lastScanWasRequestScreen
             if (captureRequested) {
                 captureRequested = false
                 saveDiagnosticDump(root, pkg, rides)
             }
+            markInDriveShown()
             showPopups(rides)
+            feedLiveMap(rides, onRequestScreen)
+            continueMapBid(root, rides, onRequestScreen)
             logRequests(rides, onRequestScreen)
             maybePromptRating(rides, onRequestScreen)
             maybeScheduleAutoAccept(rides)
@@ -384,7 +563,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         pendingDismiss = null
         if (automationPaused()) return
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-        val root = rootInActiveWindow ?: return
+        val root = inDriveRoot() ?: return
         try {
             if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
             val card = resolveTrips(findRideCards(root)).firstOrNull { it.fingerprint == fingerprint } ?: return
@@ -488,7 +667,7 @@ class InDriveAccessibilityService : AccessibilityService() {
     private fun executeBidTap(key: String, value: Int) {
         pendingBidTap = null
         if (InDriveAssistantApp.instance.repository.getHudPrefs().bidChipsMode != "AUTO_TAP" || automationPaused()) return
-        val root = rootInActiveWindow ?: return
+        val root = inDriveRoot() ?: return
         try {
             if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
             val card = findRideCards(root).singleOrNull() ?: return
@@ -776,7 +955,7 @@ class InDriveAccessibilityService : AccessibilityService() {
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
         if (!settings.autoAcceptEnabled || automationPaused()) return
 
-        val root = rootInActiveWindow ?: return
+        val root = inDriveRoot() ?: return
         try {
             if (!isTargetPackage(root.packageName?.toString() ?: "", packageName)) return
             val card = resolveTrips(findRideCards(root)).firstOrNull { it.fingerprint == fingerprint }
@@ -898,6 +1077,10 @@ class InDriveAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         autoOpenActive = false
+        if (inDriveOnScreen) {
+            inDriveOnScreen = false
+            FloatingHudService.onInDriveVisible(false)
+        }
         if (::workerThread.isInitialized) {
             worker.removeCallbacksAndMessages(null)
             workerThread.quitSafely()
@@ -918,6 +1101,9 @@ class InDriveAccessibilityService : AccessibilityService() {
         const val DUMP_FILE = "inDrive_screen_dump.txt"
         /** True while auto-open has a request open (the HUD stays quiet about screens it opened). */
         @Volatile var autoOpenActive = false
+            private set
+        /** inDrive is on screen (alone or in split screen): the floating map shows only then. */
+        @Volatile var inDriveOnScreen = false
             private set
         private const val LEAVE_CHECK_MS = 1000L
         // C (auto-open): give the map time to load, then press Back; at most one card per cooldown.
@@ -948,6 +1134,21 @@ class InDriveAccessibilityService : AccessibilityService() {
 
         /** True while the service is switched on in Android's accessibility settings and connected. */
         fun isRunning(): Boolean = instance != null
+
+        const val MAP_ACCEPT = "ACCEPT"
+        const val MAP_HIDE = "HIDE"
+        const val MAP_OPEN = "OPEN"
+        const val MAP_BID = "BID"
+        /** A bid chosen on the map waits this long for the request's screen to open. */
+        private const val MAP_BID_WAIT_MS = 6000L
+
+        /**
+         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_OPEN] or [MAP_BID] with
+         * [value]) for the request [key] (LiveRequests.keyOf). False when screen reading is off.
+         */
+        fun mapAction(key: String, action: String, value: Int = 0): Boolean {
+            return instance?.postMapAction(key, action, value) ?: false
+        }
 
         /**
          * Switches the service off in Android's accessibility settings (as if the driver turned it

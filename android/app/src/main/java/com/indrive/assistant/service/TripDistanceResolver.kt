@@ -120,6 +120,32 @@ object TripDistanceResolver {
     private val notFound = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
     private val pending = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
+    /**
+     * Where [address] is (lat, lng), or null while it is being looked up (then [onDone] runs on
+     * the geocoder thread when found) or when it can't be found. Used by the live requests map.
+     */
+    fun coordinatesOf(context: Context, address: String, onDone: () -> Unit): DoubleArray? {
+        if (address.isBlank()) return null
+        geocoded[FareCalculatorEngine.normalizeArabicText(address)]?.let { return it }
+        requestGeocode(context, address, onDone)
+        return null
+    }
+
+    /** The driver's last known position: among several matches, the nearest one wins. */
+    @Volatile var bias: DoubleArray? = null
+
+    /**
+     * inDrive writes "Place (street، neighbourhood، district، city، country)": try it as one
+     * comma list first, then without the place name (unknown to the Geocoder more often than not).
+     */
+    private fun geocodeQueries(address: String): List<String> {
+        val open = address.indexOf('(')
+        if (open < 0) return listOf(address)
+        val flat = address.replace("(", "، ").replace(")", "").trim()
+        val inner = address.substring(open + 1).replace(")", "").trim()
+        return listOf(flat, inner).filter { it.isNotBlank() }.distinct()
+    }
+
     private fun requestGeocode(context: Context, address: String, onDone: () -> Unit) {
         val key = FareCalculatorEngine.normalizeArabicText(address)
         if (geocoded.containsKey(key) || key in notFound || !pending.add(key)) return
@@ -130,9 +156,17 @@ object TripDistanceResolver {
                     return@post
                 }
                 val geocoder = Geocoder(context, Locale("ar", "EG"))
-                @Suppress("DEPRECATION")
-                val results = geocoder.getFromLocationName(address, 1, LAT_MIN, LNG_MIN, LAT_MAX, LNG_MAX)
-                val hit = results?.firstOrNull()
+                var hit: android.location.Address? = null
+                for (q in geocodeQueries(address)) {
+                    @Suppress("DEPRECATION")
+                    val results = geocoder.getFromLocationName(q, 3, LAT_MIN, LNG_MIN, LAT_MAX, LNG_MAX)
+                    if (results.isNullOrEmpty()) continue
+                    val near = bias
+                    hit = if (near == null) results.first() else results.minByOrNull {
+                        haversineKm(near[0], near[1], it.latitude, it.longitude)
+                    }
+                    break
+                }
                 if (hit != null) geocoded[key] = doubleArrayOf(hit.latitude, hit.longitude) else notFound.add(key)
                 if (geocoded.size > 400) geocoded.clear()
                 if (notFound.size > 400) notFound.clear()
