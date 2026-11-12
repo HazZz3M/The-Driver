@@ -54,7 +54,21 @@ data class HudPrefs(
     /** C: press Back as soon as the trip length is read (otherwise wait the full stay time). */
     val autoOpenBackWhenRead: Boolean = true,
     /** Circles over the Ride-request counter-bid buttons: OFF | HIGHLIGHT | AUTO_TAP (taps the best). */
-    val bidChipsMode: String = "HIGHLIGHT"
+    val bidChipsMode: String = "HIGHLIGHT",
+    /** Live requests map: requests read from inDrive placed on an OpenStreetMap map. */
+    val liveMapEnabled: Boolean = false,
+    /** The map as a floating window over inDrive. */
+    val liveMapFloating: Boolean = false,
+    /** SMALL | MEDIUM | LARGE: share of the screen height the floating map takes. */
+    val liveMapSize: String = "MEDIUM",
+    /** How long a request stays on the map after it left inDrive's screen. */
+    val liveMapKeepSeconds: Int = 90,
+    /** Accept from the map needs a second tap within 3 seconds. */
+    val liveMapConfirmAccept: Boolean = true,
+    /** Show the driver's own position (needs the location permission). */
+    val liveMapShowMe: Boolean = true,
+    /** Hide the floating map while inDrive isn't on screen. */
+    val liveMapOnlyInDrive: Boolean = true
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("style", style)
@@ -88,6 +102,13 @@ data class HudPrefs(
         put("autoOpenGapSeconds", autoOpenGapSeconds)
         put("autoOpenBackWhenRead", autoOpenBackWhenRead)
         put("bidChipsMode", bidChipsMode)
+        put("liveMapEnabled", liveMapEnabled)
+        put("liveMapFloating", liveMapFloating)
+        put("liveMapSize", liveMapSize)
+        put("liveMapKeepSeconds", liveMapKeepSeconds)
+        put("liveMapConfirmAccept", liveMapConfirmAccept)
+        put("liveMapShowMe", liveMapShowMe)
+        put("liveMapOnlyInDrive", liveMapOnlyInDrive)
     }
 
     companion object {
@@ -126,7 +147,14 @@ data class HudPrefs(
                 autoOpenStaySeconds = json.optDouble("autoOpenStaySeconds", fallback.autoOpenStaySeconds),
                 autoOpenGapSeconds = json.optDouble("autoOpenGapSeconds", fallback.autoOpenGapSeconds),
                 autoOpenBackWhenRead = json.optBoolean("autoOpenBackWhenRead", fallback.autoOpenBackWhenRead),
-                bidChipsMode = json.optString("bidChipsMode", fallback.bidChipsMode)
+                bidChipsMode = json.optString("bidChipsMode", fallback.bidChipsMode),
+                liveMapEnabled = json.optBoolean("liveMapEnabled", fallback.liveMapEnabled),
+                liveMapFloating = json.optBoolean("liveMapFloating", fallback.liveMapFloating),
+                liveMapSize = json.optString("liveMapSize", fallback.liveMapSize),
+                liveMapKeepSeconds = json.optInt("liveMapKeepSeconds", fallback.liveMapKeepSeconds).coerceIn(15, 600),
+                liveMapConfirmAccept = json.optBoolean("liveMapConfirmAccept", fallback.liveMapConfirmAccept),
+                liveMapShowMe = json.optBoolean("liveMapShowMe", fallback.liveMapShowMe),
+                liveMapOnlyInDrive = json.optBoolean("liveMapOnlyInDrive", fallback.liveMapOnlyInDrive)
             )
         }
     }

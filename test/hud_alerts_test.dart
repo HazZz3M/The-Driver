@@ -9,6 +9,13 @@ void main() {
     expect(HudSettings.fromJson({'vibrate': true}).vibrateLevels, HudSettings.allLevels);
   });
 
+  test('live map settings: off by default, round trip, keep time clamped', () {
+    expect(const HudSettings().liveMapEnabled, isFalse);
+    const h = HudSettings(liveMapEnabled: true, liveMapFloating: true, liveMapSize: "LARGE", liveMapKeepSeconds: 120);
+    expect(HudSettings.fromJson(h.toJson()).toJson(), h.toJson());
+    expect(HudSettings.fromJson({'liveMapKeepSeconds': 5}).liveMapKeepSeconds, 15);
+  });
+
   test('alert settings survive a JSON round trip', () {
     const h = HudSettings(
       vibrateLevels: "LOSS",

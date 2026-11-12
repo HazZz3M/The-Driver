@@ -83,6 +83,9 @@ class FloatingHudService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         startForeground(NOTIFICATION_ID, createNotification())
         activeInstance = this
+        // The service may start while inDrive is already open (split screen with the app).
+        inDriveVisible = InDriveAccessibilityService.inDriveOnScreen
+        syncFloatingMap()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1421,7 +1424,251 @@ class FloatingHudService : Service() {
         }
     }
 
+    // =========================================================================
+    // LIVE MAP: floating window over inDrive (minimises to a small round button)
+    // =========================================================================
+
+    // Main thread only.
+    private var mapWindow: LinearLayout? = null
+    private var mapView: LiveMapView? = null
+    private var mapParams: WindowManager.LayoutParams? = null
+    private var mapBubble: TextView? = null
+    private var mapBubbleParams: WindowManager.LayoutParams? = null
+    private var mapMinimized = false
+    private var mapSizeOverride: String? = null
+    private var inDriveVisible = false
+    private val bubbleListener: () -> Unit = { updateBubbleCount() }
+
+    private fun overlayType() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    } else {
+        @Suppress("DEPRECATION")
+        WindowManager.LayoutParams.TYPE_PHONE
+    }
+
+    private fun syncFloatingMap() {
+        val hud = hudPrefs()
+        val want = hud.liveMapEnabled && hud.liveMapFloating && !com.indrive.assistant.LiveMapActivity.isShowing &&
+            (!hud.liveMapOnlyInDrive || inDriveVisible)
+        if (!want) {
+            removeFloatingMap()
+            return
+        }
+        if (mapMinimized) showMapBubble() else showMapWindow()
+    }
+
+    private fun mapHeightPx(): Int {
+        val share = when (mapSizeOverride ?: hudPrefs().liveMapSize) {
+            "SMALL" -> 0.30
+            "LARGE" -> 0.58
+            else -> 0.42
+        }
+        return (resources.displayMetrics.heightPixels * share).toInt()
+    }
+
+    private fun showMapWindow() {
+        val wm = windowManager ?: return
+        removeMapBubble()
+        if (mapWindow != null) {
+            mapParams?.let { p ->
+                if (p.height != mapHeightPx()) {
+                    p.height = mapHeightPx()
+                    try { wm.updateViewLayout(mapWindow, p) } catch (_: Exception) {}
+                }
+            }
+            return
+        }
+        val density = resources.displayMetrics.density
+        fun dp(v: Float) = (v * density).toInt()
+
+        val view = LiveMapView(this, compact = true)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12f), dp(6f), dp(6f), dp(6f))
+            setBackgroundColor(Color.parseColor(COLOR_INK))
+        }
+        header.addView(TextView(this).apply {
+            text = "⠿  خريطة الطلبات"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        fun headerButton(label: String, onClick: () -> Unit) = TextView(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setPadding(dp(12f), dp(2f), dp(12f), dp(2f))
+            setOnClickListener { onClick() }
+        }
+        header.addView(headerButton("⤢") {
+            mapSizeOverride = when (mapSizeOverride ?: hudPrefs().liveMapSize) {
+                "SMALL" -> "MEDIUM"
+                "MEDIUM" -> "LARGE"
+                else -> "SMALL"
+            }
+            showMapWindow()
+        })
+        header.addView(headerButton("–") {
+            mapMinimized = true
+            syncFloatingMap()
+        })
+
+        val window = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor(COLOR_INK))
+                cornerRadius = dp(14f).toFloat()
+            }
+            clipToOutline = true
+            elevation = dp(8f).toFloat()
+            addView(header, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+        val params = WindowManager.LayoutParams(
+            resources.displayMetrics.widthPixels - dp(16f),
+            mapHeightPx(),
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = dp(8f)
+            y = dp(64f)
+        }
+        dragBy(header, params) { window }
+        try {
+            wm.addView(window, params)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not show the floating map", e)
+            view.destroy()
+            return
+        }
+        mapWindow = window
+        mapView = view
+        mapParams = params
+        view.start()
+    }
+
+    private fun showMapBubble() {
+        val wm = windowManager ?: return
+        removeMapWindow()
+        if (mapBubble != null) return
+        val density = resources.displayMetrics.density
+        val size = (56 * density).toInt()
+        val bubble = TextView(this).apply {
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor(COLOR_FAVORITE))
+                setStroke((2 * density).toInt(), Color.WHITE)
+            }
+        }
+        val params = WindowManager.LayoutParams(
+            size, size, overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = (8 * density).toInt()
+            y = (160 * density).toInt()
+        }
+        dragBy(bubble, params, fromEnd = true, onTap = {
+            mapMinimized = false
+            syncFloatingMap()
+        }) { bubble }
+        try {
+            wm.addView(bubble, params)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not show the map button", e)
+            return
+        }
+        mapBubble = bubble
+        mapBubbleParams = params
+        LiveRequests.addListener(bubbleListener)
+        updateBubbleCount()
+    }
+
+    private fun updateBubbleCount() {
+        val bubble = mapBubble ?: return
+        val n = LiveRequests.snapshot(hudPrefs().liveMapKeepSeconds * 1000L).count { it.onScreen }
+        bubble.text = if (n > 0) "🗺\n$n" else "🗺"
+    }
+
+    /** Drags [target]'s window by [handle]; a tap without movement runs [onTap]. */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun dragBy(
+        handle: View,
+        params: WindowManager.LayoutParams,
+        fromEnd: Boolean = false,
+        onTap: (() -> Unit)? = null,
+        target: () -> View
+    ) {
+        var startX = 0
+        var startY = 0
+        var touchX = 0f
+        var touchY = 0f
+        var moved = false
+        handle.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = params.x
+                    startY = params.y
+                    touchX = event.rawX
+                    touchY = event.rawY
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.rawX - touchX).toInt()
+                    val dy = (event.rawY - touchY).toInt()
+                    if (abs(dx) > 8 || abs(dy) > 8) moved = true
+                    if (moved) {
+                        params.x = if (fromEnd) startX - dx else startX + dx
+                        params.y = max(0, startY + dy)
+                        try { windowManager?.updateViewLayout(target(), params) } catch (_: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!moved) {
+                        if (onTap != null) onTap() else v.performClick()
+                    }
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun removeMapWindow() {
+        val window = mapWindow ?: return
+        mapView?.destroy()
+        try { windowManager?.removeView(window) } catch (_: Exception) {}
+        mapWindow = null
+        mapView = null
+        mapParams = null
+    }
+
+    private fun removeMapBubble() {
+        val bubble = mapBubble ?: return
+        LiveRequests.removeListener(bubbleListener)
+        try { windowManager?.removeView(bubble) } catch (_: Exception) {}
+        mapBubble = null
+        mapBubbleParams = null
+    }
+
+    private fun removeFloatingMap() {
+        removeMapWindow()
+        removeMapBubble()
+    }
+
     override fun onDestroy() {
+        removeFloatingMap()
         if (activeInstance == this) activeInstance = null
         clearAllCardPopups()
         try { tts?.shutdown() } catch (_: Exception) {}
@@ -1459,6 +1706,32 @@ class FloatingHudService : Service() {
         }
 
         fun isRunning(): Boolean = activeInstance != null
+
+        /** inDrive came on / left the screen (accessibility worker). Shows / hides the floating map. */
+        fun onInDriveVisible(visible: Boolean) {
+            val service = activeInstance ?: return
+            service.serviceScope.launch {
+                service.inDriveVisible = visible
+                service.syncFloatingMap()
+            }
+        }
+
+        /** The map screen came to the front / left it: the floating map steps aside meanwhile. */
+        fun refreshFloatingMap() {
+            val service = activeInstance ?: return
+            service.serviceScope.launch { service.syncFloatingMap() }
+        }
+
+        /** Settings changed in the app: the floating map follows them right away. */
+        fun onSettingsApplied() {
+            val service = activeInstance ?: return
+            service.serviceScope.launch {
+                if (!service.hudPrefs().liveMapFloating) service.mapMinimized = false
+                service.mapSizeOverride = null
+                service.removeMapWindow() // rebuilt with the new settings (size, my position…)
+                service.syncFloatingMap()
+            }
+        }
 
         /** Plays a sample vibration or voice line for [level]. False when the assistant isn't running. */
         fun testAlert(level: String, voice: Boolean): Boolean {

@@ -32,6 +32,13 @@ class HudSettings {
   final double autoOpenGapSeconds; // C: pause after closing one before opening the next
   final bool autoOpenBackWhenRead; // C: go back as soon as the trip length is read
   final String bidChipsMode; // OFF | HIGHLIGHT | AUTO_TAP: circles over the request's bid buttons
+  final bool liveMapEnabled; // live requests map (OpenStreetMap)
+  final bool liveMapFloating; // the map as a floating window over inDrive
+  final String liveMapSize; // SMALL | MEDIUM | LARGE (floating window height)
+  final int liveMapKeepSeconds; // how long a request stays after it left inDrive's screen
+  final bool liveMapConfirmAccept; // accept from the map needs a second tap
+  final bool liveMapShowMe; // the driver's own position
+  final bool liveMapOnlyInDrive; // floating map only while inDrive is on screen
 
   const HudSettings({
     this.style = "COMPACT_CIRCLE",
@@ -65,6 +72,13 @@ class HudSettings {
     this.autoOpenGapSeconds = 8.0,
     this.autoOpenBackWhenRead = true,
     this.bidChipsMode = "HIGHLIGHT",
+    this.liveMapEnabled = false,
+    this.liveMapFloating = false,
+    this.liveMapSize = "MEDIUM",
+    this.liveMapKeepSeconds = 90,
+    this.liveMapConfirmAccept = true,
+    this.liveMapShowMe = true,
+    this.liveMapOnlyInDrive = true,
   });
 
   HudSettings copyWith({
@@ -99,6 +113,13 @@ class HudSettings {
     double? autoOpenGapSeconds,
     bool? autoOpenBackWhenRead,
     String? bidChipsMode,
+    bool? liveMapEnabled,
+    bool? liveMapFloating,
+    String? liveMapSize,
+    int? liveMapKeepSeconds,
+    bool? liveMapConfirmAccept,
+    bool? liveMapShowMe,
+    bool? liveMapOnlyInDrive,
   }) {
     return HudSettings(
       style: style ?? this.style,
@@ -132,6 +153,13 @@ class HudSettings {
       autoOpenGapSeconds: autoOpenGapSeconds ?? this.autoOpenGapSeconds,
       autoOpenBackWhenRead: autoOpenBackWhenRead ?? this.autoOpenBackWhenRead,
       bidChipsMode: bidChipsMode ?? this.bidChipsMode,
+      liveMapEnabled: liveMapEnabled ?? this.liveMapEnabled,
+      liveMapFloating: liveMapFloating ?? this.liveMapFloating,
+      liveMapSize: liveMapSize ?? this.liveMapSize,
+      liveMapKeepSeconds: liveMapKeepSeconds ?? this.liveMapKeepSeconds,
+      liveMapConfirmAccept: liveMapConfirmAccept ?? this.liveMapConfirmAccept,
+      liveMapShowMe: liveMapShowMe ?? this.liveMapShowMe,
+      liveMapOnlyInDrive: liveMapOnlyInDrive ?? this.liveMapOnlyInDrive,
     );
   }
 
@@ -167,6 +195,13 @@ class HudSettings {
         'autoOpenGapSeconds': autoOpenGapSeconds,
         'autoOpenBackWhenRead': autoOpenBackWhenRead,
         'bidChipsMode': bidChipsMode,
+        'liveMapEnabled': liveMapEnabled,
+        'liveMapFloating': liveMapFloating,
+        'liveMapSize': liveMapSize,
+        'liveMapKeepSeconds': liveMapKeepSeconds,
+        'liveMapConfirmAccept': liveMapConfirmAccept,
+        'liveMapShowMe': liveMapShowMe,
+        'liveMapOnlyInDrive': liveMapOnlyInDrive,
       };
 
   factory HudSettings.fromJson(Map<String, dynamic> json, {HudSettings fallback = const HudSettings()}) {
@@ -204,6 +239,13 @@ class HudSettings {
       autoOpenGapSeconds: (json['autoOpenGapSeconds'] as num?)?.toDouble() ?? fallback.autoOpenGapSeconds,
       autoOpenBackWhenRead: json['autoOpenBackWhenRead'] as bool? ?? fallback.autoOpenBackWhenRead,
       bidChipsMode: json['bidChipsMode'] as String? ?? fallback.bidChipsMode,
+      liveMapEnabled: json['liveMapEnabled'] as bool? ?? fallback.liveMapEnabled,
+      liveMapFloating: json['liveMapFloating'] as bool? ?? fallback.liveMapFloating,
+      liveMapSize: json['liveMapSize'] as String? ?? fallback.liveMapSize,
+      liveMapKeepSeconds: ((json['liveMapKeepSeconds'] as num?)?.toInt() ?? fallback.liveMapKeepSeconds).clamp(15, 600),
+      liveMapConfirmAccept: json['liveMapConfirmAccept'] as bool? ?? fallback.liveMapConfirmAccept,
+      liveMapShowMe: json['liveMapShowMe'] as bool? ?? fallback.liveMapShowMe,
+      liveMapOnlyInDrive: json['liveMapOnlyInDrive'] as bool? ?? fallback.liveMapOnlyInDrive,
     );
   }
 

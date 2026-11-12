@@ -62,6 +62,30 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "isFloatingServiceRunning" -> result.success(FloatingHudService.isRunning())
+                "openLiveMap" -> {
+                    // Full screen, or next to inDrive in split screen.
+                    val split = call.argument<Boolean>("split") ?: false
+                    startActivity(
+                        Intent(this, LiveMapActivity::class.java)
+                            .putExtra(LiveMapActivity.EXTRA_SPLIT, split)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    result.success(true)
+                }
+                "hasLocationPermission" -> result.success(hasLocationPermission())
+                "requestLocationPermission" -> {
+                    if (!hasLocationPermission() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        requestPermissions(
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                            REQUEST_LOCATION
+                        )
+                    }
+                    result.success(true)
+                }
+                "clearLiveMap" -> {
+                    com.indrive.assistant.service.LiveRequests.clear()
+                    result.success(true)
+                }
                 "testAlert" -> result.success(
                     FloatingHudService.testAlert(
                         call.argument<String>("level") ?: "GOOD",
@@ -75,6 +99,7 @@ class MainActivity : FlutterActivity() {
                     } else {
                         try {
                             InDriveAssistantApp.instance.repository.applySettingsFromFlutter(JSONObject(json))
+                            FloatingHudService.onSettingsApplied()
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("SYNC_ERROR", e.message, null)
@@ -181,7 +206,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
     companion object {
         private const val REQUEST_NOTIFICATIONS = 4001
+        private const val REQUEST_LOCATION = 4002
     }
 }

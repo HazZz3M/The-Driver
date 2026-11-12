@@ -9,6 +9,7 @@ import '../components/dialogs.dart';
 import '../components/hud_preview.dart';
 import '../components/ui_kit.dart';
 import 'automation_screen.dart';
+import 'live_map_screen.dart';
 import 'settings_pages.dart';
 
 class OverlayControlScreen extends StatefulWidget {
@@ -282,6 +283,14 @@ class _OverlayControlScreenState extends State<OverlayControlScreen> with Widget
               // Quick customisation
               const SectionLabel("التخصيص"),
               SettingsGroup(children: [
+                NavTile(
+                  icon: Icons.map_outlined,
+                  color: AppColors.accentCyan,
+                  title: "خريطة الطلبات",
+                  subtitle: "كل الطلبات على خريطة، واقبل أو اخفي أو اعرض منها",
+                  trailingText: LiveMapPage.summary(hud),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LiveMapPage())),
+                ),
                 NavTile(
                   icon: Icons.smart_toy_outlined,
                   color: AppColors.warningYellow,

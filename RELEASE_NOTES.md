@@ -1,18 +1,20 @@
-### The Driver v1.20.0 - Full control of vibration, voice and the analysis
+### The Driver v1.21.0 - Live requests map
 
-- **New "الاهتزاز والصوت" page** (Settings, right under "الأتمتة"). Turn vibration and voice on or off, and pick exactly which verdicts trigger each one: excellent, profitable, thin margin, loss/blocked, distance not read. Each verdict has a ▶ button to try it.
-- **Vibration strength:** light, normal or strong.
-- **Voice:** choose what it says (verdict only / + net / + net and distance) and how fast it speaks.
-- **The voice no longer talks about closed requests:**
-  - it stops as soon as the request leaves the screen (switchable);
-  - each request alerts once, even when you open it and come back to the list (switchable);
-  - requests the automation opens by itself to read the distance stay silent (switchable).
-- **Areas in the analysis are yours to edit** (Insights → "تعديل المناطق"):
-  - rename an area;
-  - merge several names of the same place, such as "الحمراء الثانية" and "Al Hamraa Ath Thaneyah";
-  - hide misleading names.
-  - The app also suggests names that look like the same place in Arabic and English, merged with one tap. All of this applies to old and new requests without changing the log.
-- **"طريقة التحليل"** (the ⚙ on the Insights tab):
-  - where the area comes from: the neighbourhood, the place name, or only your own zones;
-  - count only the requests you opened;
-  - leave out requests whose distance was not read.
+- **New: "خريطة الطلبات"** (Settings, or the assistant tab → التخصيص). Every request read from inDrive is placed on a map:
+  - a pin at the passenger's pickup with the price, coloured by verdict (excellent / profitable / thin margin / loss);
+  - a straight line to where the passenger is going.
+  Several requests are visible at once, live.
+- **Act from the map.** Tap a request to see its details (passenger, rating, both addresses, distances, net). Then:
+  - **accept** (with a second tap to confirm, switchable);
+  - **hide** it;
+  - **"اعرض سعر"**: opens it in inDrive, after which its bid buttons appear on the map with the best one marked ★. Tapping a bid sends it.
+- **Three ways to show it** (try them all):
+  - **floating map over inDrive:** drag it by its bar, ⤢ to resize, – to shrink it to a small button that counts the requests;
+  - **split screen:** the map next to inDrive, both live;
+  - **full screen:** the map on its own, with the requests read in the last minutes.
+- **Map:** OpenStreetMap, free, no key. Your own position is shown if you allow location; it also helps place addresses correctly.
+- **Settings:** how long a request stays on the map after it left inDrive's screen, floating map size, confirm before accepting, hide the floating map outside inDrive.
+- **Notes:**
+  - To place an address on the map, its text is sent to Google's address service (the passenger's name is not).
+  - inDrive's requests can only be read while inDrive is on screen (alone or in split screen).
+  - Screen reading now also works in split screen, so auto-accept, auto-hide and the badges keep working there.
