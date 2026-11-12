@@ -81,11 +81,43 @@ class FloatingHudService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIFICATION_ID, createNotification())
+        startInForeground()
         activeInstance = this
         // The service may start while inDrive is already open (split screen with the app).
         inDriveVisible = InDriveAccessibilityService.inDriveOnScreen
         syncFloatingMap()
+    }
+
+    /**
+     * Foreground with the "location" type too when the driver allowed location: the live map needs
+     * the driver's position while inDrive (not this app) is on screen.
+     */
+    private fun startInForeground() {
+        val notification = createNotification()
+        val location = DriverLocation.hasPermission(this)
+        try {
+            when {
+                Build.VERSION.SDK_INT >= 34 -> startForeground(
+                    NOTIFICATION_ID, notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        (if (location) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0)
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> startForeground(
+                    NOTIFICATION_ID, notification,
+                    if (location) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+                )
+                else -> startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // e.g. location type refused: run without it rather than not at all.
+            Log.w(TAG, "Foreground with location failed, retrying without", e)
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        }
+        if (location) DriverLocation.start(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1744,6 +1776,8 @@ class FloatingHudService : Service() {
                 if (!service.hudPrefs().liveMapFloating) service.mapMinimized = false
                 service.mapSizeOverride = null
                 service.removeMapWindow() // rebuilt with the new settings (size, my position…)
+                // Location may have just been allowed: add the location type (the app is in front now).
+                if (DriverLocation.hasPermission(service)) service.startInForeground()
                 service.syncFloatingMap()
             }
         }
