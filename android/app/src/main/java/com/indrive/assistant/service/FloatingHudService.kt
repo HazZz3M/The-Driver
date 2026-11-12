@@ -1716,6 +1716,21 @@ class FloatingHudService : Service() {
             }
         }
 
+        /**
+         * Hides (or shows again) every overlay window: badges, bid circles, the floating board.
+         * Used around a screenshot of inDrive's map so the board's snapshot shows inDrive, not us.
+         */
+        fun setOverlaysHidden(hidden: Boolean) {
+            val service = activeInstance ?: return
+            service.serviceScope.launch {
+                val v = if (hidden) View.INVISIBLE else View.VISIBLE
+                service.activePopups.values.forEach { it.container.visibility = v }
+                service.chipViews.forEach { it.visibility = v }
+                service.mapWindow?.visibility = v
+                service.mapBubble?.visibility = v
+            }
+        }
+
         /** The map screen came to the front / left it: the floating map steps aside meanwhile. */
         fun refreshFloatingMap() {
             val service = activeInstance ?: return

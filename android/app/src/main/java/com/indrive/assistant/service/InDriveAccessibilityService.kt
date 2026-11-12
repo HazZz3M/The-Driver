@@ -1080,9 +1080,22 @@ class InDriveAccessibilityService : AccessibilityService() {
      */
     @RequiresApi(Build.VERSION_CODES.R)
     private fun captureRequest(snapKey: String?, snapRegion: Rect?, ocrKey: String?, ocrRegion: Rect?) {
+        // Our own windows (the floating board, badges) would cover inDrive's map in the picture:
+        // hide them for a moment, take the shot once they're gone from the screen, show them again.
+        if (FloatingHudService.isRunning()) {
+            FloatingHudService.setOverlaysHidden(true)
+            worker.postDelayed({ takeRequestShot(snapKey, snapRegion, ocrKey, ocrRegion) }, OVERLAY_HIDE_MS)
+        } else {
+            takeRequestShot(snapKey, snapRegion, ocrKey, ocrRegion)
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun takeRequestShot(snapKey: String?, snapRegion: Rect?, ocrKey: String?, ocrRegion: Rect?) {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, workerExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
+                    FloatingHudService.setOverlaysHidden(false)
                     val full = try {
                         val hardware = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
                         val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
@@ -1110,12 +1123,14 @@ class InDriveAccessibilityService : AccessibilityService() {
 
                 override fun onFailure(errorCode: Int) {
                     // e.g. ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT: the next scan retries.
+                    FloatingHudService.setOverlaysHidden(false)
                     lastOcrLog = "screenshot failed: code=$errorCode"
                     ocrInFlight = false
                     if (snapKey != null) worker.postDelayed({ requestRescan() }, 400)
                 }
             })
         } catch (e: Exception) {
+            FloatingHudService.setOverlaysHidden(false)
             lastOcrLog = "screenshot unavailable: ${e.message}"
             ocrInFlight = false
         }
@@ -1459,6 +1474,8 @@ class InDriveAccessibilityService : AccessibilityService() {
         private const val PINCH_MS = 260L
         /** Board snapshots are kept this wide (enough for a card, light on memory). */
         private const val SNAP_WIDTH = 480
+        /** Our overlays are hidden this long before a screenshot (a couple of frames). */
+        private const val OVERLAY_HIDE_MS = 90L
         // Board auto-open: as fast as the map allows (it goes back as soon as the snapshot is taken).
         private const val BOARD_OPEN_STAY_MS = 5000L
         private const val BOARD_OPEN_GAP_MS = 400L

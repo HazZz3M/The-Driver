@@ -81,7 +81,7 @@ class LiveMapPage extends StatelessWidget {
                   icon: Icons.vertical_split_outlined,
                   color: AppColors.accentCyan,
                   title: "تقسيم الشاشة مع إن درايف",
-                  subtitle: "اللوحة في نص الشاشة وإن درايف في النص التاني، والاتنين live",
+                  subtitle: "اللوحة في نص الشاشة وإن درايف في النص التاني، والاتنين بيتحدّثوا لحظة بلحظة",
                   onTap: () => NativeBridgeService.openLiveMap(split: true),
                 ),
                 NavTile(
