@@ -37,7 +37,8 @@ class HudSettings {
   final String liveMapSize; // SMALL | MEDIUM | LARGE (floating window height)
   final int liveMapKeepSeconds; // how long a request stays after it left inDrive's screen
   final bool liveMapConfirmAccept; // accept from the map needs a second tap
-  final bool liveMapShowMe; // the driver's own position
+  final bool boardAutoOpen; // board: open each new request quickly to snapshot inDrive's trip map
+  final bool boardShowApproach; // board: keep the way to the pickup in the snapshot
   final bool liveMapOnlyInDrive; // floating map only while inDrive is on screen
 
   const HudSettings({
@@ -77,7 +78,8 @@ class HudSettings {
     this.liveMapSize = "MEDIUM",
     this.liveMapKeepSeconds = 90,
     this.liveMapConfirmAccept = true,
-    this.liveMapShowMe = true,
+    this.boardAutoOpen = true,
+    this.boardShowApproach = false,
     this.liveMapOnlyInDrive = true,
   });
 
@@ -118,7 +120,8 @@ class HudSettings {
     String? liveMapSize,
     int? liveMapKeepSeconds,
     bool? liveMapConfirmAccept,
-    bool? liveMapShowMe,
+    bool? boardAutoOpen,
+    bool? boardShowApproach,
     bool? liveMapOnlyInDrive,
   }) {
     return HudSettings(
@@ -158,7 +161,8 @@ class HudSettings {
       liveMapSize: liveMapSize ?? this.liveMapSize,
       liveMapKeepSeconds: liveMapKeepSeconds ?? this.liveMapKeepSeconds,
       liveMapConfirmAccept: liveMapConfirmAccept ?? this.liveMapConfirmAccept,
-      liveMapShowMe: liveMapShowMe ?? this.liveMapShowMe,
+      boardAutoOpen: boardAutoOpen ?? this.boardAutoOpen,
+      boardShowApproach: boardShowApproach ?? this.boardShowApproach,
       liveMapOnlyInDrive: liveMapOnlyInDrive ?? this.liveMapOnlyInDrive,
     );
   }
@@ -200,7 +204,8 @@ class HudSettings {
         'liveMapSize': liveMapSize,
         'liveMapKeepSeconds': liveMapKeepSeconds,
         'liveMapConfirmAccept': liveMapConfirmAccept,
-        'liveMapShowMe': liveMapShowMe,
+        'boardAutoOpen': boardAutoOpen,
+        'boardShowApproach': boardShowApproach,
         'liveMapOnlyInDrive': liveMapOnlyInDrive,
       };
 
@@ -244,7 +249,8 @@ class HudSettings {
       liveMapSize: json['liveMapSize'] as String? ?? fallback.liveMapSize,
       liveMapKeepSeconds: ((json['liveMapKeepSeconds'] as num?)?.toInt() ?? fallback.liveMapKeepSeconds).clamp(15, 600),
       liveMapConfirmAccept: json['liveMapConfirmAccept'] as bool? ?? fallback.liveMapConfirmAccept,
-      liveMapShowMe: json['liveMapShowMe'] as bool? ?? fallback.liveMapShowMe,
+      boardAutoOpen: json['boardAutoOpen'] as bool? ?? fallback.boardAutoOpen,
+      boardShowApproach: json['boardShowApproach'] as bool? ?? fallback.boardShowApproach,
       liveMapOnlyInDrive: json['liveMapOnlyInDrive'] as bool? ?? fallback.liveMapOnlyInDrive,
     );
   }

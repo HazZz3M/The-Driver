@@ -65,8 +65,10 @@ data class HudPrefs(
     val liveMapKeepSeconds: Int = 90,
     /** Accept from the map needs a second tap within 3 seconds. */
     val liveMapConfirmAccept: Boolean = true,
-    /** Show the driver's own position (needs the location permission). */
-    val liveMapShowMe: Boolean = true,
+    /** Board: open each new request quickly (and go back) to snapshot inDrive's trip map. */
+    val boardAutoOpen: Boolean = true,
+    /** Board: keep the way to the pickup in the snapshot (otherwise crop to the trip A → B). */
+    val boardShowApproach: Boolean = false,
     /** Hide the floating map while inDrive isn't on screen. */
     val liveMapOnlyInDrive: Boolean = true
 ) {
@@ -107,7 +109,8 @@ data class HudPrefs(
         put("liveMapSize", liveMapSize)
         put("liveMapKeepSeconds", liveMapKeepSeconds)
         put("liveMapConfirmAccept", liveMapConfirmAccept)
-        put("liveMapShowMe", liveMapShowMe)
+        put("boardAutoOpen", boardAutoOpen)
+        put("boardShowApproach", boardShowApproach)
         put("liveMapOnlyInDrive", liveMapOnlyInDrive)
     }
 
@@ -153,7 +156,8 @@ data class HudPrefs(
                 liveMapSize = json.optString("liveMapSize", fallback.liveMapSize),
                 liveMapKeepSeconds = json.optInt("liveMapKeepSeconds", fallback.liveMapKeepSeconds).coerceIn(15, 600),
                 liveMapConfirmAccept = json.optBoolean("liveMapConfirmAccept", fallback.liveMapConfirmAccept),
-                liveMapShowMe = json.optBoolean("liveMapShowMe", fallback.liveMapShowMe),
+                boardAutoOpen = json.optBoolean("boardAutoOpen", fallback.boardAutoOpen),
+                boardShowApproach = json.optBoolean("boardShowApproach", fallback.boardShowApproach),
                 liveMapOnlyInDrive = json.optBoolean("liveMapOnlyInDrive", fallback.liveMapOnlyInDrive)
             )
         }

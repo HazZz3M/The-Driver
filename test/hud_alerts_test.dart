@@ -14,6 +14,10 @@ void main() {
     const h = HudSettings(liveMapEnabled: true, liveMapFloating: true, liveMapSize: "LARGE", liveMapKeepSeconds: 120);
     expect(HudSettings.fromJson(h.toJson()).toJson(), h.toJson());
     expect(HudSettings.fromJson({'liveMapKeepSeconds': 5}).liveMapKeepSeconds, 15);
+    // Board snapshots: fast open on, cropped to the trip by default.
+    expect(const HudSettings().boardAutoOpen, isTrue);
+    expect(const HudSettings().boardShowApproach, isFalse);
+    expect(HudSettings.fromJson(const HudSettings(boardShowApproach: true).toJson()).boardShowApproach, isTrue);
   });
 
   test('alert settings survive a JSON round trip', () {

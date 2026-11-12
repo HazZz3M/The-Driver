@@ -7,9 +7,9 @@ import '../../theme/app_colors.dart';
 import '../components/dialogs.dart';
 import '../components/ui_kit.dart';
 
-/// Live requests map: the requests read from inDrive on an OpenStreetMap map, each with a line to
-/// its destination, and accept / hide / bid from the map. Shown as a floating window over inDrive,
-/// next to inDrive in split screen, or as a screen of its own.
+/// Requests board: every request read from inDrive as a card with a snapshot of inDrive's own map
+/// of the trip, the price and the verdict, and accept / hide / bid / own price from the card.
+/// Shown as a floating window over inDrive, next to inDrive in split screen, or full screen.
 class LiveMapPage extends StatelessWidget {
   const LiveMapPage({super.key});
 
@@ -30,39 +30,38 @@ class LiveMapPage extends StatelessWidget {
       if (v &&
           !await confirmAction(
             context,
-            title: "خريطة الطلبات المباشرة",
-            message: "كل طلب بيظهر في إن درايف هيتحط على الخريطة، بخط من مكان العميل لمكان وصوله.\n\n"
-                "• عشان يتحط على الخريطة، نص العنوان بيتبعت لخدمة العناوين بتاعة جوجل (مش اسم الراكب).\n"
-                "• الخريطة نفسها من OpenStreetMap ومحتاجة إنترنت.\n"
-                "• زرار القبول والإخفاء والعرض على الخريطة بيضغط فعلاً في إن درايف، زي ما تكون ضغطت بإيدك.\n"
-                "• الطلبات بتتقري بس وإن درايف ظاهر على الشاشة (لوحده أو متقسّم مع الخريطة).",
-            confirmLabel: "موافق، فعّل",
+            title: "لوحة الطلبات",
+            message: "كل طلب بيظهر في إن درايف هيبقى كارت فيه صورة خريطة إن درايف للمشوار، والسعر، والصافي.\n\n"
+                "• عشان ياخد صورة الخريطة، التطبيق بيفتح كل طلب جديد بسرعة ويرجع للقائمة (تقدر تقفل ده تحت).\n"
+                "• في المشاوير الطويلة بيصغّر خريطة إن درايف لحد ما المشوار كله يبان.\n"
+                "• أزرار القبول والإخفاء والعرض والسعر بتاعك بتضغط فعلاً في إن درايف، زي ما تكون ضغطت بإيدك.\n"
+                "• فتح الطلبات بسرعة وباستمرار أوضح من الضغط العادي، وممكن يخالف شروط إن درايف ويعرّض حسابك للإيقاف. انت المسؤول عن استخدامه.",
+            confirmLabel: "أفهم، فعّل",
             destructive: false,
           )) {
         return;
       }
-      change((h) => h.copyWith(liveMapEnabled: v, liveMapFloating: v ? true : null));
-      if (v && hud.liveMapShowMe) await NativeBridgeService.requestLocationPermission();
+      change((h) => h.copyWith(liveMapEnabled: v, liveMapFloating: v ? true : null, readMapDistance: v ? true : null));
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("خريطة الطلبات")),
+      appBar: AppBar(title: const Text("لوحة الطلبات")),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(Insets.lg, Insets.sm, Insets.lg, Insets.xl),
           children: [
             const Text(
-              "شوف كل الطلبات اللي في إن درايف على خريطة واحدة: كل طلب دبوس عند مكان العميل عليه السعر ولونه حسب الحكم، "
-              "وخط لحد مكان وصوله. دوس على أي طلب عشان تقبله أو تخفيه أو تعرض سعر.",
+              "شوف كل الطلبات مع بعض: كل طلب كارت عليه صورة المسار من خريطة إن درايف نفسها، والسعر ولونه حسب الحكم. "
+              "اقبل أو اخفي أو دوس على عرض جاهز، أو حط سعرك بـ − و + وابعته، من غير ما تفتح الطلب بإيدك.",
               style: TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.5),
             ),
             const SizedBox(height: Insets.md),
             SettingsGroup(children: [
               SwitchTile(
-                icon: Icons.map_outlined,
+                icon: Icons.view_agenda_outlined,
                 iconColor: AppColors.accentCyan,
-                title: "تشغيل خريطة الطلبات",
-                subtitle: "محتاجة قراءة الشاشة شغالة",
+                title: "تشغيل لوحة الطلبات",
+                subtitle: "محتاجة قراءة الشاشة شغالة، وأندرويد 11 أو أحدث لصور المسار",
                 value: hud.liveMapEnabled,
                 onChanged: enable,
               ),
@@ -73,7 +72,7 @@ class LiveMapPage extends StatelessWidget {
                 SwitchTile(
                   icon: Icons.picture_in_picture_alt_outlined,
                   iconColor: AppColors.accentCyan,
-                  title: "خريطة عائمة فوق إن درايف",
+                  title: "لوحة عائمة فوق إن درايف",
                   subtitle: "شباك تحرّكه من شريطه، تكبّره بـ ⤢ وتصغّره لزرار بـ –. محتاج المساعد العائم شغال",
                   value: hud.liveMapFloating,
                   onChanged: (v) => change((h) => h.copyWith(liveMapFloating: v)),
@@ -82,15 +81,34 @@ class LiveMapPage extends StatelessWidget {
                   icon: Icons.vertical_split_outlined,
                   color: AppColors.accentCyan,
                   title: "تقسيم الشاشة مع إن درايف",
-                  subtitle: "الخريطة في نص الشاشة وإن درايف في النص التاني، والاتنين live",
+                  subtitle: "اللوحة في نص الشاشة وإن درايف في النص التاني، والاتنين live",
                   onTap: () => NativeBridgeService.openLiveMap(split: true),
                 ),
                 NavTile(
                   icon: Icons.fullscreen,
                   color: AppColors.accentCyan,
-                  title: "افتح الخريطة على الشاشة كلها",
-                  subtitle: "بتعرض الطلبات اللي اتقرت آخر شوية. عشان تقبل لازم ترجع لإن درايف",
+                  title: "افتح اللوحة على الشاشة كلها",
+                  subtitle: "بتعرض الطلبات اللي اتقرت آخر شوية. عشان تقبل لازم إن درايف يبقى ظاهر",
                   onTap: () => NativeBridgeService.openLiveMap(split: false),
+                ),
+              ]),
+              const SectionLabel("صورة المسار"),
+              SettingsGroup(children: [
+                SwitchTile(
+                  icon: Icons.bolt_outlined,
+                  iconColor: AppColors.warningYellow,
+                  title: "افتح كل طلب جديد بسرعة وصوّره",
+                  subtitle: "بيفتح الطلب، يستنى المسار يترسم، ياخد الصورة ويرجع على طول (حوالي ثانية لكل طلب). "
+                      "لو مقفول: الصورة بتتاخد بس لما تفتح الطلب بنفسك",
+                  value: hud.boardAutoOpen,
+                  onChanged: (v) => change((h) => h.copyWith(boardAutoOpen: v)),
+                ),
+                SwitchTile(
+                  icon: Icons.alt_route,
+                  title: "اعرض طريق الوصول للعميل كمان",
+                  subtitle: "لو مقفول: الصورة بتتقص على المشوار نفسه من A لـ B",
+                  value: hud.boardShowApproach,
+                  onChanged: (v) => change((h) => h.copyWith(boardShowApproach: v)),
                 ),
               ]),
               const SectionLabel("الإعدادات"),
@@ -98,7 +116,7 @@ class LiveMapPage extends StatelessWidget {
                 if (hud.liveMapFloating)
                   ChoiceTile<String>(
                     icon: Icons.aspect_ratio,
-                    title: "حجم الخريطة العائمة",
+                    title: "حجم اللوحة العائمة",
                     value: hud.liveMapSize,
                     options: sizeLabels,
                     onChanged: (v) => change((h) => h.copyWith(liveMapSize: v)),
@@ -107,13 +125,13 @@ class LiveMapPage extends StatelessWidget {
                   SwitchTile(
                     icon: Icons.layers_clear_outlined,
                     title: "اخفيها لما أقفل إن درايف",
-                    subtitle: "الخريطة العائمة تظهر بس وإن درايف قدامك",
+                    subtitle: "اللوحة العائمة تظهر بس وإن درايف قدامك",
                     value: hud.liveMapOnlyInDrive,
                     onChanged: (v) => change((h) => h.copyWith(liveMapOnlyInDrive: v)),
                   ),
                 NumberStepperTile(
                   icon: Icons.timelapse,
-                  title: "الطلب يفضل على الخريطة",
+                  title: "الطلب يفضل في اللوحة",
                   subtitle: "بعد ما يختفي من شاشة إن درايف (بيبان باهت)",
                   unit: "ثانية",
                   value: hud.liveMapKeepSeconds.toDouble(),
@@ -126,26 +144,16 @@ class LiveMapPage extends StatelessWidget {
                   icon: Icons.touch_app_outlined,
                   iconColor: AppColors.warningYellow,
                   title: "تأكيد قبل القبول",
-                  subtitle: "زرار القبول على الخريطة محتاج ضغطة تانية خلال 3 ثواني",
+                  subtitle: "زرار القبول محتاج ضغطة تانية خلال 3 ثواني. اقفله لو عايز أسرع قبول",
                   value: hud.liveMapConfirmAccept,
                   onChanged: (v) => change((h) => h.copyWith(liveMapConfirmAccept: v)),
-                ),
-                SwitchTile(
-                  icon: Icons.my_location,
-                  title: "اعرض مكاني على الخريطة",
-                  subtitle: "محتاج إذن الموقع. بيساعد كمان إن العناوين تتحط في المكان الصح",
-                  value: hud.liveMapShowMe,
-                  onChanged: (v) async {
-                    change((h) => h.copyWith(liveMapShowMe: v));
-                    if (v) await NativeBridgeService.requestLocationPermission();
-                  },
                 ),
               ]),
               const SizedBox(height: Insets.lg),
               Center(
                 child: TextButton.icon(
                   icon: const Icon(Icons.cleaning_services_outlined),
-                  label: const Text("امسح الطلبات من الخريطة"),
+                  label: const Text("امسح الطلبات من اللوحة"),
                   onPressed: () async {
                     await NativeBridgeService.clearLiveMap();
                     if (context.mounted) {

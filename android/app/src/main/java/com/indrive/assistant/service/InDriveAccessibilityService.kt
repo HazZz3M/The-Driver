@@ -192,39 +192,26 @@ class InDriveAccessibilityService : AccessibilityService() {
     }
 
     // =========================================================================
-    // LIVE MAP: requests on a map, and the driver's taps on it (accept, hide, open, bid)
+    // REQUESTS BOARD: every request with a snapshot of inDrive's own trip map, and the driver's
+    // taps on it (accept, hide, a bid button, or their own price). Actions that need the request's
+    // screen open it first and finish there; one action at a time.
     // =========================================================================
 
     private fun feedLiveMap(rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         if (!InDriveAssistantApp.instance.repository.getHudPrefs().liveMapEnabled) return
         val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-        LiveRequests.update(applicationContext, rides.map { it to analyze(it, settings) }, onRequestScreen)
+        LiveRequests.update(rides.map { it to analyze(it, settings) }, onRequestScreen)
     }
 
-    // Worker thread only: a bid chosen on the map for a request that first had to be opened.
-    private var mapBidKey: String? = null
-    private var mapBidValue = 0
-    private var mapBidUntil = 0L
-
-    private fun continueMapBid(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
-        val key = mapBidKey ?: return
-        if (System.currentTimeMillis() > mapBidUntil) {
-            mapBidKey = null
-            return
-        }
-        if (!onRequestScreen) return
-        val card = rides.singleOrNull()?.takeIf { LiveRequests.keyOf(it) == key } ?: return
-        val chip = card.bidChips.firstOrNull { it.value == mapBidValue } ?: return
-        mapBidKey = null
-        if (clickNodeAt(root, chip.bounds)) onMapBidSent(card, chip.value)
+    /** The driver's action from the board, being carried out. Worker thread only. */
+    private class PendingBoard(val key: String, val action: String, val value: Int, val until: Long) {
+        /** CUSTOM price: 0 = press "Offer your fare", 1 = type the price, 2 = press the send button. */
+        var stage = 0
+        var stageAt = 0L
+        var opens = 0
     }
 
-    private fun onMapBidSent(card: ParsedRideData, value: Int) {
-        RequestLog.recordOutcome(applicationContext, card.fingerprint, RequestLog.STATUS_BID_SENT, value)
-        LiveRequests.setStatus(LiveRequests.keyOf(card), LiveRequests.STATUS_BID_SENT, "عرضت $value")
-        AutomationLog.add(applicationContext, AutomationLog.BID, value.toDouble(), "من الخريطة: عرض $value (عرض الراكب ${card.fare.toInt()})")
-        toast("تم إرسال عرض $value ج.م")
-    }
+    private var pendingBoard: PendingBoard? = null
 
     private fun toast(text: String) {
         mainHandler.post { Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show() }
@@ -236,8 +223,15 @@ class InDriveAccessibilityService : AccessibilityService() {
         return true
     }
 
-    /** The driver tapped Accept / Hide / Open / a bid on the map. Worker thread. */
+    /** The driver tapped Accept / Hide / a bid / their own price on the board. Worker thread. */
     private fun executeMapAction(key: String, action: String, value: Int) {
+        pendingBoard = null
+        // The driver takes over: an automatic open in progress stops managing the screen.
+        if (autoOpenKey != null) {
+            autoOpenKey = null
+            autoOpenActive = false
+            worker.removeCallbacks(autoOpenTimeout)
+        }
         val root = inDriveRoot()
         if (root == null) {
             toast("افتح إن درايف الأول (أو قسّم الشاشة معاه)")
@@ -247,63 +241,329 @@ class InDriveAccessibilityService : AccessibilityService() {
             val rides = resolveTrips(findRideCards(root))
             val onRequestScreen = lastScanWasRequestScreen
             val card = rides.firstOrNull { LiveRequests.keyOf(it) == key }
-            if (card == null) {
+            if (action == MAP_HIDE) {
+                hideFromBoard(root, card, key, onRequestScreen)
+                return
+            }
+            // Accept straight from a list card when it has its own Accept button.
+            if (action == MAP_ACCEPT && card != null && !onRequestScreen) {
+                val b = card.screenBounds ?: card.anchorBounds
+                if (b != null && clickAcceptButtonInside(root, b)) {
+                    onBoardAccepted(card)
+                    return
+                }
+            }
+            if (card == null && !onRequestScreen) {
                 toast("الطلب ده مش ظاهر في إن درايف دلوقتي")
                 return
             }
-            // On the Ride-request screen the whole window is the request.
-            val area = if (onRequestScreen) Rect().also { root.getBoundsInScreen(it) } else card.screenBounds ?: card.anchorBounds
-            when (action) {
-                MAP_ACCEPT -> {
-                    if (area != null && clickAcceptButtonInside(root, area)) {
-                        markAccepted(card)
-                        LiveRequests.setStatus(key, LiveRequests.STATUS_ACCEPTED, "اتقبل")
-                        AutomationLog.add(applicationContext, AutomationLog.ACCEPT, card.fare, "من الخريطة")
-                        toast("تم قبول الطلب (${card.fare.toInt()} ج.م)")
-                    } else {
-                        toast("مش لاقي زرار القبول: افتح الطلب واقبله من إن درايف")
-                    }
-                }
-                MAP_HIDE -> {
-                    val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
-                    val done = if (onRequestScreen) clickSkipButton(root) else swipeCard(card, settings.autoDismissDirection)
-                    if (done) {
-                        dismissedFingerprints.add(card.fingerprint)
-                        RequestLog.markDismissed(applicationContext, card.fingerprint, "من الخريطة")
-                        LiveRequests.setStatus(key, LiveRequests.STATUS_HIDDEN, "اتخفى")
-                        AutomationLog.add(applicationContext, AutomationLog.HIDE, card.fare, "من الخريطة")
-                    } else {
-                        toast("معرفتش أخفي الطلب")
-                    }
-                }
-                MAP_OPEN -> {
-                    if (!onRequestScreen) {
-                        val b = card.screenBounds
-                        if (b == null || !clickCardBody(root, b)) toast("معرفتش أفتح الطلب")
-                    }
-                }
-                MAP_BID -> {
-                    val chip = if (onRequestScreen) card.bidChips.firstOrNull { it.value == value } else null
-                    if (chip != null) {
-                        if (clickNodeAt(root, chip.bounds)) onMapBidSent(card, value) else toast("معرفتش أضغط على العرض")
-                    } else {
-                        // Open the request first; the bid is pressed when its screen shows (within a few seconds).
-                        val b = card.screenBounds
-                        if (!onRequestScreen && b != null && clickCardBody(root, b)) {
-                            mapBidKey = key
-                            mapBidValue = value
-                            mapBidUntil = System.currentTimeMillis() + MAP_BID_WAIT_MS
-                        } else {
-                            toast("العرض ده مش موجود في الطلب")
-                        }
-                    }
-                }
-            }
+            pendingBoard = PendingBoard(key, action, value, System.currentTimeMillis() + BOARD_ACTION_TIMEOUT_MS)
+            LiveRequests.setStatus(key, LiveRequests.STATUS_WORKING, "جاري التنفيذ…")
+            continueBoardAction(root, rides, onRequestScreen)
         } catch (e: Exception) {
-            Log.e(TAG, "Map action $action failed", e)
+            Log.e(TAG, "Board action $action failed", e)
         } finally {
             root.recycle()
         }
+    }
+
+    private fun hideFromBoard(root: AccessibilityNodeInfo, card: ParsedRideData?, key: String, onRequestScreen: Boolean) {
+        if (card == null) {
+            // Not in inDrive any more: just take it off the board.
+            LiveRequests.setStatus(key, LiveRequests.STATUS_HIDDEN, "اتشال من اللوحة")
+            return
+        }
+        val settings = InDriveAssistantApp.instance.repository.getDriverSettings()
+        val done = if (onRequestScreen) clickSkipButton(root) else swipeCard(card, settings.autoDismissDirection)
+        if (done) {
+            dismissedFingerprints.add(card.fingerprint)
+            RequestLog.markDismissed(applicationContext, card.fingerprint, "من لوحة الطلبات")
+            LiveRequests.setStatus(key, LiveRequests.STATUS_HIDDEN, "اتخفى")
+            AutomationLog.add(applicationContext, AutomationLog.HIDE, card.fare, "من لوحة الطلبات")
+        } else {
+            toast("معرفتش أخفي الطلب")
+        }
+    }
+
+    private fun onBoardAccepted(card: ParsedRideData) {
+        markAccepted(card)
+        LiveRequests.setStatus(LiveRequests.keyOf(card), LiveRequests.STATUS_ACCEPTED, "اتقبل")
+        AutomationLog.add(applicationContext, AutomationLog.ACCEPT, card.fare, "من لوحة الطلبات")
+        toast("تم قبول الطلب (${card.fare.toInt()} ج.م)")
+    }
+
+    private fun onBoardBidSent(card: ParsedRideData, value: Int) {
+        RequestLog.recordOutcome(applicationContext, card.fingerprint, RequestLog.STATUS_BID_SENT, value)
+        LiveRequests.setStatus(LiveRequests.keyOf(card), LiveRequests.STATUS_BID_SENT, "عرضت $value")
+        AutomationLog.add(applicationContext, AutomationLog.BID, value.toDouble(), "من لوحة الطلبات: $value (عرض الراكب ${card.fare.toInt()})")
+        toast("تم إرسال عرض $value ج.م")
+    }
+
+    private fun failBoardAction(p: PendingBoard, message: String) {
+        pendingBoard = null
+        LiveRequests.setStatus(p.key, LiveRequests.STATUS_LIVE)
+        toast(message)
+    }
+
+    /**
+     * Moves the pending board action one step on the current screen: open the request (going
+     * back first if another one is open), then accept / press the bid / type the price.
+     */
+    private fun continueBoardAction(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
+        val p = pendingBoard ?: return
+        val now = System.currentTimeMillis()
+        if (now > p.until) {
+            if (p.action == MAP_CUSTOM) {
+                // Unknown layout of the offer screen: the next screen read is saved for diagnosis.
+                captureRequested = true
+                failBoardAction(p, "معرفتش أبعت السعر. اتسجلت لقطة تشخيص في التطبيق، ابعتها للمطور")
+            } else {
+                failBoardAction(p, "معرفتش أكمّل: الطلب ممكن يكون اختفى")
+            }
+            return
+        }
+        val card = rides.firstOrNull { LiveRequests.keyOf(it) == p.key }
+        if (!onRequestScreen) {
+            // On the list: open the request (again if a tap didn't take).
+            if (card?.screenBounds == null) return
+            if (now - p.stageAt > BOARD_RETRY_MS && p.opens < 3) {
+                p.opens++
+                p.stageAt = now
+                clickCardBody(root, card.screenBounds)
+            }
+            worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+            return
+        }
+        if (card == null) {
+            // Another request is open: back to the list first.
+            if (now - p.stageAt > BOARD_RETRY_MS) {
+                p.stageAt = now
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+            return
+        }
+        val screen = Rect().also { root.getBoundsInScreen(it) }
+        when (p.action) {
+            MAP_ACCEPT -> {
+                pendingBoard = null
+                if (clickAcceptButtonInside(root, screen)) onBoardAccepted(card)
+                else failBoardAction(p, "مش لاقي زرار القبول في الطلب")
+            }
+            MAP_BID -> {
+                val chip = card.bidChips.firstOrNull { it.value == p.value }
+                if (chip == null) {
+                    // The bid buttons may still be drawing: wait a little, then give up.
+                    if (now - p.stageAt > 1500 && p.stageAt != 0L) failBoardAction(p, "العرض ${p.value} مش موجود في الطلب")
+                    else {
+                        if (p.stageAt == 0L) p.stageAt = now
+                        worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+                    }
+                    return
+                }
+                pendingBoard = null
+                if (clickNodeAt(root, chip.bounds)) onBoardBidSent(card, p.value)
+                else failBoardAction(p, "معرفتش أضغط على العرض")
+            }
+            MAP_CUSTOM -> continueCustomPrice(root, card, p, now)
+        }
+    }
+
+    /** "Offer your fare" → type the price → send. Each step waits for the screen to react. */
+    private fun continueCustomPrice(root: AccessibilityNodeInfo, card: ParsedRideData, p: PendingBoard, now: Long) {
+        if (now - p.stageAt < BOARD_STEP_MS) {
+            worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+            return
+        }
+        val text = p.value.toString()
+        when (p.stage) {
+            0 -> {
+                // The price field may already be on screen; otherwise press "Offer your fare".
+                if (setTextInEditable(root, text)) {
+                    p.stage = 2
+                } else if (clickFirst(root) { label -> OFFER_FIELD_LABELS.any { label.contains(it) } }) {
+                    p.stage = 1
+                }
+            }
+            1 -> if (setTextInEditable(root, text)) p.stage = 2
+            2 -> {
+                val sent = clickFirst(root) { label ->
+                    label in SEND_OFFER_LABELS || (label.startsWith("offer") && label.contains(text)) ||
+                        (label.startsWith("اقترح") && label.contains(text))
+                }
+                if (sent) {
+                    pendingBoard = null
+                    onBoardBidSent(card, p.value)
+                    return
+                }
+            }
+        }
+        p.stageAt = now
+        worker.postDelayed({ requestRescan() }, BOARD_STEP_MS)
+    }
+
+    /** Types [text] into the first visible editable field. */
+    private fun setTextInEditable(root: AccessibilityNodeInfo, text: String): Boolean {
+        val seen = mutableListOf<AccessibilityNodeInfo>()
+        var field: AccessibilityNodeInfo? = null
+        fun visit(node: AccessibilityNodeInfo) {
+            if (field != null) return
+            if (node.isEditable && node.isVisibleToUser && node.isEnabled) {
+                field = node
+                return
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                seen.add(child)
+                visit(child)
+            }
+        }
+        return try {
+            visit(root)
+            val f = field ?: return false
+            f.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            val args = android.os.Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            }
+            f.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        } finally {
+            seen.forEach { it.recycle() }
+        }
+    }
+
+    /** Clicks the first visible node whose label (lower case, digits normalised) matches. */
+    private fun clickFirst(root: AccessibilityNodeInfo, matches: (String) -> Boolean): Boolean {
+        val seen = mutableListOf<AccessibilityNodeInfo>()
+        var target: AccessibilityNodeInfo? = null
+        fun visit(node: AccessibilityNodeInfo) {
+            if (target != null) return
+            val label = normalizeArabicDigits("${node.text ?: node.contentDescription ?: ""}".trim()).lowercase()
+            if (label.isNotEmpty() && node.isVisibleToUser && matches(label)) {
+                target = node
+                return
+            }
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                seen.add(child)
+                visit(child)
+            }
+        }
+        return try {
+            visit(root)
+            var t = target
+            var depth = 0
+            while (t != null && !t.isClickable && depth < 4) {
+                t = t.parent?.also { seen.add(it) }
+                depth++
+            }
+            t != null && t.isClickable && t.isEnabled && t.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        } finally {
+            seen.forEach { it.recycle() }
+        }
+    }
+
+    // ---- Snapshot of inDrive's trip map (request screen) ----
+
+    /** Per request: when its markers showed, zoom-outs done, screenshots tried. Worker thread only. */
+    private class SnapState(val openedAt: Long) {
+        var markersAt = 0L
+        var zooms = 0
+        var zoomAt = 0L
+        var attempts = 0
+    }
+
+    private val snapStates = LinkedHashMap<String, SnapState>()
+
+    /**
+     * On a Ride-request screen without a snapshot yet: waits for the route to be drawn (markers A
+     * and B), zooms the map out when the trip doesn't fit (long trips), then takes one screenshot
+     * for the board (and reads the trip length from it when unknown). True when it took over the
+     * screenshot for this scan.
+     */
+    private fun maybeSnapshotRequest(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean): Boolean {
+        if (!onRequestScreen || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || ocrInFlight) return false
+        val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
+        if (!hud.liveMapEnabled) return false
+        val card = rides.singleOrNull() ?: return false
+        val key = LiveRequests.keyOf(card)
+        if (LiveRequests.hasSnapshot(key)) return false
+        val now = System.currentTimeMillis()
+        val st = snapStates.getOrPut(key) { SnapState(now) }
+        while (snapStates.size > 60) snapStates.remove(snapStates.keys.first())
+        if (st.attempts >= MAX_SNAP_ATTEMPTS) return false
+
+        val screen = Rect().also { root.getBoundsInScreen(it) }
+        val mapBottom = card.screenBounds?.top ?: (screen.top + screen.height() / 2)
+        val map = Rect(screen.left, screen.top, screen.right, mapBottom)
+        if (map.height() < 200) return false
+        val markers = findMapMarkers(root)
+        val a = markers.pointA
+        val b = markers.pointB
+
+        // Give the map a moment to draw the route once its markers are there.
+        if (a == null && b == null && now - st.openedAt < SNAP_NO_MARKERS_WAIT_MS) {
+            worker.postDelayed({ requestRescan() }, 150)
+            return false
+        }
+        if (st.markersAt == 0L) st.markersAt = now
+        val settleUntil = maxOf(st.markersAt + SNAP_SETTLE_MS, st.zoomAt + SNAP_ZOOM_SETTLE_MS)
+        if (now < settleUntil) {
+            worker.postDelayed({ requestRescan() }, settleUntil - now + 20)
+            return false
+        }
+
+        // Long trip: A or B outside the visible map (or under the sheet): zoom out and look again.
+        val inner = Rect(map).apply { inset(map.width() / 14, map.height() / 14) }
+        val cut = a == null || b == null || listOf(a, b).any { !inner.contains(it.centerX(), it.centerY()) }
+        if (cut && st.zooms < MAX_SNAP_ZOOMS && pinchOut(map)) {
+            st.zooms++
+            st.zoomAt = now
+            rideKey(card)?.let { ocrAttempts.remove(it) } // the trip label may be visible now
+            worker.postDelayed({ requestRescan() }, SNAP_ZOOM_SETTLE_MS + 20)
+            return true
+        }
+
+        val region = if (hud.boardShowApproach || a == null || b == null) map else tripRegion(a, b, map)
+        // Read the trip length from the same screenshot when it is still unknown.
+        val ocrKey = rideKey(card)
+        val ocrRegion = if (!card.tripKnown && hud.readMapDistance && ocrKey != null && b != null &&
+            (ocrAttempts[ocrKey] ?: 0) < MAX_OCR_ATTEMPTS
+        ) {
+            markers.infoWindows.minByOrNull { distanceSq(it, b) }
+        } else null
+        if (ocrRegion != null && ocrKey != null) ocrAttempts[ocrKey] = (ocrAttempts[ocrKey] ?: 0) + 1
+        st.attempts++
+        ocrInFlight = true
+        captureRequest(key, region, ocrKey, ocrRegion)
+        return true
+    }
+
+    /** The part of the map around A and B (the trip itself, without the way to the pickup). */
+    private fun tripRegion(a: Rect, b: Rect, map: Rect): Rect {
+        val r = Rect(a).apply { union(b) }
+        val pad = maxOf(r.width(), r.height()) / 4 + 80
+        r.inset(-pad, -pad)
+        // Not too thin: at least half the map's height and width.
+        if (r.height() < map.height() / 2) r.inset(0, -(map.height() / 2 - r.height()) / 2)
+        if (r.width() < map.width() / 2) r.inset(-(map.width() / 2 - r.width()) / 2, 0)
+        if (!r.intersect(map)) return Rect(map)
+        return r
+    }
+
+    /** Two fingers pinching towards the centre of [area]: the map zooms out. */
+    private fun pinchOut(area: Rect): Boolean {
+        val cx = area.centerX().toFloat()
+        val cy = area.centerY().toFloat()
+        val d = minOf(area.width(), area.height()) * 0.38f
+        fun stroke(fromX: Float, fromY: Float, toX: Float, toY: Float) =
+            android.accessibilityservice.GestureDescription.StrokeDescription(
+                android.graphics.Path().apply { moveTo(fromX, fromY); lineTo(toX, toY) }, 0, PINCH_MS
+            )
+        val gesture = android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(stroke(cx - d, cy - d, cx - 24, cy - 24))
+            .addStroke(stroke(cx + d, cy + d, cx + 24, cy + 24))
+            .build()
+        return dispatchGesture(gesture, null, null)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -355,11 +615,11 @@ class InDriveAccessibilityService : AccessibilityService() {
             markInDriveShown()
             showPopups(rides)
             feedLiveMap(rides, onRequestScreen)
-            continueMapBid(root, rides, onRequestScreen)
+            continueBoardAction(root, rides, onRequestScreen)
             logRequests(rides, onRequestScreen)
             maybePromptRating(rides, onRequestScreen)
             maybeScheduleAutoAccept(rides)
-            maybeReadTripFromMap(root, rides)
+            if (!maybeSnapshotRequest(root, rides, onRequestScreen)) maybeReadTripFromMap(root, rides)
             maybeAutoOpen(root, rides, onRequestScreen)
             maybeAutoTapBestBid(rides, onRequestScreen)
             maybeAutoDismiss(rides)
@@ -479,9 +739,11 @@ class InDriveAccessibilityService : AccessibilityService() {
     private fun maybeAutoOpen(root: AccessibilityNodeInfo, rides: List<ParsedRideData>, onRequestScreen: Boolean) {
         val now = System.currentTimeMillis()
         val hud = InDriveAssistantApp.instance.repository.getHudPrefs()
+        // Requests board: open every new request quickly to snapshot its trip map.
+        val boardOpen = hud.liveMapEnabled && hud.boardAutoOpen
         // Driver's timings: how long a request stays open at most, and the pause before the next one.
-        val stayMs = (hud.autoOpenStaySeconds * 1000).toLong().coerceIn(1000L, 30_000L)
-        val gapMs = (hud.autoOpenGapSeconds * 1000).toLong().coerceIn(1000L, 120_000L)
+        val stayMs = if (boardOpen) BOARD_OPEN_STAY_MS else (hud.autoOpenStaySeconds * 1000).toLong().coerceIn(1000L, 30_000L)
+        val gapMs = if (boardOpen) BOARD_OPEN_GAP_MS else (hud.autoOpenGapSeconds * 1000).toLong().coerceIn(1000L, 120_000L)
         val active = autoOpenKey
         if (active != null) {
             val elapsed = now - autoOpenStartedAt
@@ -490,7 +752,7 @@ class InDriveAccessibilityService : AccessibilityService() {
                 val card = rides.singleOrNull()
                 if (card == null || rideKey(card) != active) {
                     finishAutoOpen(goBack = false) // the driver opened something else: hands off
-                } else if ((card.tripKnown && hud.autoOpenBackWhenRead) || elapsed > stayMs) {
+                } else if (autoOpenDone(card, active, hud, boardOpen) || elapsed > stayMs) {
                     finishAutoOpen(goBack = true)
                 }
             } else if (autoOpenSawRequest || elapsed > AUTO_OPEN_TAP_TIMEOUT_MS) {
@@ -499,13 +761,16 @@ class InDriveAccessibilityService : AccessibilityService() {
             return
         }
 
-        if (!hud.tripAutoOpen || !hud.readMapDistance || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || automationPaused()) return
-        if (onRequestScreen || pendingAutoAcceptFingerprint != null || pendingDismiss != null) return
+        val tripOpen = hud.tripAutoOpen && hud.readMapDistance
+        if ((!tripOpen && !boardOpen) || Build.VERSION.SDK_INT < Build.VERSION_CODES.R || automationPaused()) return
+        if (onRequestScreen || pendingAutoAcceptFingerprint != null || pendingDismiss != null || pendingBoard != null) return
         // The pause is counted from the moment the previous request was closed.
         if (now - lastAutoOpenAt < gapMs) return
 
         val candidate = rides.firstOrNull { card ->
-            !card.tripKnown && card.screenBounds != null && rideKey(card)?.let { it !in autoOpenTried } == true
+            val k = rideKey(card)
+            card.screenBounds != null && k != null && k !in autoOpenTried &&
+                ((tripOpen && !card.tripKnown) || (boardOpen && !LiveRequests.hasSnapshot(k)))
         } ?: return
         val key = rideKey(candidate) ?: return
         autoOpenTried.add(key)
@@ -719,6 +984,14 @@ class InDriveAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** The opened request gave what it was opened for: its trip length and/or its board snapshot. */
+    private fun autoOpenDone(card: ParsedRideData, key: String, hud: com.indrive.assistant.data.model.HudPrefs, boardOpen: Boolean): Boolean {
+        if (!boardOpen) return card.tripKnown && hud.autoOpenBackWhenRead
+        // The snapshot's screenshot also reads the trip length when it can: wait for that reading.
+        val snapDone = LiveRequests.hasSnapshot(key) || (snapStates[key]?.attempts ?: 0) >= MAX_SNAP_ATTEMPTS
+        return snapDone && !ocrInFlight
+    }
+
     private fun finishAutoOpen(goBack: Boolean) {
         autoOpenKey = null
         autoOpenActive = false
@@ -799,59 +1072,85 @@ class InDriveAccessibilityService : AccessibilityService() {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun captureAndRead(key: String, region: Rect) {
+    private fun captureAndRead(key: String, region: Rect) = captureRequest(null, null, key, region)
+
+    /**
+     * One screenshot for both: the board's snapshot of the trip map ([snapRegion], stored for
+     * [snapKey]) and the trip-length OCR ([ocrRegion], learned for [ocrKey]). Either may be null.
+     */
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun captureRequest(snapKey: String?, snapRegion: Rect?, ocrKey: String?, ocrRegion: Rect?) {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, workerExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
-                    val crop = try {
+                    val full = try {
                         val hardware = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
                         val software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
                         result.hardwareBuffer.close()
-                        software?.let { cropSafely(it, region) }
+                        software
                     } catch (e: Exception) {
                         Log.w(TAG, "Screenshot decode failed", e)
                         null
                     }
-                    if (crop == null) {
+                    if (full == null) {
                         ocrInFlight = false
                         return
                     }
-                    textRecognizer.process(InputImage.fromBitmap(crop, 0))
-                        .addOnSuccessListener(workerExecutor) { visionText ->
-                            val raw = visionText.text.replace('\n', ' ')
-                            val km = extractTripKm(raw)
-                            lastOcrLog = "region=${region.toShortString()} text='$raw' → trip=${km ?: "?"}"
-                            if (km != null) {
-                                storeTripMemory(key, km)
-                                ocrAttempts.remove(key)
-                                // B: remember this pickup → destination for later list cards.
-                                if (InDriveAssistantApp.instance.repository.getHudPrefs().tripFromHistory) {
-                                    TripDistanceResolver.learn(applicationContext, key, km)
-                                }
-                                // Re-parse now so the badge switches from "≈" to the real value.
-                                if (!scanScheduled) {
-                                    scanScheduled = true
-                                    worker.post(scanRunnable)
-                                }
-                            }
-                            ocrInFlight = false
-                        }
-                        .addOnFailureListener(workerExecutor) { e ->
-                            lastOcrLog = "region=${region.toShortString()} OCR failed: ${e.message}"
-                            ocrInFlight = false
-                        }
+                    if (snapKey != null && snapRegion != null) {
+                        cropSafely(full, snapRegion)?.let { LiveRequests.setSnapshot(snapKey, scaleForBoard(it)) }
+                        requestRescan() // auto-open can go back now
+                    }
+                    val crop = if (ocrKey != null && ocrRegion != null) cropSafely(full, ocrRegion) else null
+                    if (crop == null || ocrKey == null || ocrRegion == null) {
+                        ocrInFlight = false
+                        return
+                    }
+                    readTripLength(ocrKey, ocrRegion, crop)
                 }
 
                 override fun onFailure(errorCode: Int) {
                     // e.g. ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT: the next scan retries.
                     lastOcrLog = "screenshot failed: code=$errorCode"
                     ocrInFlight = false
+                    if (snapKey != null) worker.postDelayed({ requestRescan() }, 400)
                 }
             })
         } catch (e: Exception) {
             lastOcrLog = "screenshot unavailable: ${e.message}"
             ocrInFlight = false
         }
+    }
+
+    private fun scaleForBoard(src: Bitmap): Bitmap {
+        if (src.width <= SNAP_WIDTH) return src
+        return Bitmap.createScaledBitmap(src, SNAP_WIDTH, (src.height.toLong() * SNAP_WIDTH / src.width).toInt().coerceAtLeast(1), true)
+    }
+
+    private fun readTripLength(key: String, region: Rect, crop: Bitmap) {
+        textRecognizer.process(InputImage.fromBitmap(crop, 0))
+            .addOnSuccessListener(workerExecutor) { visionText ->
+                val raw = visionText.text.replace('\n', ' ')
+                val km = extractTripKm(raw)
+                lastOcrLog = "region=${region.toShortString()} text='$raw' → trip=${km ?: "?"}"
+                if (km != null) {
+                    storeTripMemory(key, km)
+                    ocrAttempts.remove(key)
+                    // B: remember this pickup → destination for later list cards.
+                    if (InDriveAssistantApp.instance.repository.getHudPrefs().tripFromHistory) {
+                        TripDistanceResolver.learn(applicationContext, key, km)
+                    }
+                    // Re-parse now so the badge switches from "≈" to the real value.
+                    if (!scanScheduled) {
+                        scanScheduled = true
+                        worker.post(scanRunnable)
+                    }
+                }
+                ocrInFlight = false
+            }
+            .addOnFailureListener(workerExecutor) { e ->
+                lastOcrLog = "region=${region.toShortString()} OCR failed: ${e.message}"
+                ocrInFlight = false
+            }
     }
 
     private fun cropSafely(bitmap: Bitmap, region: Rect): Bitmap? {
@@ -1137,13 +1436,35 @@ class InDriveAccessibilityService : AccessibilityService() {
 
         const val MAP_ACCEPT = "ACCEPT"
         const val MAP_HIDE = "HIDE"
-        const val MAP_OPEN = "OPEN"
         const val MAP_BID = "BID"
-        /** A bid chosen on the map waits this long for the request's screen to open. */
-        private const val MAP_BID_WAIT_MS = 6000L
+        /** The driver's own price, typed into inDrive's "Offer your fare" field. */
+        const val MAP_CUSTOM = "CUSTOM"
+        /** A board action gives up after this long (request gone, unknown screen). */
+        private const val BOARD_ACTION_TIMEOUT_MS = 9000L
+        /** Pause between two steps of a board action (the screen needs to react). */
+        private const val BOARD_STEP_MS = 280L
+        /** A tap that didn't open / close a screen is retried after this long. */
+        private const val BOARD_RETRY_MS = 900L
+        /** "Offer your fare" button on the request screen (lower case, contains). */
+        private val OFFER_FIELD_LABELS = listOf("offer your fare", "offer your price", "your offer", "اقترح سعرك", "اعرض سعرك", "اقترح سعر", "سعرك")
+        /** The button that sends the typed price (lower case, whole label). */
+        private val SEND_OFFER_LABELS = setOf("offer", "send", "send offer", "done", "ok", "confirm", "اقترح", "إرسال", "ارسال", "تم", "تأكيد", "تاكيد", "اعرض")
+
+        // Board snapshots: wait for the route to draw, zoom out for long trips (a few times at most).
+        private const val SNAP_SETTLE_MS = 350L
+        private const val SNAP_ZOOM_SETTLE_MS = 650L
+        private const val SNAP_NO_MARKERS_WAIT_MS = 1500L
+        private const val MAX_SNAP_ZOOMS = 3
+        private const val MAX_SNAP_ATTEMPTS = 3
+        private const val PINCH_MS = 260L
+        /** Board snapshots are kept this wide (enough for a card, light on memory). */
+        private const val SNAP_WIDTH = 480
+        // Board auto-open: as fast as the map allows (it goes back as soon as the snapshot is taken).
+        private const val BOARD_OPEN_STAY_MS = 5000L
+        private const val BOARD_OPEN_GAP_MS = 400L
 
         /**
-         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_OPEN] or [MAP_BID] with
+         * The driver's tap on the live map ([MAP_ACCEPT], [MAP_HIDE], [MAP_BID] or [MAP_CUSTOM] with
          * [value]) for the request [key] (LiveRequests.keyOf). False when screen reading is off.
          */
         fun mapAction(key: String, action: String, value: Int = 0): Boolean {

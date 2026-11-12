@@ -72,16 +72,6 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(true)
                 }
-                "hasLocationPermission" -> result.success(hasLocationPermission())
-                "requestLocationPermission" -> {
-                    if (!hasLocationPermission() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        requestPermissions(
-                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                            REQUEST_LOCATION
-                        )
-                    }
-                    result.success(true)
-                }
                 "clearLiveMap" -> {
                     com.indrive.assistant.service.LiveRequests.clear()
                     result.success(true)
@@ -206,12 +196,7 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
     companion object {
         private const val REQUEST_NOTIFICATIONS = 4001
-        private const val REQUEST_LOCATION = 4002
     }
 }

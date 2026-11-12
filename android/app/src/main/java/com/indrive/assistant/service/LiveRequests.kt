@@ -1,6 +1,6 @@
 package com.indrive.assistant.service
 
-import android.content.Context
+import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
 import com.indrive.assistant.data.model.ParsedRideData
@@ -9,11 +9,12 @@ import com.indrive.assistant.engine.FareCalculatorEngine
 import com.indrive.assistant.engine.ProfitabilityLevel
 
 /**
- * The requests shown on the live map: every request read from inDrive in the last
- * [HudPrefs.liveMapKeepSeconds], with its verdict and where its pickup and destination are.
+ * The requests shown on the requests board: every request read from inDrive in the last
+ * [HudPrefs.liveMapKeepSeconds], with its verdict and a snapshot of inDrive's own map of the
+ * trip (taken when the request screen was open).
  *
- * Fed by the accessibility worker ([update]); read by the map views on the main thread
- * ([snapshot], [addListener]). A request stays on the map for a while after it leaves inDrive's
+ * Fed by the accessibility worker ([update], [setSnapshot]); read by the board views on the main
+ * thread ([snapshot], [addListener]). A request stays for a while after it leaves inDrive's
  * screen (e.g. while another request is open), drawn faded until it shows again.
  */
 object LiveRequests {
@@ -26,10 +27,7 @@ object LiveRequests {
         @Volatile var lastSeen: Long,
         /** On inDrive's screen at the last read (actions only work then). */
         @Volatile var onScreen: Boolean,
-        /** [lat, lng] once geocoded. */
-        @Volatile var pickup: DoubleArray? = null,
-        @Volatile var dropoff: DoubleArray? = null,
-        /** LIVE | ACCEPTED | HIDDEN | BID_SENT */
+        /** LIVE | ACCEPTED | HIDDEN | BID_SENT | WORKING */
         @Volatile var status: String = STATUS_LIVE,
         @Volatile var statusDetail: String = ""
     ) {
@@ -48,8 +46,13 @@ object LiveRequests {
     const val STATUS_ACCEPTED = "ACCEPTED"
     const val STATUS_HIDDEN = "HIDDEN"
     const val STATUS_BID_SENT = "BID_SENT"
+    /** The driver's action is being carried out in inDrive (opening, typing the price…). */
+    const val STATUS_WORKING = "WORKING"
 
     private val entries = LinkedHashMap<String, Entry>() // guarded by this
+    /** Snapshots of inDrive's trip map, by key (most recent last). Guarded by this. */
+    private val snapshots = LinkedHashMap<String, Bitmap>()
+    private const val MAX_SNAPSHOTS = 40
     private val listeners = mutableListOf<() -> Unit>() // main thread only
     private val main = Handler(Looper.getMainLooper())
     private var notifyPosted = false // main thread only
@@ -65,8 +68,8 @@ object LiveRequests {
             FareCalculatorEngine.normalizeArabicText(card.dropoffAddress)
     }
 
-    /** Worker thread: the requests just read from inDrive (empty when inDrive left the screen). */
-    fun update(context: Context, read: List<Pair<ParsedRideData, FareAnalysisResult>>, onRequestScreen: Boolean) {
+    /** Worker thread: the requests just read from inDrive. */
+    fun update(read: List<Pair<ParsedRideData, FareAnalysisResult>>, onRequestScreen: Boolean) {
         val now = System.currentTimeMillis()
         val seen = HashSet<String>()
         synchronized(this) {
@@ -84,10 +87,10 @@ object LiveRequests {
                     e.onScreen = true
                 }
             }
+            // On a request screen the list isn't visible: the others are not "gone".
             for (e in entries.values) if (e.key !in seen) e.onScreen = false
             openKey = if (onRequestScreen) read.singleOrNull()?.let { keyOf(it.first) } else null
         }
-        geocodeMissing(context)
         changed()
     }
 
@@ -109,6 +112,19 @@ object LiveRequests {
         changed()
     }
 
+    fun setSnapshot(key: String, bitmap: Bitmap) {
+        synchronized(this) {
+            snapshots.remove(key)
+            snapshots[key] = bitmap
+            while (snapshots.size > MAX_SNAPSHOTS) snapshots.remove(snapshots.keys.first())
+        }
+        changed()
+    }
+
+    fun hasSnapshot(key: String): Boolean = synchronized(this) { snapshots.containsKey(key) }
+
+    fun snapshotOf(key: String): Bitmap? = synchronized(this) { snapshots[key] }
+
     /** Requests seen in the last [keepMs], newest first. Expired ones are dropped. */
     fun snapshot(keepMs: Long): List<Entry> = synchronized(this) {
         val now = System.currentTimeMillis()
@@ -119,25 +135,14 @@ object LiveRequests {
     fun get(key: String): Entry? = synchronized(this) { entries[key] }
 
     fun clear() {
-        synchronized(this) { entries.clear() }
-        changed()
-    }
-
-    private fun geocodeMissing(context: Context) {
-        val todo = synchronized(this) { entries.values.filter { it.pickup == null || it.dropoff == null } }
-        for (e in todo) {
-            if (e.pickup == null) e.pickup = TripDistanceResolver.coordinatesOf(context, e.card.pickupAddress) { refill(context) }
-            if (e.dropoff == null) e.dropoff = TripDistanceResolver.coordinatesOf(context, e.card.dropoffAddress) { refill(context) }
+        synchronized(this) {
+            entries.clear()
+            snapshots.clear()
         }
-    }
-
-    /** A geocoding lookup finished (geocoder thread): place what can be placed now. */
-    private fun refill(context: Context) {
-        geocodeMissing(context)
         changed()
     }
 
-    // ---- Listeners (map views) ----
+    // ---- Listeners (board views) ----
 
     fun addListener(l: () -> Unit) {
         main.post { listeners.add(l) }
@@ -155,7 +160,7 @@ object LiveRequests {
             main.postDelayed({
                 notifyPosted = false
                 listeners.toList().forEach { it() }
-            }, 150)
+            }, 120)
         }
     }
 }

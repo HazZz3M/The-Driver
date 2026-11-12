@@ -110,32 +110,15 @@ class NativeBridgeService {
     }
   }
 
-  // ---- Live requests map (LiveMapActivity.kt / LiveMapView.kt) ----
+  // ---- Requests board (LiveMapActivity.kt / RequestBoardView.kt) ----
 
-  /// Opens the map screen: full screen, or with inDrive next to it ([split]).
+  /// Opens the board screen: full screen, or with inDrive next to it ([split]).
   static Future<bool> openLiveMap({required bool split}) async {
     try {
       return await _channel.invokeMethod<bool>('openLiveMap', {'split': split}) ?? false;
     } catch (e) {
       debugPrint("openLiveMap failed: $e");
       return false;
-    }
-  }
-
-  static Future<bool> hasLocationPermission() async {
-    try {
-      return await _channel.invokeMethod<bool>('hasLocationPermission') ?? false;
-    } catch (e) {
-      debugPrint("hasLocationPermission failed: $e");
-      return false;
-    }
-  }
-
-  static Future<void> requestLocationPermission() async {
-    try {
-      await _channel.invokeMethod('requestLocationPermission');
-    } catch (e) {
-      debugPrint("requestLocationPermission failed: $e");
     }
   }
 

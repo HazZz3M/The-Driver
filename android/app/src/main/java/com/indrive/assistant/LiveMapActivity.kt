@@ -1,9 +1,7 @@
 package com.indrive.assistant
 
-import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,103 +9,91 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.indrive.assistant.service.FloatingHudService
 import com.indrive.assistant.service.InDriveAccessibilityService
-import com.indrive.assistant.service.LiveMapView
+import com.indrive.assistant.service.RequestBoardView
 
 /**
- * The live requests map as a screen of its own: full screen (requests read while inDrive was
- * open), or next to inDrive in split screen ([EXTRA_SPLIT]), where it updates live and its
- * buttons act on inDrive.
+ * The requests board as a screen of its own: next to inDrive in split screen ([EXTRA_SPLIT]),
+ * where it updates live and its buttons act on inDrive, or full screen (the requests read while
+ * inDrive was open).
  */
 class LiveMapActivity : Activity() {
 
-    private lateinit var mapView: LiveMapView
+    private lateinit var board: RequestBoardView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mapView = LiveMapView(this, compact = false)
-        val root = FrameLayout(this)
-        root.addView(mapView)
+        board = RequestBoardView(this, compact = false)
 
         val density = resources.displayMetrics.density
         fun dp(v: Int) = (v * density).toInt()
         fun button(label: String, onClick: () -> Unit) = TextView(this).apply {
             text = label
             setTextColor(Color.WHITE)
-            textSize = 12.5f
+            textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(12), dp(7), dp(12), dp(7))
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(9), dp(12), dp(9))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#E64F46E5"))
+                setColor(Color.parseColor("#4F46E5"))
                 cornerRadius = dp(18).toFloat()
             }
             setOnClickListener { onClick() }
         }
-        val actions = LinearLayout(this).apply {
+        val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(8), dp(48), dp(8), 0)
-            addView(button("فتح إن درايف") { openInDrive(adjacent = false) })
+            setBackgroundColor(Color.parseColor("#0B0F17"))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            addView(TextView(context).apply {
+                text = "لوحة الطلبات"
+                setTextColor(Color.WHITE)
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER_VERTICAL
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            addView(button("إن درايف") { openInDrive(adjacent = false) })
             addView(TextView(context), LinearLayout.LayoutParams(dp(6), 1))
             addView(button("تقسيم الشاشة") { openInDrive(adjacent = true) })
         }
-        root.addView(actions, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START
-        ))
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(bar, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(board, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
         setContentView(root)
 
-        askForLocation()
         if (!InDriveAccessibilityService.isRunning()) {
-            Toast.makeText(this, "قراءة الشاشة متوقفة: الطلبات مش هتظهر على الخريطة", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "قراءة الشاشة متوقفة: الطلبات مش هتظهر هنا", Toast.LENGTH_LONG).show()
         }
         if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_SPLIT, false)) openInDrive(adjacent = true)
     }
 
-    override fun onResume() {
-        super.onResume()
+    // Visible from onStart to onStop: in split screen the board keeps updating (and the floating
+    // board stays hidden) while the driver is tapping in inDrive.
+    override fun onStart() {
+        super.onStart()
         isShowing = true
-        mapView.start()
+        board.start()
         FloatingHudService.refreshFloatingMap()
     }
 
-    override fun onPause() {
-        super.onPause()
+    override fun onStop() {
+        super.onStop()
         isShowing = false
-        mapView.stop()
+        board.stop()
         FloatingHudService.refreshFloatingMap()
     }
 
     override fun onDestroy() {
-        mapView.destroy()
+        board.destroy()
         super.onDestroy()
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_LOCATION) {
-            mapView.stop()
-            mapView.start() // picks up the permission
-        }
-    }
-
-    private fun askForLocation() {
-        if (!InDriveAssistantApp.instance.repository.getHudPrefs().liveMapShowMe) return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            requestPermissions(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                REQUEST_LOCATION
-            )
-        }
-    }
-
-    /** Opens inDrive; [adjacent] asks Android to put it next to the map (split screen). */
+    /** Opens inDrive; [adjacent] asks Android to put it next to the board (split screen). */
     private fun openInDrive(adjacent: Boolean) {
         val launch = inDriveLaunchIntent(this)
         if (launch == null) {
@@ -137,9 +123,8 @@ class LiveMapActivity : Activity() {
 
     companion object {
         const val EXTRA_SPLIT = "split"
-        private const val REQUEST_LOCATION = 41
 
-        /** True while the map screen is in front (the floating map steps aside then). */
+        /** True while the board screen is in front (the floating board steps aside then). */
         @Volatile
         var isShowing = false
             private set

@@ -121,20 +121,6 @@ object TripDistanceResolver {
     private val pending = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 
     /**
-     * Where [address] is (lat, lng), or null while it is being looked up (then [onDone] runs on
-     * the geocoder thread when found) or when it can't be found. Used by the live requests map.
-     */
-    fun coordinatesOf(context: Context, address: String, onDone: () -> Unit): DoubleArray? {
-        if (address.isBlank()) return null
-        geocoded[FareCalculatorEngine.normalizeArabicText(address)]?.let { return it }
-        requestGeocode(context, address, onDone)
-        return null
-    }
-
-    /** The driver's last known position: among several matches, the nearest one wins. */
-    @Volatile var bias: DoubleArray? = null
-
-    /**
      * inDrive writes "Place (street، neighbourhood، district، city، country)": try it as one
      * comma list first, then without the place name (unknown to the Geocoder more often than not).
      */
@@ -159,13 +145,8 @@ object TripDistanceResolver {
                 var hit: android.location.Address? = null
                 for (q in geocodeQueries(address)) {
                     @Suppress("DEPRECATION")
-                    val results = geocoder.getFromLocationName(q, 3, LAT_MIN, LNG_MIN, LAT_MAX, LNG_MAX)
-                    if (results.isNullOrEmpty()) continue
-                    val near = bias
-                    hit = if (near == null) results.first() else results.minByOrNull {
-                        haversineKm(near[0], near[1], it.latitude, it.longitude)
-                    }
-                    break
+                    hit = geocoder.getFromLocationName(q, 1, LAT_MIN, LNG_MIN, LAT_MAX, LNG_MAX)?.firstOrNull()
+                    if (hit != null) break
                 }
                 if (hit != null) geocoded[key] = doubleArrayOf(hit.latitude, hit.longitude) else notFound.add(key)
                 if (geocoded.size > 400) geocoded.clear()
