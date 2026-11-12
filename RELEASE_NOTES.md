@@ -1,27 +1,23 @@
-### The Driver v1.22.0 - Requests board: inDrive's own trip map for every request
+### The Driver v1.22.0 - Passengers on the map, placed correctly
 
-- **The map is replaced by "لوحة الطلبات".** Pins placed from the address text landed in the wrong place. Each request is now a card with a **picture of inDrive's own map of the trip** (route, A and B exactly as inDrive draws it), plus:
-  - the price and the verdict colour;
-  - net profit and profit per km;
-  - the pickup and trip distances;
-  - the passenger and the destination.
-- **Fast:**
-  - The app opens each new request, waits only until the route is drawn, takes the picture and goes straight back (about a second per request).
-  - When you open a request yourself, it gets priority.
-- **Long trips:** when the trip doesn't fit on inDrive's map, the app zooms the map out until A and B are both visible before taking the picture. The trip length is read from that same picture.
-- **Way to the pickup:** a new switch shows it in the picture too. By default the picture is cropped to the trip A → B.
-- **Full control from the card:**
+- **"خريطة الطلبات" now puts every passenger in the right place.** Pins used to come from Google looking up the address text, which often landed in the wrong place. The app now uses inDrive's own map:
+  - It opens each new request for about a second, reads where inDrive draws the car, the passenger (A) and the destination (B), and the routes, and goes back.
+  - With your GPS position as the car, every point is converted to its real place on the map.
+- **On the map:**
+  - a pin at each passenger with the price, coloured by verdict;
+  - the trip route to where the passenger is going, as inDrive draws it;
+  - your position as a blue dot;
+  - the way to the passenger (blue), shown on request.
+- **Long trips:** when the trip doesn't fit on inDrive's map, the app zooms it out until A and B are both visible.
+- **From the map:**
   - **Accept:** confirm tap optional.
   - **Hide.**
-  - **The bid buttons:** each shows its net, and the best one is marked ★.
-  - **Your own price:** "سعر تاني", then −10 / −5 / +5 / +10 with the net shown live, then "ابعت". The price is typed into inDrive's "Offer your fare" field.
-  - If the request isn't open, the app opens it (or goes back from another one) and finishes the action there.
-  - Tap the picture to enlarge it.
-- **Three ways to show it:**
+  - **inDrive's price buttons, all of them:** including the ones hidden behind the ">" arrow. Each shows its net, and the best one is marked ★.
+  - If the request isn't open, the app opens it, or goes back from another one, and finishes the action.
+  - The details also show inDrive's own picture of the trip, to compare.
+- **Ways to show it:**
   - floating over inDrive;
-  - split screen next to inDrive;
+  - **split screen next to inDrive, both live** (tested on a real phone);
   - full screen.
-- **Notes:**
-  - Addresses are no longer sent to Google for the board, and location permission is no longer needed.
-  - Pictures of the route need Android 11 or newer.
-  - If sending your own price fails on your phone, the app saves a diagnostic capture of that screen. Send it so the button layout can be matched.
+- **Needs the location permission:** "While using the app" is enough, since the assistant's service now keeps the location while inDrive is in front.
+- **Note:** inDrive has no field for typing your own price. You can only offer from its own price buttons, and the map shows all of them.

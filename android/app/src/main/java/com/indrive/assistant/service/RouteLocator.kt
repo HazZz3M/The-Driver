@@ -72,6 +72,9 @@ object RouteLocator {
                 if (kind != 0 && skip.none { it.contains(x, y) }) mask[y * w + x] = kind.toByte()
             }
         }
+        // Specks of the same colours elsewhere on the map (labels, parks) are not route.
+        keepMainParts(mask, w, h, 1)
+        keepMainParts(mask, w, h, 2)
         val tripPx = routeLengthPx(mask, w, h, 1)
         val approachPx = routeLengthPx(mask, w, h, 2)
 
@@ -123,6 +126,48 @@ object RouteLocator {
             approach = points(2),
             metersPerPixel = mpp
         )
+    }
+
+    /**
+     * Keeps only the big connected pieces of one route colour (a route may be cut in a few pieces
+     * by markers and boxes; anything under a fifth of the biggest piece is noise).
+     */
+    private fun keepMainParts(mask: ByteArray, w: Int, h: Int, kind: Int) {
+        val k = kind.toByte()
+        val label = IntArray(w * h)
+        val sizes = mutableListOf(0) // sizes[id], id 0 = none
+        val queue = IntArray(w * h)
+        for (start in 0 until w * h) {
+            if (mask[start] != k || label[start] != 0) continue
+            val id = sizes.size
+            var head = 0
+            var tail = 0
+            queue[tail++] = start
+            label[start] = id
+            while (head < tail) {
+                val i = queue[head++]
+                val x = i % w
+                val y = i / w
+                // 8-neighbours: thin diagonal parts stay connected.
+                for (dy in -1..1) for (dx in -1..1) {
+                    val nx = x + dx
+                    val ny = y + dy
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+                    val j = ny * w + nx
+                    if (mask[j] == k && label[j] == 0) {
+                        label[j] = id
+                        queue[tail++] = j
+                    }
+                }
+            }
+            sizes.add(tail)
+        }
+        val biggest = sizes.maxOrNull() ?: return
+        if (biggest == 0) return
+        for (i in 0 until w * h) {
+            val id = label[i]
+            if (id != 0 && sizes[id] * 5 < biggest) mask[i] = 0
+        }
     }
 
     /** inDrive's lime route (#C1F11D-ish): bright green-yellow. */
